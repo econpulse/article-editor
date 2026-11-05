@@ -1,0 +1,7 @@
+shiny>=1.2.0
+sqlalchemy>=2.0.30
+pyodbc>=5.1.0
+pydantic>=2.8.0
+typst>=0.12.0
+jinja2>=3.1.4
+python-dotenv>=1.0.1

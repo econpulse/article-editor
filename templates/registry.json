@@ -1,0 +1,16 @@
+{
+  "templates": [
+    {
+      "id": "investment_focus",
+      "name": "LUKB Investment Fokus (2-spaltiger Report)",
+      "description": "Klassisches mehrseitiges Publikationslayout mit zweispaltigem Satz, Kopfbalken, Autorenleiste sowie ein- oder zweispaltigen Grafiken und Tabellen.",
+      "columns": 2
+    },
+    {
+      "id": "market_flash",
+      "name": "LUKB Market Flash (Kompakter Fokus-Bericht)",
+      "description": "Kompaktes Fokus-Layout mit dunkelblauem Executive-Banner, zweispaltigem Satz für Text und Überschriften sowie wahlweise ein- oder zweispaltigen Grafiken und Tabellen.",
+      "columns": 2
+    }
+  ]
+}

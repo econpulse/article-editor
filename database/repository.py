@@ -1,0 +1,734 @@
+"""
+Repository-Layer für CRUD-Operationen, Debounced Autosave, Revisions-Snapshots
+und Datenbank-Asset-Speicherung (MSSQL / SQLAlchemy).
+"""
+
+from __future__ import annotations
+
+import json
+import uuid
+from datetime import datetime, timezone
+from typing import Any
+from sqlalchemy import or_, select, desc
+
+from database.connection import Base, engine, get_db_session
+from database.models import ArticleModel, ArticleRevisionModel, AssetModel
+from schemas.article import ArticleDocument, ArticleMetadata, AuthorItem
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _row_to_document(row: ArticleModel) -> ArticleDocument:
+    try:
+        authors_raw = json.loads(row.authors_json or "[]")
+    except Exception:
+        authors_raw = []
+
+    try:
+        blocks_raw = json.loads(row.blocks_json or "[]")
+    except Exception:
+        blocks_raw = []
+
+    metadata = ArticleMetadata(
+        title=row.title or "Unbenannte Publikation",
+        subtitle=row.subtitle or "",
+        lead=row.lead or "",
+        publication_date=row.publication_date or "",
+        category=row.category or "Anlagepolitik & Märkte",
+        authors=[AuthorItem.model_validate(a) for a in authors_raw if isinstance(a, dict)],
+        disclaimer=row.disclaimer or ArticleMetadata().disclaimer,
+    )
+    return ArticleDocument(
+        id=row.id,
+        template_id=row.template_id or "investment_focus",
+        status=row.status if row.status in ("draft", "review", "published") else "draft",
+        metadata=metadata,
+        blocks=blocks_raw,
+    )
+
+
+def list_articles(search_query: str = "", status_filter: str = "all") -> list[dict[str, Any]]:
+    """Liefert eine kompakte Übersicht aller Artikel in der Datenbank (sortiert nach Änderungsdatum)."""
+    with get_db_session() as session:
+        stmt = select(ArticleModel).order_by(desc(ArticleModel.updated_at))
+        if status_filter and status_filter != "all":
+            stmt = stmt.where(ArticleModel.status == status_filter)
+        if search_query and search_query.strip():
+            q = f"%{search_query.strip()}%"
+            stmt = stmt.where(
+                or_(
+                    ArticleModel.title.ilike(q),
+                    ArticleModel.subtitle.ilike(q),
+                    ArticleModel.lead.ilike(q),
+                    ArticleModel.authors_json.ilike(q),
+                    ArticleModel.category.ilike(q),
+                )
+            )
+        rows = session.scalars(stmt).all()
+        result: list[dict[str, Any]] = []
+        for r in rows:
+            try:
+                authors = json.loads(r.authors_json or "[]")
+                author_names = ", ".join(a.get("name", "") for a in authors if a.get("name"))
+            except Exception:
+                author_names = ""
+            updated_dt = r.updated_at or r.created_at
+            updated_str = updated_dt.strftime("%d.%m.%Y %H:%M") if updated_dt else ""
+            result.append(
+                {
+                    "id": r.id,
+                    "title": r.title,
+                    "subtitle": r.subtitle,
+                    "category": r.category,
+                    "template_id": r.template_id,
+                    "status": r.status,
+                    "authors_summary": author_names or "Investment Office",
+                    "publication_date": r.publication_date,
+                    "updated_at": updated_str,
+                    "updated_by": r.updated_by,
+                }
+            )
+        return result
+
+
+def get_article(article_id: str) -> ArticleDocument | None:
+    """Lädt einen einzelnen Artikel als validiertes ArticleDocument."""
+    if not article_id:
+        return None
+    with get_db_session() as session:
+        row = session.get(ArticleModel, article_id)
+        if not row:
+            return None
+        return _row_to_document(row)
+
+
+def _merge_concurrent_documents(
+    base_doc: ArticleDocument,
+    incoming_doc: ArticleDocument,
+    db_doc: ArticleDocument,
+) -> ArticleDocument:
+    """
+    Führt einen 3-Wege-Merge (Base vs. Incoming vs. DB) auf Metadaten- und Block-Ebene durch,
+    sodass mehrere Autoren gleichzeitig an verschiedenen Blöcken oder Metadaten-Feldern
+    desselben Artikels arbeiten können, ohne sich gegenseitig zu überschreiben.
+    """
+    base_d = base_doc.model_dump()
+    inc_d = incoming_doc.model_dump()
+    db_d = db_doc.model_dump()
+
+    # 1. Top-Level Felder (template_id, status)
+    merged_template = (
+        inc_d["template_id"]
+        if inc_d["template_id"] != base_d["template_id"]
+        else db_d["template_id"]
+    )
+    merged_status = (
+        inc_d["status"] if inc_d["status"] != base_d["status"] else db_d["status"]
+    )
+
+    # 2. Metadaten-Felder einzeln mergen
+    merged_meta: dict[str, Any] = {}
+    for k in (
+        "title",
+        "subtitle",
+        "lead",
+        "publication_date",
+        "category",
+        "authors",
+        "disclaimer",
+    ):
+        if inc_d["metadata"].get(k) != base_d["metadata"].get(k):
+            merged_meta[k] = inc_d["metadata"].get(k)
+        else:
+            merged_meta[k] = db_d["metadata"].get(k)
+
+    # 3. Inhaltsblöcke (ID-basiertes 3-Wege-Merging)
+    base_blocks_by_id = {b["id"]: b for b in base_d.get("blocks", []) if "id" in b}
+    inc_blocks_by_id = {b["id"]: b for b in inc_d.get("blocks", []) if "id" in b}
+    db_blocks_by_id = {b["id"]: b for b in db_d.get("blocks", []) if "id" in b}
+
+    base_order = [b["id"] for b in base_d.get("blocks", []) if "id" in b]
+    inc_order = [b["id"] for b in inc_d.get("blocks", []) if "id" in b]
+    db_order = [b["id"] for b in db_d.get("blocks", []) if "id" in b]
+
+    # Wurde die Reihenfolge / Struktur vom aktuellen Client verändert?
+    inc_structure_changed = inc_order != base_order
+
+    # Welche Blöcke wurden explizit gelöscht?
+    deleted_by_inc = set(base_order) - set(inc_order)
+    deleted_by_db = set(base_order) - set(db_order)
+    all_deleted = deleted_by_inc | deleted_by_db
+
+    # Bestimme die kombinierte Reihenfolge der Block-IDs
+    primary_order = inc_order if inc_structure_changed else db_order
+    secondary_order = db_order if inc_structure_changed else inc_order
+
+    combined_ids: list[str] = []
+    for bid in primary_order:
+        if bid not in all_deleted and bid not in combined_ids:
+            combined_ids.append(bid)
+
+    # Falls im anderen Stand neue Blöcke hinzugekommen sind, an passender Stelle einfügen
+    for idx, bid in enumerate(secondary_order):
+        if bid not in all_deleted and bid not in combined_ids:
+            if idx == 0:
+                combined_ids.insert(0, bid)
+            else:
+                prev_id = secondary_order[idx - 1]
+                if prev_id in combined_ids:
+                    insert_pos = combined_ids.index(prev_id) + 1
+                    combined_ids.insert(insert_pos, bid)
+                else:
+                    combined_ids.append(bid)
+
+    # Inhalt jedes einzelnen Blocks zusammenführen
+    merged_blocks: list[dict[str, Any]] = []
+    for bid in combined_ids:
+        b_base = base_blocks_by_id.get(bid)
+        b_inc = inc_blocks_by_id.get(bid)
+        b_db = db_blocks_by_id.get(bid)
+
+        if b_inc and b_db and b_base:
+            # Existierte in allen 3 Ständen: Hat Incoming diesen Block editiert?
+            if b_inc != b_base:
+                if b_db != b_base and b_db != b_inc:
+                    # Beide haben denselben Block editiert -> Feld-genauer Merge innerhalb des Blocks
+                    merged_blk = dict(b_db)
+                    for fk, fv in b_inc.items():
+                        if fv != b_base.get(fk):
+                            merged_blk[fk] = fv
+                    merged_blocks.append(merged_blk)
+                else:
+                    merged_blocks.append(b_inc)
+            else:
+                # Incoming hat diesen Block nicht angefasst -> behalte DB-Änderung von Kollege!
+                merged_blocks.append(b_db)
+        elif b_inc and not b_base:
+            # Neu von Incoming angelegt
+            merged_blocks.append(b_inc)
+        elif b_db and not b_base:
+            # Neu in DB von Kollege angelegt
+            merged_blocks.append(b_db)
+        elif b_inc:
+            merged_blocks.append(b_inc)
+        elif b_db:
+            merged_blocks.append(b_db)
+
+    return ArticleDocument.model_validate(
+        {
+            "id": incoming_doc.id,
+            "template_id": merged_template,
+            "status": merged_status,
+            "metadata": merged_meta,
+            "blocks": merged_blocks,
+        }
+    )
+
+
+def save_article(
+    doc: ArticleDocument,
+    user: str = "Investment Office",
+    create_revision: bool = False,
+    revision_note: str = "",
+    base_doc: ArticleDocument | None = None,
+) -> dict[str, Any]:
+    """
+    Speichert oder aktualisiert einen Artikel (UPSERT) in der MSSQL-Datenbank.
+    Falls `base_doc` übergeben wird und der Datenbankstand zwischenzeitlich durch
+    einen anderen Autor verändert wurde, führt `save_article` automatisch einen
+    3-Wege-Merge auf Block- und Metadaten-Ebene durch.
+    """
+    now = _utc_now()
+    merged_from_other = False
+    with get_db_session() as session:
+        row = session.get(ArticleModel, doc.id)
+
+        if row is not None and base_doc is not None:
+            current_db_doc = _row_to_document(row)
+            if current_db_doc.model_dump() != base_doc.model_dump():
+                doc = _merge_concurrent_documents(base_doc, doc, current_db_doc)
+                merged_from_other = True
+
+        authors_serialized = json.dumps(
+            [a.model_dump() for a in doc.metadata.authors], ensure_ascii=False
+        )
+        blocks_serialized = json.dumps(doc.blocks, ensure_ascii=False)
+
+        if row is None:
+            row = ArticleModel(
+                id=doc.id,
+                title=doc.metadata.title,
+                subtitle=doc.metadata.subtitle,
+                lead=doc.metadata.lead,
+                category=doc.metadata.category,
+                publication_date=doc.metadata.publication_date,
+                authors_json=authors_serialized,
+                disclaimer=doc.metadata.disclaimer,
+                template_id=doc.template_id,
+                status=doc.status,
+                blocks_json=blocks_serialized,
+                created_at=now,
+                updated_at=now,
+                updated_by=user,
+            )
+            session.add(row)
+        else:
+            row.title = doc.metadata.title
+            row.subtitle = doc.metadata.subtitle
+            row.lead = doc.metadata.lead
+            row.category = doc.metadata.category
+            row.publication_date = doc.metadata.publication_date
+            row.authors_json = authors_serialized
+            row.disclaimer = doc.metadata.disclaimer
+            row.template_id = doc.template_id
+            row.status = doc.status
+            row.blocks_json = blocks_serialized
+            row.updated_at = now
+            row.updated_by = user
+
+        if create_revision:
+            rev = ArticleRevisionModel(
+                article_id=doc.id,
+                snapshot_json=doc.model_dump_json(),
+                saved_at=now,
+                saved_by=user,
+                note=revision_note or "Manueller Snapshot",
+            )
+            session.add(rev)
+
+    return {
+        "id": doc.id,
+        "saved_at": now.strftime("%H:%M:%S"),
+        "saved_date": now.strftime("%d.%m.%Y %H:%M:%S"),
+        "merged": merged_from_other,
+        "article": doc.model_dump(),
+    }
+
+
+def create_new_article(
+    template_id: str = "investment_focus",
+    user: str = "Investment Office",
+) -> ArticleDocument:
+    """Erstellt einen neuen Artikel mit einer strukturierten Start-Vorlage."""
+    new_doc = ArticleDocument(
+        id=str(uuid.uuid4()),
+        template_id=template_id,
+        status="draft",
+        metadata=ArticleMetadata(
+            title="Neue Investment-Publikation",
+            subtitle="Markteinschätzung & Positionierung",
+            lead=(
+                "Fassen Sie hier die wichtigsten Erkenntnisse (Management Summary) in zwei bis drei "
+                "prägnanten Sätzen für die Leserinnen und Leser zusammen."
+            ),
+            category="Anlagepolitik & Märkte",
+            authors=[AuthorItem(name="Dr. Reto Krähenbühl", role="Chief Investment Officer")],
+        ),
+        blocks=[
+            {
+                "id": f"blk_{uuid.uuid4().hex[:8]}",
+                "type": "heading",
+                "level": 1,
+                "text": "Makroökonomischer Ausblick",
+            },
+            {
+                "id": f"blk_{uuid.uuid4().hex[:8]}",
+                "type": "richtext",
+                "html": (
+                    "<p>Beginnen Sie hier mit Ihrem Analysetext. Sie können Absätze beliebig per "
+                    "<strong>Drag-and-Drop</strong> umsortieren sowie neue Grafiken und Tabellen einfügen.</p>"
+                ),
+            },
+        ],
+    )
+    save_article(new_doc, user=user, create_revision=True, revision_note="Initiale Erstellung")
+    return new_doc
+
+
+def duplicate_article(article_id: str, user: str = "Investment Office") -> ArticleDocument | None:
+    """Dupliziert einen bestehenden Artikel als neuen Entwurf."""
+    orig = get_article(article_id)
+    if not orig:
+        return None
+    orig.id = str(uuid.uuid4())
+    orig.status = "draft"
+    orig.metadata.title = f"{orig.metadata.title} (Kopie)"
+    save_article(orig, user=user, create_revision=True, revision_note="Kopie erstellt")
+    return orig
+
+
+def delete_article(article_id: str) -> bool:
+    """Löscht einen Artikel aus der Datenbank."""
+    with get_db_session() as session:
+        row = session.get(ArticleModel, article_id)
+        if not row:
+            return False
+        session.delete(row)
+        return True
+
+
+def save_asset(
+    filename: str,
+    mime_type: str,
+    data: bytes,
+    article_id: str | None = None,
+    asset_id: str | None = None,
+) -> str:
+    """Speichert eine Grafik als Binärobjekt (VARBINARY(MAX)) in der Datenbank."""
+    aid = asset_id or f"asset_{uuid.uuid4().hex[:12]}"
+    with get_db_session() as session:
+        existing = session.get(AssetModel, aid)
+        if existing:
+            existing.filename = filename
+            existing.mime_type = mime_type
+            existing.data = data
+            existing.article_id = article_id
+        else:
+            session.add(
+                AssetModel(
+                    id=aid,
+                    article_id=article_id,
+                    filename=filename,
+                    mime_type=mime_type,
+                    data=data,
+                )
+            )
+    return aid
+
+
+def get_asset(asset_id: str) -> dict[str, Any] | None:
+    """Lädt ein Grafik-Asset aus der Datenbank."""
+    if not asset_id:
+        return None
+    with get_db_session() as session:
+        row = session.get(AssetModel, asset_id)
+        if not row:
+            return None
+        return {
+            "id": row.id,
+            "filename": row.filename,
+            "mime_type": row.mime_type,
+            "data": row.data,
+        }
+
+
+# ============================================================================
+# Initialisierung & Beispiel-Publikationen (Seed Data)
+# ============================================================================
+
+SAMPLE_SVG_RATES = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" width="680" height="320">
+  <rect width="680" height="320" fill="#FFFFFF"/>
+  <!-- Grid lines -->
+  <g stroke="#E2E8F0" stroke-width="1">
+    <line x1="55" y1="35" x2="650" y2="35"/>
+    <line x1="55" y1="90" x2="650" y2="90"/>
+    <line x1="55" y1="145" x2="650" y2="145"/>
+    <line x1="55" y1="200" x2="650" y2="200"/>
+    <line x1="55" y1="255" x2="650" y2="255"/>
+  </g>
+  <!-- Y-Axis Labels -->
+  <g font-family="Yoga Sans for LUKB Light, Calibri, Arial, sans-serif" font-size="11" fill="#5A687C" text-anchor="end">
+    <text x="46" y="39">5.0 %</text>
+    <text x="46" y="94">3.75 %</text>
+    <text x="46" y="149">2.50 %</text>
+    <text x="46" y="204">1.25 %</text>
+    <text x="46" y="259">0.00 %</text>
+  </g>
+  <!-- X-Axis Labels -->
+  <g font-family="Yoga Sans for LUKB Light, Calibri, Arial, sans-serif" font-size="11" fill="#5A687C" text-anchor="middle">
+    <text x="80" y="280">2022</text>
+    <text x="215" y="280">2023</text>
+    <text x="350" y="280">2024</text>
+    <text x="485" y="280">2025</text>
+    <text x="620" y="280">2026 (P)</text>
+  </g>
+  <!-- Forecast Shaded Area -->
+  <rect x="485" y="35" width="165" height="220" fill="#F4F7FA" opacity="0.75"/>
+  <line x1="485" y1="35" x2="485" y2="255" stroke="#002855" stroke-dasharray="4,4" stroke-width="1"/>
+  <text x="567" y="52" font-family="Yoga Sans for LUKB Medium, Calibri, Arial, sans-serif" font-size="10" fill="#002855" text-anchor="middle">LUKB Prognose</text>
+  <!-- Fed Line (Navy) -->
+  <polyline fill="none" stroke="#002855" stroke-width="3" points="80,235 150,140 215,50 290,42 350,55 420,95 485,125 555,142 620,152"/>
+  <!-- ECB Line (Cyan) -->
+  <polyline fill="none" stroke="#009FE3" stroke-width="3" points="80,255 150,190 215,90 290,78 350,105 420,145 485,168 555,178 620,182"/>
+  <!-- SNB Line (Gold) -->
+  <polyline fill="none" stroke="#C59B27" stroke-width="3" points="80,268 150,230 215,180 290,178 350,200 420,222 485,238 555,244 620,244"/>
+  <!-- Legend -->
+  <g transform="translate(80, 302)" font-family="Yoga Sans for LUKB Medium, Calibri, Arial, sans-serif" font-size="11" fill="#1A2433">
+    <line x1="0" y1="-4" x2="22" y2="-4" stroke="#002855" stroke-width="3"/>
+    <text x="28" y="0">US Fed Funds Rate</text>
+    <line x1="170" y1="-4" x2="192" y2="-4" stroke="#009FE3" stroke-width="3"/>
+    <text x="198" y="0">EZB Einlagesatz</text>
+    <line x1="330" y1="-4" x2="352" y2="-4" stroke="#C59B27" stroke-width="3"/>
+    <text x="358" y="0">SNB Leitzins (CHF)</text>
+  </g>
+</svg>"""
+
+SAMPLE_SVG_EQUITY = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 300" width="680" height="300">
+  <rect width="680" height="300" fill="#FFFFFF"/>
+  <g stroke="#E2E8F0" stroke-width="1">
+    <line x1="60" y1="30" x2="640" y2="30"/>
+    <line x1="60" y1="85" x2="640" y2="85"/>
+    <line x1="60" y1="140" x2="640" y2="140"/>
+    <line x1="60" y1="195" x2="640" y2="195"/>
+    <line x1="60" y1="250" x2="640" y2="250"/>
+  </g>
+  <g font-family="Yoga Sans for LUKB Light, Calibri, Arial, sans-serif" font-size="11" fill="#5A687C" text-anchor="end">
+    <text x="50" y="34">125</text>
+    <text x="50" y="89">115</text>
+    <text x="50" y="144">105</text>
+    <text x="50" y="199">95</text>
+    <text x="50" y="254">85</text>
+  </g>
+  <!-- Bar chart sectors -->
+  <g font-family="Yoga Sans for LUKB Medium, Calibri, Arial, sans-serif" font-size="11" fill="#1A2433" text-anchor="middle">
+    <rect x="95" y="62" width="65" height="188" fill="#002855" rx="2"/>
+    <text x="127" y="54" fill="#002855">+14.2 %</text>
+    <text x="127" y="272">Industrie CH</text>
+
+    <rect x="205" y="84" width="65" height="166" fill="#005A9C" rx="2"/>
+    <text x="237" y="76" fill="#005A9C">+11.8 %</text>
+    <text x="237" y="272">Finanzwerte</text>
+
+    <rect x="315" y="98" width="65" height="152" fill="#009FE3" rx="2"/>
+    <text x="347" y="90" fill="#009FE3">+9.6 %</text>
+    <text x="347" y="272">Gesundheit</text>
+
+    <rect x="425" y="125" width="65" height="125" fill="#6482A6" rx="2"/>
+    <text x="457" y="117" fill="#5A687C">+6.4 %</text>
+    <text x="457" y="272">Basiskonsum</text>
+
+    <rect x="535" y="75" width="65" height="175" fill="#C59B27" rx="2"/>
+    <text x="567" y="67" fill="#9A7615">+12.9 %</text>
+    <text x="567" y="272">SMI Dividenden</text>
+  </g>
+</svg>"""
+
+
+def init_db_and_seed() -> None:
+    """Erstellt alle MSSQL/SQLAlchemy-Tabellen und legt initiale Beispielartikel an, falls leer."""
+    Base.metadata.create_all(bind=engine)
+
+    # Lege Beispiel-Assets an
+    save_asset(
+        filename="lukb_leitzinsen_vergleich.svg",
+        mime_type="image/svg+xml",
+        data=SAMPLE_SVG_RATES.encode("utf-8"),
+        asset_id="asset_sample_rates",
+    )
+    save_asset(
+        filename="lukb_schweizer_sektoren.svg",
+        mime_type="image/svg+xml",
+        data=SAMPLE_SVG_EQUITY.encode("utf-8"),
+        asset_id="asset_sample_equity",
+    )
+
+    existing = list_articles()
+    if existing:
+        # Selbstheilung für Artikel, deren Blöcke durch den früheren Tuple-Bug geleert wurden
+        with get_db_session() as session:
+            for item in existing:
+                row = session.get(ArticleModel, item["id"])
+                if row and (not row.blocks_json or row.blocks_json.strip() == "[]"):
+                    for rev in row.revisions:
+                        try:
+                            snap = json.loads(rev.snapshot_json)
+                            if snap.get("blocks"):
+                                row.blocks_json = json.dumps(snap["blocks"], ensure_ascii=False)
+                                break
+                        except Exception:
+                            pass
+        return
+
+    # Beispiel-Artikel 1: Investment Focus (2-spaltiges Flaggschiff-Layout)
+    art1 = ArticleDocument(
+        id="art-lukb-focus-2026-q4",
+        template_id="investment_focus",
+        status="published",
+        metadata=ArticleMetadata(
+            title="Zinswende und Schweizer Qualitätsaktien im Fokus",
+            subtitle="Anlagepolitik & Marktausblick — 4. Quartal 2026",
+            lead=(
+                "Das globale Wachstum stabilisiert sich auf moderatem Niveau, während das tiefere Zinsumfeld "
+                "in der Schweiz dividendenstarke Qualitätsaktien und erstklassige Unternehmensanleihen "
+                "gegenüber Liquidität deutlich begünstigt."
+            ),
+            publication_date="2026-11-05",
+            category="Anlagepolitik & Märkte",
+            authors=[
+                AuthorItem(name="Dr. Reto Krähenbühl", role="Chief Investment Officer"),
+                AuthorItem(name="Sabine Lustenberger, CFA", role="Leiterin Aktienanalyse"),
+            ],
+        ),
+        blocks=[
+            {
+                "id": "blk_intro_callout",
+                "type": "callout",
+                "title": "Kernaussagen des Anlageausschusses",
+                "html": (
+                    "<ul>"
+                    "<li><strong>Geldpolitik:</strong> Die Schweizerische Nationalbank (SNB) hält das Zinsniveau "
+                    "nahe null, wodurch reale Renditen auf Kontoguthaben negativ bleiben.</li>"
+                    "<li><strong>Aktienquote:</strong> Wir bestätigen unser Übergewicht in Schweizer Qualitäts- "
+                    "und Dividendentiteln mit hoher Preissetzungsmacht.</li>"
+                    "<li><strong>Obligationen:</strong> Mittlere Laufzeiten (5 bis 7 Jahre) bieten das attraktivste "
+                    "Risiko-Ertrags-Profil in Schweizer Franken.</li>"
+                    "</ul>"
+                ),
+            },
+            {
+                "id": "blk_h1_macro",
+                "type": "heading",
+                "level": 1,
+                "text": "Geldpolitisches Umfeld: Stabilisierung auf tieferem Niveau",
+            },
+            {
+                "id": "blk_p1_macro",
+                "type": "richtext",
+                "html": (
+                    "<p>Nach dem ausgeprägten Zinssenkungszyklus der vergangenen Quartale befinden sich die "
+                    "grossen Notenbanken in einer Phase der geldpolitischen Feinjustierung. In der Schweiz liegt "
+                    "die Teuerung weiterhin komfortabel im Zielband der SNB unterhalb von 1,0 Prozent. Für "
+                    "Anlegerinnen und Anleger bedeutet dies, dass kurzfristige Geldmarktanlagen kaum noch "
+                    "nominale Erträge abwerfen.</p>"
+                    "<p>In den USA und der Eurozone nähern sich die Leitzinsen schrittweise dem neutralen "
+                    "Gleichgewichtszins an. Davon profitieren insbesondere Unternehmen mit solider Bilanzstruktur "
+                    "und planbaren Cashflows.</p>"
+                ),
+            },
+            {
+                "id": "blk_fig_rates",
+                "type": "figure",
+                "title": "Leitzinsentwicklung im internationalen Vergleich",
+                "subtitle": "Leitzinsen von Fed, EZB und SNB in Prozent (ab Q4 2025 Prognose LUKB)",
+                "source": "Quelle: Bloomberg, SNB, LUKB Investment Office",
+                "asset_id": "asset_sample_rates",
+                "layout": "column",
+            },
+            {
+                "id": "blk_h1_alloc",
+                "type": "heading",
+                "level": 1,
+                "text": "Taktische Positionierung im Portfolio",
+            },
+            {
+                "id": "blk_p2_alloc",
+                "type": "richtext",
+                "html": (
+                    "<p>Im Rahmen unserer jüngsten Sitzung des Anlageausschusses haben wir die "
+                    "Übergewichtung in Schweizer Aktien zulasten der Liquiditätsquote um weitere 1,5 Prozentpunkte "
+                    "ausgebaut. Zyklische Industriewerte mit globaler Nischenführerschaft sowie defensive "
+                    "Dividendentitel weisen für 2027 ein attraktives Gewinnwachstum von rund 8 Prozent auf.</p>"
+                ),
+            },
+            {
+                "id": "blk_tbl_taa",
+                "type": "table",
+                "title": "Taktische Asset Allocation (Ausgewogenes Mandat CHF)",
+                "subtitle": "Aktuelle Gewichtung im Vergleich zur strategischen Benchmark",
+                "source": "Quelle: LUKB Anlageausschuss, Stand November 2026",
+                "layout": "full",
+                "highlight_last_row": True,
+                "columns": [
+                    {"field": "asset", "title": "Anlageklasse", "align": "left"},
+                    {"field": "saa", "title": "Strategisch (SAA)", "align": "right"},
+                    {"field": "taa", "title": "Taktisch (TAA)", "align": "right"},
+                    {"field": "diff", "title": "Abweichung", "align": "right"},
+                    {"field": "view", "title": "Einschätzung", "align": "center"},
+                ],
+                "rows": [
+                    {
+                        "asset": "Liquidität & Geldmarkt",
+                        "saa": "5.0 %",
+                        "taa": "2.5 %",
+                        "diff": "-2.5 %",
+                        "view": "Untergewicht",
+                    },
+                    {
+                        "asset": "Obligationen CHF & Global (Hedged)",
+                        "saa": "38.0 %",
+                        "taa": "37.5 %",
+                        "diff": "-0.5 %",
+                        "view": "Neutral",
+                    },
+                    {
+                        "asset": "Aktien Schweiz",
+                        "saa": "22.0 %",
+                        "taa": "25.0 %",
+                        "diff": "+3.0 %",
+                        "view": "Übergewicht",
+                    },
+                    {
+                        "asset": "Aktien Welt (Industrie- & Schwellenländer)",
+                        "saa": "23.0 %",
+                        "taa": "23.0 %",
+                        "diff": "0.0 %",
+                        "view": "Neutral",
+                    },
+                    {
+                        "asset": "Immobilien Schweiz & Alternative Anlagen",
+                        "saa": "12.0 %",
+                        "taa": "12.0 %",
+                        "diff": "0.0 %",
+                        "view": "Neutral",
+                    },
+                    {
+                        "asset": "Gesamtportfolio Mandat Ausgewogen",
+                        "saa": "100.0 %",
+                        "taa": "100.0 %",
+                        "diff": "0.0 %",
+                        "view": "Investiert",
+                    },
+                ],
+            },
+        ],
+    )
+    save_article(art1, user="Dr. Reto Krähenbühl", create_revision=True, revision_note="Erstpublikation Q4")
+
+    # Beispiel-Artikel 2: Market Flash (Kompakter 1-Seiter)
+    art2 = ArticleDocument(
+        id="art-lukb-flash-ch-equities",
+        template_id="market_flash",
+        status="review",
+        metadata=ArticleMetadata(
+            title="Schweizer Dividendentitel vor starker Berichtssaison",
+            subtitle="Market Flash — Fokus Aktien Schweiz",
+            lead=(
+                "Trotz eines starken Schweizer Frankens überzeugen heimische Qualitätsunternehmen "
+                "mit steigenden operativen Margen und nachhaltigen Ausschüttungsrenditen von über 3,2 Prozent."
+            ),
+            publication_date="2026-11-04",
+            category="Market Flash",
+            authors=[
+                AuthorItem(name="Sabine Lustenberger, CFA", role="Leiterin Aktienanalyse"),
+            ],
+        ),
+        blocks=[
+            {
+                "id": "blk_f2_h1",
+                "type": "heading",
+                "level": 1,
+                "text": "Hohe Preissetzungsmacht schützt operative Margen",
+            },
+            {
+                "id": "blk_f2_p1",
+                "type": "richtext",
+                "html": (
+                    "<p>Schweizer Unternehmen aus den Bereichen Spezialchemie, Medizintechnik und "
+                    "Versicherungen profitieren von ihrer ausgeprägten Innovationskraft. Währungseffekte "
+                    "werden durch globale Produktionsstandorte natürlich abgesichert.</p>"
+                ),
+            },
+            {
+                "id": "blk_f2_fig",
+                "type": "figure",
+                "title": "Gesamtrendite Schweizer Aktiensektoren (Laufendes Jahr)",
+                "subtitle": "Indexierte Performance inkl. reinvestierter Dividenden in CHF",
+                "source": "Quelle: SIX Swiss Exchange, LUKB Investment Office",
+                "asset_id": "asset_sample_equity",
+                "layout": "full",
+            },
+        ],
+    )
+    save_article(art2, user="Sabine Lustenberger, CFA", create_revision=True, revision_note="Entwurf zur Prüfung")

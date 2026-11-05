@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="de-CH">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ article.metadata.title }} — LUKB Investment Office</title>
+  <style>
+    :root {
+      --lukb-navy: #002855;
+      --lukb-blue: #005A9C;
+      --lukb-cyan: #009FE3;
+      --lukb-gold: #C59B27;
+      --lukb-text: #1A2433;
+      --lukb-muted: #5A687C;
+      --lukb-surface: #F4F7FA;
+      --lukb-border: #D6DEE8;
+      --font-body: "Yoga Sans for LUKB Light", "Yoga Sans for LUKB", "Calibri Light", "Segoe UI", Arial, sans-serif;
+      --font-heading: "Yoga Sans for LUKB Medium", "Yoga Sans for LUKB", "Calibri", "Segoe UI Semibold", Arial, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #EEF2F6;
+      color: var(--lukb-text);
+      font-family: var(--font-body);
+      font-weight: 300;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    strong, b {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+    }
+
+    .lukb-article-shell {
+      max-width: 960px;
+      margin: 28px auto;
+      background: #FFFFFF;
+      border-radius: 6px;
+      box-shadow: 0 8px 30px rgba(0, 40, 85, 0.08);
+      overflow: hidden;
+      border-top: 5px solid var(--lukb-navy);
+    }
+
+    .lukb-header {
+      padding: 36px 44px 28px 44px;
+      border-bottom: 2px solid var(--lukb-navy);
+      background: linear-gradient(180deg, #FFFFFF 0%, #FAFCFF 100%);
+    }
+
+    .lukb-brand-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .lukb-brand-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .lukb-logo-pill {
+      background: var(--lukb-navy);
+      color: #FFFFFF;
+      font-family: var(--font-heading);
+      font-weight: 500;
+      font-size: 0.75rem;
+      letter-spacing: 0.08em;
+      padding: 5px 11px;
+      border-radius: 3px;
+      text-transform: uppercase;
+    }
+
+    .lukb-category {
+      color: var(--lukb-cyan);
+      font-family: var(--font-heading);
+      font-weight: 500;
+      font-size: 0.82rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .lukb-pub-date {
+      color: var(--lukb-muted);
+      font-size: 0.85rem;
+    }
+
+    .lukb-subtitle {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-blue);
+      font-size: 1rem;
+      margin: 0 0 6px 0;
+    }
+
+    .lukb-title {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+      font-size: 2.1rem;
+      line-height: 1.22;
+      margin: 0 0 16px 0;
+    }
+
+    .lukb-lead {
+      font-size: 1.12rem;
+      line-height: 1.6;
+      color: var(--lukb-text);
+      margin: 0 0 20px 0;
+    }
+
+    .lukb-authors-bar {
+      background: var(--lukb-surface);
+      padding: 10px 16px;
+      border-radius: 4px;
+      font-size: 0.86rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 18px;
+      align-items: center;
+    }
+
+    .lukb-authors-label {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+    }
+
+    .lukb-author-item strong {
+      color: var(--lukb-text);
+    }
+
+    .lukb-author-role {
+      color: var(--lukb-muted);
+    }
+
+    /* Content Grid: Responsive 2-column magazine layout on desktop */
+    .lukb-body {
+      padding: 34px 44px;
+      column-count: 2;
+      column-gap: 32px;
+      column-fill: balance;
+    }
+
+    @media (max-width: 780px) {
+      .lukb-body {
+        column-count: 1 !important;
+        padding: 24px 20px;
+      }
+      .lukb-header {
+        padding: 24px 20px;
+      }
+      .lukb-title {
+        font-size: 1.65rem;
+      }
+    }
+
+    .blk-full-span {
+      column-span: all;
+    }
+
+    h1.blk-h1, h2.blk-h2, h3.blk-h3 {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      line-height: 1.15;
+      break-after: avoid;
+      break-inside: avoid;
+      margin-top: 1.65rem;
+      margin-bottom: 0.65rem;
+    }
+
+    h1.blk-h1:first-child, h2.blk-h2:first-child, h3.blk-h3:first-child {
+      margin-top: 0;
+    }
+
+    h1.blk-h1 {
+      font-size: 1.28rem;
+      color: var(--lukb-navy);
+    }
+
+    h2.blk-h2 {
+      font-size: 1.1rem;
+      color: var(--lukb-blue);
+    }
+
+    h3.blk-h3 {
+      font-size: 0.98rem;
+      color: var(--lukb-text);
+    }
+
+    .blk-richtext p {
+      margin: 0 0 1em 0;
+      text-align: justify;
+      orphans: 2;
+      widows: 2;
+    }
+
+    .blk-richtext-textbox {
+      background: #EBF3FA;
+      border: 1px solid var(--lukb-navy);
+      border-radius: 3px;
+      padding: 12px 14px;
+      margin: 0 0 1em 0;
+      break-inside: avoid;
+    }
+
+    .blk-richtext-textbox p:last-child {
+      margin-bottom: 0;
+    }
+
+    .blk-callout {
+      break-inside: avoid;
+      background: var(--lukb-surface);
+      border: 1px solid var(--lukb-border);
+      border-left: 4px solid var(--lukb-cyan);
+      border-radius: 0 4px 4px 0;
+      padding: 16px 18px;
+      margin: 1.2em 0;
+    }
+
+    .blk-callout-title {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+      font-size: 1.02rem;
+      margin: 0 0 8px 0;
+    }
+
+    .blk-callout ul, .blk-callout ol {
+      margin: 0;
+      padding-left: 20px;
+    }
+
+    .blk-callout li {
+      margin-bottom: 6px;
+    }
+
+    .blk-figure, .blk-table-wrap {
+      break-inside: avoid;
+      border-top: 2px solid var(--lukb-navy);
+      border-bottom: 1px solid var(--lukb-border);
+      padding: 12px 0 10px 0;
+      margin: 1.4em 0;
+    }
+
+    .blk-box-title {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+      font-size: 1.02rem;
+      margin: 0 0 3px 0;
+    }
+
+    .blk-box-subtitle {
+      font-family: var(--font-body);
+      font-weight: 300;
+      color: var(--lukb-muted);
+      font-size: 0.85rem;
+      margin: 0 0 10px 0;
+    }
+
+    .blk-figure-img-container {
+      text-align: center;
+      margin: 8px 0;
+    }
+
+    .blk-figure-img-container img {
+      max-width: 100%;
+      height: auto;
+      display: inline-block;
+    }
+
+    .blk-figure-placeholder {
+      background: var(--lukb-surface);
+      border: 1px dashed var(--lukb-border);
+      padding: 36px 16px;
+      text-align: center;
+      color: var(--lukb-muted);
+      font-size: 0.86rem;
+    }
+
+    .blk-box-source {
+      font-family: var(--font-body);
+      font-weight: 300;
+      color: var(--lukb-muted);
+      font-size: 0.78rem;
+      margin: 8px 0 0 0;
+    }
+
+    table.lukb-data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.86rem;
+    }
+
+    table.lukb-data-table thead th {
+      background: var(--lukb-navy);
+      color: #FFFFFF;
+      font-family: var(--font-heading);
+      font-weight: 500;
+      padding: 8px 10px;
+      border-top: 1px solid var(--lukb-navy);
+      border-bottom: 1px solid var(--lukb-navy);
+    }
+
+    table.lukb-data-table tbody td {
+      padding: 7px 10px;
+      border-bottom: 1px solid var(--lukb-border);
+      color: var(--lukb-text);
+    }
+
+    table.lukb-data-table tbody tr:nth-child(even) {
+      background: var(--lukb-surface);
+    }
+
+    table.lukb-data-table tbody tr.row-total td {
+      background: #E6EEF7;
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+      border-top: 1px solid var(--lukb-navy);
+      border-bottom: 2px solid var(--lukb-navy);
+    }
+
+    .lukb-footer {
+      padding: 18px 44px;
+      background: var(--lukb-surface);
+      border-top: 1px solid var(--lukb-border);
+      font-size: 0.76rem;
+      color: var(--lukb-muted);
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <article class="lukb-article-shell">
+    <header class="lukb-header">
+      <div class="lukb-brand-row">
+        <div class="lukb-brand-badge">
+          <span class="lukb-logo-pill">Luzerner Kantonalbank</span>
+          <span class="lukb-category">{{ article.metadata.category }}</span>
+        </div>
+        <span class="lukb-pub-date">Publikation vom {{ article.metadata.publication_date }}</span>
+      </div>
+
+      {% if article.metadata.subtitle %}
+      <p class="lukb-subtitle">{{ article.metadata.subtitle }}</p>
+      {% endif %}
+
+      <h1 class="lukb-title">{{ article.metadata.title }}</h1>
+
+      {% if article.metadata.lead %}
+      <div class="lukb-lead">{{ article.metadata.lead }}</div>
+      {% endif %}
+
+      {% if article.metadata.authors %}
+      <div class="lukb-authors-bar">
+        <span class="lukb-authors-label">Autoren:</span>
+        {% for author in article.metadata.authors %}
+        <span class="lukb-author-item">
+          <strong>{{ author.name }}</strong>
+          {% if author.role %}<span class="lukb-author-role">({{ author.role }})</span>{% endif %}
+        </span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </header>
+
+    <section class="lukb-body">
+      {% macro render_single_block(blk, in_box=false) %}
+        {% if blk.type == "heading" %}
+          {% if blk.level == 1 %}
+            <h1 class="blk-h1">{{ blk.text }}</h1>
+          {% elif blk.level == 2 %}
+            <h2 class="blk-h2">{{ blk.text }}</h2>
+          {% else %}
+            <h3 class="blk-h3">{{ blk.text }}</h3>
+          {% endif %}
+
+        {% elif blk.type == "richtext" %}
+          <div class="blk-richtext">{{ blk.html | safe }}</div>
+
+        {% elif blk.type == "callout" %}
+          <aside class="blk-callout">
+            {% if blk.title %}
+              <div class="blk-callout-title">{{ blk.title }}</div>
+            {% endif %}
+            <div class="blk-callout-content">{{ blk.html | safe }}</div>
+          </aside>
+
+        {% elif blk.type == "figure" %}
+          <figure class="blk-figure {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
+            {% if blk.title %}
+              <div class="blk-box-title">{{ blk.title }}</div>
+            {% endif %}
+            {% if blk.subtitle %}
+              <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
+            {% endif %}
+            {% if blk.data_uri %}
+              <div class="blk-figure-img-container">
+                <img src="{{ blk.data_uri }}" alt="{{ blk.title }}" />
+              </div>
+            {% else %}
+              <div class="blk-figure-placeholder">
+                Grafik-Platzhalter (Bitte SVG oder PNG im Grafik-Block hochladen)
+              </div>
+            {% endif %}
+            {% if blk.source %}
+              <figcaption class="blk-box-source">{{ blk.source }}</figcaption>
+            {% endif %}
+          </figure>
+
+        {% elif blk.type == "table" %}
+          <div class="blk-table-wrap {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
+            {% if blk.title %}
+              <div class="blk-box-title">{{ blk.title }}</div>
+            {% endif %}
+            {% if blk.subtitle %}
+              <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
+            {% endif %}
+            <table class="lukb-data-table">
+              <thead>
+                <tr>
+                  {% for col in blk.columns %}
+                  <th style="text-align: {{ col.align }};">{{ col.title }}</th>
+                  {% endfor %}
+                </tr>
+              </thead>
+              <tbody>
+                {% for row in blk.rows %}
+                <tr class="{% if blk.highlight_last_row and loop.last %}row-total{% endif %}">
+                  {% for col in blk.columns %}
+                  <td style="text-align: {{ col.align }};">{{ row.get(col.field, "") }}</td>
+                  {% endfor %}
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            {% if blk.source %}
+              <div class="blk-box-source">{{ blk.source }}</div>
+            {% endif %}
+          </div>
+        {% endif %}
+      {% endmacro %}
+
+      {% for blk in article.blocks %}
+        {% if blk.type == "textbox_group" %}
+          <div class="blk-richtext-textbox">
+            {% for child in blk.children %}
+              {{ render_single_block(child, in_box=true) }}
+            {% endfor %}
+          </div>
+        {% else %}
+          {{ render_single_block(blk, in_box=false) }}
+        {% endif %}
+      {% endfor %}
+    </section>
+
+    <footer class="lukb-footer">
+      <div>{{ article.metadata.disclaimer }}</div>
+      <div style="white-space: nowrap; font-family: var(--font-heading); font-weight: 500; color: var(--lukb-navy);">
+        LUKB Investment Office
+      </div>
+    </footer>
+  </article>
+</body>
+</html>
