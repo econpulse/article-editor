@@ -15,6 +15,20 @@ def _new_block_id() -> str:
     return f"blk_{uuid.uuid4().hex[:10]}"
 
 
+LEGACY_LUKB_DISCLAIMER = (
+    "Diese Publikation dient ausschliesslich Informations- und Marketingzwecken der "
+    "Luzerner Kantonalbank AG (LUKB) und stellt keine Anlageberatung oder Empfehlung dar."
+)
+
+DEFAULT_LUKB_DISCLAIMER = (
+    "Die in diesem Dokument verwendeten Informationen stammen aus Quellen, welche die Luzerner Kantonalbank als zuverlässig erachtet. "
+    "Trotz sorgfältiger Bearbeitung übernimmt die LUKB keine Garantie für die Richtigkeit und Vollständigkeit dieser Veröffentlichung "
+    "und der dargestellten Informationen. Die Publikation hat ausschliesslich informativen Charakter und ersetzt keinesfalls die "
+    "persönliche Beratung durch unsere Kundenberater vor einem allfälligen Anlage- oder anderen Entscheid. Die Informationen können "
+    "sich jederzeit und ohne vorherige Ankündigung ändern."
+)
+
+
 class AuthorItem(BaseModel):
     name: str = Field(default="", description="Vor- und Nachname des Autors")
     role: str = Field(default="", description="Funktion im Investment Office")
@@ -31,10 +45,7 @@ class ArticleMetadata(BaseModel):
     category: str = Field(default="Anlagepolitik & Märkte", description="Rubrik / Publikationsreihe")
     authors: list[AuthorItem] = Field(default_factory=list, description="Autorenliste")
     disclaimer: str = Field(
-        default=(
-            "Diese Publikation dient ausschliesslich Informations- und Marketingzwecken der "
-            "Luzerner Kantonalbank AG (LUKB) und stellt keine Anlageberatung oder Empfehlung dar."
-        ),
+        default=DEFAULT_LUKB_DISCLAIMER,
         description="Rechtlicher Hinweis im Fussbereich",
     )
 

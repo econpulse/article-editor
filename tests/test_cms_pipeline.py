@@ -55,10 +55,14 @@ def test_full_cms_workflow():
     articles = list_articles()
     assert len(articles) >= 2, "Seed muss mindestens 2 Beispielartikel anlegen"
 
-    # Prüfe Suche & Status-Filter
+    # Prüfe Suche & Status-Filter (inkl. "active_work" für Entwurf & Review)
     filtered = list_articles(search_query="Zinswende")
     assert len(filtered) >= 1
     assert "Zinswende" in filtered[0]["title"]
+    assert "updated_iso" in filtered[0]
+
+    active_work = list_articles(status_filter="active_work")
+    assert all(a["status"] in ("draft", "review") for a in active_work)
 
     # Neuen Artikel anlegen, Blöcke ergänzen (Heading, RichText, Figure, Table, Callout) & speichern
     new_doc = create_new_article(template_id="investment_focus", user="Test Analyst")
@@ -126,6 +130,8 @@ def test_full_cms_workflow():
     assert "<!DOCTYPE html>" in html_out
     assert "Yoga Sans for LUKB Light" in html_out
     assert "Yoga Sans for LUKB Medium" in html_out
+    assert "Investment Office News" in html_out
+    assert "data:image/svg+xml;base64," in html_out
     assert "Immobilienpreisindex Zentralschweiz" in html_out
     assert "Regionale Renditekennzahlen" in html_out
 

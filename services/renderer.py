@@ -18,10 +18,12 @@ from typing import Any
 import jinja2
 import typst
 
-from config import FONTS_DIR, TEMPLATES_DIR
+from config import FONTS_DIR, TEMPLATES_DIR, WWW_DIR
 from database.repository import get_asset
 from schemas.article import ArticleDocument
 from services.html_to_typst import escape_typst_text, html_to_typst
+
+LUKB_LOGO_SVG_PATH = WWW_DIR / "img" / "LUKB-Logo.svg"
 
 _jinja_env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
@@ -86,11 +88,15 @@ def _group_blocks_into_render_items(blocks: list[dict[str, Any]]) -> list[dict[s
 def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, Any]:
     """
     Bereitet das Artikel-Dictionary für Typst auf:
+    - Kopiert das offizielle LUKB-Logo (`LUKB-Logo.svg`) in das temporäre Render-Verzeichnis.
     - Konvertiert HTML-Rich-Text-Blöcke in sicheres Typst-Markup.
     - Schreibt benötigte Grafik-Assets aus der MSSQL-Datenbank in `work_dir`
       und trägt den relativen Pfad als `resolved_image` ein.
     - Gruppiert Blöcke zwischen `box_start` und `box_end` zu einer gemeinsamen farblichen Textbox.
     """
+    if LUKB_LOGO_SVG_PATH.exists():
+        (work_dir / "LUKB-Logo.svg").write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
+
     payload = doc.model_dump()
     payload["metadata"]["lead_typst"] = escape_typst_text(doc.metadata.lead or "")
 
@@ -209,10 +215,15 @@ def render_web_html(doc: ArticleDocument) -> str:
 
     payload["blocks"] = _group_blocks_into_render_items(payload.get("blocks", []))
 
+    logo_data_uri = ""
+    if LUKB_LOGO_SVG_PATH.exists():
+        b64_logo = base64.b64encode(LUKB_LOGO_SVG_PATH.read_bytes()).decode("ascii")
+        logo_data_uri = f"data:image/svg+xml;base64,{b64_logo}"
+
     tpl_name = f"{doc.template_id}/template.html.j2"
     try:
         tpl = _jinja_env.get_template(tpl_name)
     except jinja2.TemplateNotFound:
         tpl = _jinja_env.get_template("investment_focus/template.html.j2")
 
-    return tpl.render(article=payload, template_mode=doc.template_id)
+    return tpl.render(article=payload, template_mode=doc.template_id, logo_data_uri=logo_data_uri)

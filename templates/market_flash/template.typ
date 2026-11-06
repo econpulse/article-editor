@@ -45,26 +45,41 @@
 
 #set page(
   paper: "a4",
-  margin: (top: 2.2cm, bottom: 2.1cm, left: 2.2cm, right: 2.2cm),
+  margin: (top: 1.25cm, bottom: 2.4cm, left: 1.5cm, right: 1.5cm),
+  footer-descent: 12pt,
   footer: context {
     let page-num = counter(page).get().first()
-    let total-pages = counter(page).final().first()
-    block(width: 100%, inset: (top: 6pt), stroke: (top: 0.6pt + lukb-border))[
-      #grid(
-        columns: (1fr, auto),
-        column-gutter: 12pt,
-        align(left)[
-          #text(size: 7pt, fill: lukb-muted)[#meta.disclaimer]
-        ],
-        align(right + horizon)[
-          #text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[
-            LUKB Market Flash · Seite #page-num / #total-pages
-          ]
+    if page-num == 1 and meta.disclaimer != "" {
+      align(top)[
+        #block(
+          width: 100%,
+          inset: (top: 6pt),
+          stroke: (top: 0.5pt + black)
+        )[
+          #set par(justify: false, leading: 0.25em)
+          #text(font: font-body, weight: "light", size: 7pt, fill: black)[#meta.disclaimer]
         ]
-      )
-    ]
+      ]
+    }
   }
 )
+
+// Kopfzeile Seite 1: LUKB Logo links oben & Schriftzug rechts oben
+#grid(
+  columns: (1fr, auto),
+  align(left + top)[
+    #image("LUKB-Logo.svg", height: 30pt)
+  ],
+  align(right + top)[
+    #pad(top: 3.5pt)[
+      #text(font: font-heading, weight: "medium", size: 14pt, fill: rgb("#0093D1"))[
+        Investment Office News
+      ]
+    ]
+  ]
+)
+
+#v(12pt)
 
 // Dunkelblauer Kopfbalken im Executive-Briefing-Stil
 #block(
@@ -362,7 +377,7 @@
   layout(bounds => {
     let col-w = (bounds.width - gutter) / 2
     let page-h = 841.89pt
-    let bottom-margin = 2.1cm
+    let bottom-margin = 2.4cm
     let avail-h = page-h - start-pos.y - bottom-margin
 
     let item-heights = items.map(it => {

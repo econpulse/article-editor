@@ -65,20 +65,48 @@ def _collect_article_assets_map(doc: ArticleDocument) -> dict[str, str]:
 
 templates_list = list_available_templates()
 
+
+def _asset_version() -> str:
+    try:
+        js_m = int((WWW_DIR / "js" / "editor.js").stat().st_mtime)
+        css_m = int((WWW_DIR / "css" / "editor.css").stat().st_mtime)
+        return f"{max(js_m, css_m)}"
+    except Exception:
+        return "2"
+
+
+_ASSET_VER = _asset_version()
+
 app_ui = ui.page_fluid(
     ui.head_content(
         ui.tags.meta(charset="utf-8"),
         ui.tags.meta(name="viewport", content="width=device-width, initial-scale=1"),
         ui.tags.title("LUKB Investment Office — Publikations-Editor & CMS"),
-        ui.tags.link(rel="stylesheet", href="css/editor.css"),
+        ui.tags.link(rel="stylesheet", href=f"css/editor.css?v={_ASSET_VER}"),
         ui.tags.script(src="js/vendor/Sortable.min.js"),
-        ui.tags.script(src="js/editor.js"),
+        ui.tags.script(src=f"js/editor.js?v={_ASSET_VER}"),
     ),
     # ------------------------------------------------------------------------
     # Top Header Bar
     # ------------------------------------------------------------------------
     ui.div(
         ui.div(
+            ui.tags.button(
+                "☰ Publikationen",
+                id="btn-toggle-sidebar",
+                type="button",
+                class_="btn-lukb btn-lukb-outline-light btn-lukb-sm",
+                title="Linke Publikations-Sidebar ein- oder ausklappen (Ctrl+B)",
+                onclick="if(window.lukbToggleSidebar){window.lukbToggleSidebar();}",
+            ),
+            ui.tags.button(
+                "🔍 Alle durchsuchen (Ctrl+K)",
+                id="btn-open-pub-modal",
+                type="button",
+                class_="btn-lukb btn-lukb-outline-light btn-lukb-sm",
+                title="Such- & Publikations-Dialog öffnen (Ctrl+K)",
+                onclick="if(window.lukbOpenPubModal){window.lukbOpenPubModal();}",
+            ),
             ui.span("LUKB", class_="cms-brand-badge"),
             ui.span("Investment Office — Publikations-CMS", class_="cms-brand-title"),
             ui.span(f"DB: {DATABASE_BACKEND_LABEL}", class_="cms-brand-subtitle"),
@@ -125,13 +153,37 @@ app_ui = ui.page_fluid(
     # ------------------------------------------------------------------------
     ui.div(
         # ====================================================================
-        # Linke Spalte: Artikel-Übersicht & Datenbank-Suche
+        # Linke Spalte: Gruppierte & einklappbare Artikel-Sidebar
         # ====================================================================
         ui.tags.aside(
             ui.div(
                 ui.div(
-                    ui.h2("Publikationen", class_="sidebar-title"),
-                    ui.span("0 Artikel", id="sidebar-article-count", style="font-size:11.5px;color:#5A687C;"),
+                    ui.div(
+                        ui.h2("Publikationen", class_="sidebar-title"),
+                        ui.span("0 Artikel", id="sidebar-article-count", class_="sidebar-count-pill"),
+                        style="display:flex;align-items:center;gap:8px;",
+                    ),
+                    ui.div(
+                        ui.tags.button(
+                            "⤢ Dialog",
+                            id="btn-sidebar-open-modal",
+                            type="button",
+                            class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                            title="Grosses Publikations-Verzeichnis & Suche öffnen (Ctrl+K)",
+                            style="padding:3px 8px;font-size:11.5px;",
+                            onclick="if(window.lukbOpenPubModal){window.lukbOpenPubModal();}",
+                        ),
+                        ui.tags.button(
+                            "«",
+                            id="btn-sidebar-collapse-inner",
+                            type="button",
+                            class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                            title="Sidebar einklappen (Ctrl+B)",
+                            style="padding:3px 8px;font-size:13px;",
+                            onclick="if(window.lukbSetSidebarCollapsed){window.lukbSetSidebarCollapsed(true);}",
+                        ),
+                        style="display:flex;align-items:center;gap:4px;",
+                    ),
                     class_="sidebar-title-row",
                 ),
                 ui.div(
@@ -139,20 +191,21 @@ app_ui = ui.page_fluid(
                         "btn_new_article",
                         "+ Neue Publikation anlegen",
                         class_="btn-lukb btn-lukb-navy",
-                        style="width:100%;margin-bottom:6px;",
+                        style="width:100%;margin-bottom:4px;",
                     ),
                     ui.tags.input(
                         id="sidebar_search",
                         type="search",
                         class_="cms-input",
-                        placeholder="Artikel, Autor oder Thema suchen …",
+                        placeholder="Schnellfilter (Titel, Autor, Rubrik) …",
                         oninput="Shiny.setInputValue('sidebar_search_query', this.value, {priority: 'event'})",
                     ),
                     ui.tags.select(
-                        ui.tags.option("Alle Status anzeigen", value="all"),
+                        ui.tags.option("Alle Status (Gruppiert)", value="all"),
+                        ui.tags.option("Nur In Bearbeitung (Entwurf & Review)", value="active_work"),
                         ui.tags.option("Status: Entwurf", value="draft"),
                         ui.tags.option("Status: In Review", value="review"),
-                        ui.tags.option("Status: Publiziert", value="published"),
+                        ui.tags.option("Status: Publiziert (Archiv)", value="published"),
                         id="sidebar_status_filter",
                         class_="cms-select",
                         onchange="Shiny.setInputValue('sidebar_status_val', this.value, {priority: 'event'})",
@@ -177,6 +230,7 @@ app_ui = ui.page_fluid(
                 ),
                 style="padding:10px 12px;border-top:1px solid #D6DEE8;display:flex;gap:8px;background:#F4F7FA;",
             ),
+            id="lukb-sidebar",
             class_="cms-sidebar",
         ),
         # ====================================================================
@@ -395,7 +449,140 @@ app_ui = ui.page_fluid(
             ),
             class_="cms-preview-pane",
         ),
+        id="lukb-workspace",
         class_="cms-workspace",
+    ),
+    # ------------------------------------------------------------------------
+    # Such- & Publikations-Dialog (Modal / Command Palette, Ctrl+K)
+    # ------------------------------------------------------------------------
+    ui.div(
+        ui.div(
+            # Modal Header
+            ui.div(
+                ui.div(
+                    ui.h2("Publikations-Verzeichnis & Suche", class_="pub-modal-title"),
+                    ui.span("0 Publikationen", id="pub-modal-count-badge", class_="sidebar-count-pill"),
+                    style="display:flex;align-items:center;gap:10px;",
+                ),
+                ui.div(
+                    ui.tags.button(
+                        "+ Neue Publikation",
+                        id="btn-modal-new-article",
+                        type="button",
+                        class_="btn-lukb btn-lukb-navy btn-lukb-sm",
+                    ),
+                    ui.tags.button(
+                        "✕ Schliessen (Esc)",
+                        id="btn-close-pub-modal",
+                        type="button",
+                        class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        onclick="if(window.lukbClosePubModal){window.lukbClosePubModal();}",
+                    ),
+                    style="display:flex;align-items:center;gap:8px;",
+                ),
+                class_="pub-modal-header",
+            ),
+            # Modal Filter & Search Bar
+            ui.div(
+                ui.div(
+                    ui.tags.input(
+                        id="pub-modal-search",
+                        type="search",
+                        class_="cms-input pub-modal-search-input",
+                        placeholder="🔍 Titel, Untertitel, Autor, Rubrik oder Datum durchsuchen …",
+                    ),
+                    class_="pub-modal-search-row",
+                ),
+                ui.div(
+                    ui.div(
+                        ui.tags.button(
+                            "Alle",
+                            type="button",
+                            class_="pub-filter-pill active",
+                            **{"data-modal-status": "all"},
+                        ),
+                        ui.tags.button(
+                            "In Bearbeitung",
+                            type="button",
+                            class_="pub-filter-pill",
+                            **{"data-modal-status": "active_work"},
+                        ),
+                        ui.tags.button(
+                            "Entwurf",
+                            type="button",
+                            class_="pub-filter-pill",
+                            **{"data-modal-status": "draft"},
+                        ),
+                        ui.tags.button(
+                            "In Review",
+                            type="button",
+                            class_="pub-filter-pill",
+                            **{"data-modal-status": "review"},
+                        ),
+                        ui.tags.button(
+                            "Publiziert",
+                            type="button",
+                            class_="pub-filter-pill",
+                            **{"data-modal-status": "published"},
+                        ),
+                        class_="pub-modal-status-pills",
+                    ),
+                    ui.div(
+                        ui.tags.select(
+                            ui.tags.option("Alle Templates", value="all"),
+                            ui.tags.option("Investment Fokus", value="investment_focus"),
+                            ui.tags.option("Market Flash", value="market_flash"),
+                            id="pub-modal-template-filter",
+                            class_="cms-select pub-modal-select",
+                        ),
+                        ui.tags.select(
+                            ui.tags.option("Alle Rubriken", value="all"),
+                            id="pub-modal-category-filter",
+                            class_="cms-select pub-modal-select",
+                        ),
+                        ui.tags.select(
+                            ui.tags.option("Sortierung: Zuletzt geändert", value="updated_desc"),
+                            ui.tags.option("Sortierung: Publikationsdatum", value="pubdate_desc"),
+                            ui.tags.option("Sortierung: Titel (A–Z)", value="title_asc"),
+                            id="pub-modal-sort",
+                            class_="cms-select pub-modal-select",
+                        ),
+                        class_="pub-modal-dropdowns",
+                    ),
+                    class_="pub-modal-filter-bar",
+                ),
+                class_="pub-modal-controls",
+            ),
+            # Modal Table Content
+            ui.div(
+                ui.tags.table(
+                    ui.tags.thead(
+                        ui.tags.tr(
+                            ui.tags.th("Status", style="width:110px;"),
+                            ui.tags.th("Titel & Untertitel"),
+                            ui.tags.th("Rubrik & Template", style="width:185px;"),
+                            ui.tags.th("Autor(en)", style="width:170px;"),
+                            ui.tags.th("Publ.-Datum", style="width:105px;"),
+                            ui.tags.th("Zuletzt geändert", style="width:135px;"),
+                            ui.tags.th("Aktionen", style="width:155px;text-align:right;"),
+                        )
+                    ),
+                    ui.tags.tbody(id="pub-modal-tbody"),
+                    class_="pub-modal-table",
+                ),
+                class_="pub-modal-table-wrap",
+            ),
+            # Modal Footer & Pagination
+            ui.div(
+                ui.span("Tipp: Mit Ctrl+K jederzeit öffnen · Ctrl+B klappt die linke Sidebar ein/aus", class_="pub-modal-hint"),
+                ui.div(id="pub-modal-pagination", class_="pub-modal-pagination"),
+                class_="pub-modal-footer",
+            ),
+            class_="pub-modal-dialog",
+        ),
+        id="lukb-pub-modal-backdrop",
+        class_="pub-modal-backdrop",
+        style="display:none;",
     ),
 )
 
@@ -539,9 +726,20 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             pass
 
         items = list_articles(search_query=search_q, status_filter=status_f)
+        all_items = (
+            items
+            if (not search_q.strip() and status_f == "all")
+            else list_articles(search_query="", status_filter="all")
+        )
         await session.send_custom_message(
             "lukb_update_article_list",
-            {"articles": items, "active_id": active_id},
+            {
+                "articles": items,
+                "all_articles": all_items,
+                "active_id": active_id,
+                "sidebar_search_active": bool(search_q.strip()),
+                "sidebar_status_filter": status_f,
+            },
         )
 
     async def _send_preview(doc: ArticleDocument) -> None:
@@ -760,6 +958,42 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         next_id = remaining[0]["id"] if remaining else ""
         await _load_and_broadcast_article(next_id)
         ui.notification_show("Publikation wurde gelöscht.", type="message", duration=3)
+
+    # Aktionen direkt aus dem Publikations-Dialog (Modal: Neu, Duplizieren, Löschen)
+    @reactive.effect
+    @reactive.event(input.lukb_modal_article_action)
+    async def _on_modal_article_action() -> None:
+        payload = input.lukb_modal_article_action()
+        if not isinstance(payload, dict):
+            return
+        action = payload.get("action", "")
+        target_id = payload.get("id", "")
+        if action == "create":
+            new_doc = create_new_article(user=_current_user())
+            await _load_and_broadcast_article(new_doc.id)
+            ui.notification_show("Neue Publikation wurde angelegt.", type="message", duration=3)
+        elif action == "duplicate" and target_id:
+            dup_doc = duplicate_article(target_id, user=_current_user())
+            if dup_doc:
+                await _load_and_broadcast_article(dup_doc.id)
+                ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
+        elif action == "delete" and target_id:
+            all_items = list_articles()
+            if len(all_items) <= 1:
+                ui.notification_show(
+                    "Der letzte verbleibende Artikel kann nicht gelöscht werden.",
+                    type="warning",
+                    duration=4,
+                )
+                return
+            delete_article(target_id)
+            if current_article_id.get() == target_id:
+                remaining = list_articles()
+                next_id = remaining[0]["id"] if remaining else ""
+                await _load_and_broadcast_article(next_id)
+            else:
+                await _send_article_list(current_article_id.get())
+            ui.notification_show("Publikation wurde gelöscht.", type="message", duration=3)
 
     # Manueller Preview-Refresh
     @reactive.effect

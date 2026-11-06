@@ -49,6 +49,7 @@ def build_database_url() -> tuple[str, str]:
         mssql_password = os.getenv("MSSQL_PASSWORD", "").strip()
         mssql_driver = os.getenv("MSSQL_DRIVER", "ODBC Driver 18 for SQL Server").strip()
         trust_cert = os.getenv("MSSQL_TRUST_SERVER_CERTIFICATE", "yes").strip()
+        mssql_encrypt = os.getenv("MSSQL_ENCRYPT", "").strip()
         trusted_conn = os.getenv("MSSQL_TRUSTED_CONNECTION", "no").strip().lower() in (
             "yes",
             "true",
@@ -60,6 +61,9 @@ def build_database_url() -> tuple[str, str]:
             f"driver={quote_plus(mssql_driver)}",
             f"TrustServerCertificate={quote_plus(trust_cert)}",
         ]
+
+        if mssql_encrypt:
+            query_params.append(f"Encrypt={quote_plus(mssql_encrypt)}")
 
         if trusted_conn or not mssql_user:
             query_params.append("Trusted_Connection=yes")

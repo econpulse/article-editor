@@ -13,7 +13,13 @@ from sqlalchemy import or_, select, desc
 
 from database.connection import Base, engine, get_db_session
 from database.models import ArticleModel, ArticleRevisionModel, AssetModel
-from schemas.article import ArticleDocument, ArticleMetadata, AuthorItem
+from schemas.article import (
+    DEFAULT_LUKB_DISCLAIMER,
+    LEGACY_LUKB_DISCLAIMER,
+    ArticleDocument,
+    ArticleMetadata,
+    AuthorItem,
+)
 
 
 def _utc_now() -> datetime:
@@ -31,6 +37,12 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
     except Exception:
         blocks_raw = []
 
+    raw_disclaimer = (row.disclaimer or "").strip()
+    if not raw_disclaimer or raw_disclaimer == LEGACY_LUKB_DISCLAIMER:
+        resolved_disclaimer = DEFAULT_LUKB_DISCLAIMER
+    else:
+        resolved_disclaimer = raw_disclaimer
+
     metadata = ArticleMetadata(
         title=row.title or "Unbenannte Publikation",
         subtitle=row.subtitle or "",
@@ -38,7 +50,7 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
         publication_date=row.publication_date or "",
         category=row.category or "Anlagepolitik & Märkte",
         authors=[AuthorItem.model_validate(a) for a in authors_raw if isinstance(a, dict)],
-        disclaimer=row.disclaimer or ArticleMetadata().disclaimer,
+        disclaimer=resolved_disclaimer,
     )
     return ArticleDocument(
         id=row.id,
@@ -50,11 +62,31 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
 
 
 def list_articles(search_query: str = "", status_filter: str = "all") -> list[dict[str, Any]]:
-    """Liefert eine kompakte Übersicht aller Artikel in der Datenbank (sortiert nach Änderungsdatum)."""
+    """
+    Liefert eine kompakte Übersicht aller Artikel in der Datenbank (sortiert nach Änderungsdatum).
+    Optimierte Projektionsabfrage: Lädt nur die leichten Metadaten-Spalten (ohne `blocks_json`,
+    `lead` oder `disclaimer`), um auch bei 50+ oder 500+ Artikeln minimalen MSSQL-Netzwerk-Traffic
+    zu garantieren.
+    """
     with get_db_session() as session:
-        stmt = select(ArticleModel).order_by(desc(ArticleModel.updated_at))
+        stmt = select(
+            ArticleModel.id,
+            ArticleModel.title,
+            ArticleModel.subtitle,
+            ArticleModel.category,
+            ArticleModel.template_id,
+            ArticleModel.status,
+            ArticleModel.authors_json,
+            ArticleModel.publication_date,
+            ArticleModel.updated_at,
+            ArticleModel.created_at,
+            ArticleModel.updated_by,
+        ).order_by(desc(ArticleModel.updated_at))
         if status_filter and status_filter != "all":
-            stmt = stmt.where(ArticleModel.status == status_filter)
+            if status_filter == "active_work":
+                stmt = stmt.where(ArticleModel.status.in_(["draft", "review"]))
+            else:
+                stmt = stmt.where(ArticleModel.status == status_filter)
         if search_query and search_query.strip():
             q = f"%{search_query.strip()}%"
             stmt = stmt.where(
@@ -66,7 +98,7 @@ def list_articles(search_query: str = "", status_filter: str = "all") -> list[di
                     ArticleModel.category.ilike(q),
                 )
             )
-        rows = session.scalars(stmt).all()
+        rows = session.execute(stmt).all()
         result: list[dict[str, Any]] = []
         for r in rows:
             try:
@@ -76,18 +108,20 @@ def list_articles(search_query: str = "", status_filter: str = "all") -> list[di
                 author_names = ""
             updated_dt = r.updated_at or r.created_at
             updated_str = updated_dt.strftime("%d.%m.%Y %H:%M") if updated_dt else ""
+            updated_iso = updated_dt.isoformat() if updated_dt else ""
             result.append(
                 {
                     "id": r.id,
                     "title": r.title,
-                    "subtitle": r.subtitle,
-                    "category": r.category,
+                    "subtitle": r.subtitle or "",
+                    "category": r.category or "",
                     "template_id": r.template_id,
                     "status": r.status,
                     "authors_summary": author_names or "Investment Office",
-                    "publication_date": r.publication_date,
+                    "publication_date": r.publication_date or "",
                     "updated_at": updated_str,
-                    "updated_by": r.updated_by,
+                    "updated_iso": updated_iso,
+                    "updated_by": r.updated_by or "",
                 }
             )
         return result
@@ -526,11 +560,16 @@ def init_db_and_seed() -> None:
 
     existing = list_articles()
     if existing:
-        # Selbstheilung für Artikel, deren Blöcke durch den früheren Tuple-Bug geleert wurden
+        # Selbstheilung für Artikel, deren Blöcke durch den früheren Tuple-Bug geleert wurden,
+        # sowie Aktualisierung des Standard-Disclaimers auf die aktuelle LUKB-Fassung
         with get_db_session() as session:
             for item in existing:
                 row = session.get(ArticleModel, item["id"])
-                if row and (not row.blocks_json or row.blocks_json.strip() == "[]"):
+                if not row:
+                    continue
+                if not row.disclaimer or row.disclaimer.strip() == LEGACY_LUKB_DISCLAIMER:
+                    row.disclaimer = DEFAULT_LUKB_DISCLAIMER
+                if not row.blocks_json or row.blocks_json.strip() == "[]":
                     for rev in row.revisions:
                         try:
                             snap = json.loads(rev.snapshot_json)

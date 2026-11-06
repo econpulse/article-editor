@@ -48,44 +48,22 @@
 
 #set page(
   paper: "a4",
-  margin: (top: 2.3cm, bottom: 2.1cm, left: 1.8cm, right: 1.8cm),
-  header: context {
-    let page-num = counter(page).get().first()
-    if page-num > 1 {
-      block(width: 100%, inset: (bottom: 5pt), stroke: (bottom: 0.6pt + lukb-border))[
-        #grid(
-          columns: (1fr, auto),
-          align(left)[
-            #text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy, tracking: 0.4pt)[
-              LUKB INVESTMENT OFFICE
-            ]
-            #h(6pt)
-            #text(size: 8pt, fill: lukb-muted)[| #meta.category]
-          ],
-          align(right)[
-            #text(size: 8pt, fill: lukb-muted)[#meta.title]
-          ]
-        )
-      ]
-    }
-  },
+  margin: (top: 1.25cm, bottom: 2.4cm, left: 1.5cm, right: 1.5cm),
+  footer-descent: 12pt,
   footer: context {
     let page-num = counter(page).get().first()
-    let total-pages = counter(page).final().first()
-    block(width: 100%, inset: (top: 6pt), stroke: (top: 0.6pt + lukb-border))[
-      #grid(
-        columns: (1fr, auto),
-        column-gutter: 12pt,
-        align(left)[
-          #text(size: 7pt, fill: lukb-muted)[#meta.disclaimer]
-        ],
-        align(right + horizon)[
-          #text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[
-            Seite #page-num / #total-pages
-          ]
+    if page-num == 1 and meta.disclaimer != "" {
+      align(top)[
+        #block(
+          width: 100%,
+          inset: (top: 6pt),
+          stroke: (top: 0.5pt + black)
+        )[
+          #set par(justify: false, leading: 0.25em)
+          #text(font: font-body, weight: "light", size: 7pt, fill: black)[#meta.disclaimer]
         ]
-      )
-    ]
+      ]
+    }
   }
 )
 
@@ -268,25 +246,19 @@
 )[
   #grid(
     columns: (1fr, auto),
-    align(left + horizon)[
-      #box(fill: lukb-navy, inset: (x: 8pt, y: 4pt), radius: 2pt)[
-        #text(font: font-heading, weight: "medium", size: 8.5pt, fill: white, tracking: 0.8pt)[
-          LUZERNER KANTONALBANK
-        ]
-      ]
-      #h(8pt)
-      #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-cyan, tracking: 0.4pt)[
-        #upper(meta.category)
-      ]
+    align(left + top)[
+      #image("LUKB-Logo.svg", height: 30pt)
     ],
-    align(right + horizon)[
-      #text(font: font-body, weight: "light", size: 8.5pt, fill: lukb-muted)[
-        Publikation vom #meta.publication_date
+    align(right + top)[
+      #pad(top: 3.5pt)[
+        #text(font: font-heading, weight: "medium", size: 14pt, fill: rgb("#0093D1"))[
+          Investment Office News
+        ]
       ]
     ]
   )
 
-  #v(10pt)
+  #v(14pt)
 
   #if meta.subtitle != "" [
     #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue)[#meta.subtitle]
@@ -398,7 +370,7 @@
   layout(bounds => {
     let col-w = (bounds.width - gutter) / 2
     let page-h = 841.89pt
-    let bottom-margin = 2.1cm
+    let bottom-margin = 2.4cm
     let avail-h = page-h - start-pos.y - bottom-margin
 
     let item-heights = items.map(it => {
