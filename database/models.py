@@ -7,9 +7,11 @@ damit Redeployments auf Posit Connect niemals hochgeladene Grafiken oder Artikel
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from sqlalchemy import (
+    Date,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -88,3 +90,17 @@ class AssetModel(Base):
     mime_type: Mapped[str] = mapped_column(Unicode(100), nullable=False)
     data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)
+
+
+class TimeSeriesModel(Base):
+    """
+    Zeitreihen-Tabelle `ts_db` im Long-Format (ticker, date, name, value).
+    Unterstützt DATE- und DATETIME-Spalten in MS SQL Server sowie SQLite für lokale Tests.
+    """
+
+    __tablename__ = "ts_db"
+
+    ticker: Mapped[str] = mapped_column(Unicode(100), primary_key=True, index=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True, index=True)
+    name: Mapped[str] = mapped_column(Unicode(255), nullable=False, default="")
+    value: Mapped[float] = mapped_column(Float, nullable=True)

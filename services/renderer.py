@@ -21,6 +21,7 @@ import typst
 from config import FONTS_DIR, TEMPLATES_DIR, WWW_DIR
 from database.repository import get_asset
 from schemas.article import ArticleDocument
+from services.chart_generator import generate_db_chart_svg
 from services.html_to_typst import escape_typst_text, html_to_typst
 
 LUKB_LOGO_SVG_PATH = WWW_DIR / "img" / "LUKB-Logo.svg"
@@ -124,6 +125,12 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                     resolved_rel_path = asset_filename
             bcopy["resolved_image"] = resolved_rel_path
 
+        elif btype == "db_chart":
+            svg_markup = generate_db_chart_svg(blk)
+            chart_filename = f"dbchart_{blk.get('id', 'chart')}.svg"
+            (work_dir / chart_filename).write_bytes(svg_markup.encode("utf-8"))
+            bcopy["resolved_image"] = chart_filename
+
         enriched_blocks.append(bcopy)
 
     payload["blocks"] = _group_blocks_into_render_items(enriched_blocks)
@@ -212,6 +219,10 @@ def render_web_html(doc: ArticleDocument) -> str:
                     mime = asset_record.get("mime_type", "image/svg+xml")
                     data_uri = f"data:{mime};base64,{b64}"
             blk["data_uri"] = data_uri
+        elif blk.get("type") == "db_chart":
+            svg_markup = generate_db_chart_svg(blk)
+            b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+            blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
 
     payload["blocks"] = _group_blocks_into_render_items(payload.get("blocks", []))
 

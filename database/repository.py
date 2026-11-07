@@ -6,13 +6,14 @@ und Datenbank-Asset-Speicherung (MSSQL / SQLAlchemy).
 from __future__ import annotations
 
 import json
+import math
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
-from sqlalchemy import or_, select, desc
+from sqlalchemy import desc, func, or_, select
 
 from database.connection import Base, engine, get_db_session
-from database.models import ArticleModel, ArticleRevisionModel, AssetModel
+from database.models import ArticleModel, ArticleRevisionModel, AssetModel, TimeSeriesModel
 from schemas.article import (
     DEFAULT_LUKB_DISCLAIMER,
     LEGACY_LUKB_DISCLAIMER,
@@ -449,6 +450,322 @@ def get_asset(asset_id: str) -> dict[str, Any] | None:
 
 
 # ============================================================================
+# Zeitreihen-Abfragen für `ts_db` (DB-Chart Inhaltsblock)
+# ============================================================================
+
+
+def _coerce_to_date(val: Any) -> date | None:
+    """Konvertiert DATE, DATETIME oder ISO-String sicher in ein `datetime.date`-Objekt."""
+    if val is None:
+        return None
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, date):
+        return val
+    if isinstance(val, str):
+        s = val.strip()
+        if not s:
+            return None
+        try:
+            return date.fromisoformat(s[:10])
+        except ValueError:
+            for fmt in ("%d.%m.%Y", "%Y/%m/%d", "%m/%d/%Y"):
+                try:
+                    return datetime.strptime(s[:10], fmt).date()
+                except ValueError:
+                    pass
+    return None
+
+
+def list_available_tickers() -> list[dict[str, Any]]:
+    """
+    Liefert alle in `ts_db` vorhandenen Ticker samt Namen und Datumsbereich
+    für die Autovervollständigung im Editor.
+    """
+    try:
+        with get_db_session() as session:
+            stmt = (
+                select(
+                    TimeSeriesModel.ticker,
+                    func.max(TimeSeriesModel.name).label("name"),
+                    func.min(TimeSeriesModel.date).label("min_date"),
+                    func.max(TimeSeriesModel.date).label("max_date"),
+                )
+                .group_by(TimeSeriesModel.ticker)
+                .order_by(TimeSeriesModel.ticker.asc())
+            )
+            rows = session.execute(stmt).all()
+            out: list[dict[str, Any]] = []
+            for r in rows:
+                if not r.ticker:
+                    continue
+                min_d = _coerce_to_date(r.min_date)
+                max_d = _coerce_to_date(r.max_date)
+                out.append(
+                    {
+                        "ticker": str(r.ticker).strip(),
+                        "name": str(r.name or r.ticker).strip(),
+                        "min_date": min_d.isoformat() if min_d else "",
+                        "max_date": max_d.isoformat() if max_d else "",
+                    }
+                )
+            return out
+    except Exception:
+        return []
+
+
+def query_timeseries_data(
+    tickers: list[str],
+    start_date: str | date | None = None,
+) -> dict[str, dict[str, Any]]:
+    """
+    Liest Zeitreihen aus `ts_db` (Spalten: ticker, date, name, value) im Long-Format.
+    Gibt ein Dictionary zurück, indiziert über den angefragten Ticker (Case-Insensitive Match):
+    `{ "SMI": {"ticker": "SMI", "name": "Swiss Market Index (SMI)", "points": [(date, float), ...]} }`
+    """
+    cleaned = [t.strip() for t in tickers if t and str(t).strip()]
+    if not cleaned:
+        return {}
+
+    upper_map = {t.upper(): t for t in cleaned}
+    start_dt = _coerce_to_date(start_date)
+
+    result: dict[str, dict[str, Any]] = {}
+    with get_db_session() as session:
+        stmt = select(
+            TimeSeriesModel.ticker,
+            TimeSeriesModel.date,
+            TimeSeriesModel.name,
+            TimeSeriesModel.value,
+        ).where(func.upper(TimeSeriesModel.ticker).in_(list(upper_map.keys())))
+
+        if start_dt is not None:
+            stmt = stmt.where(TimeSeriesModel.date >= start_dt)
+
+        stmt = stmt.order_by(TimeSeriesModel.date.asc())
+        rows = session.execute(stmt).all()
+
+        by_upper: dict[str, dict[date, float]] = {}
+        meta_by_upper: dict[str, tuple[str, str]] = {}
+
+        for r in rows:
+            if not r.ticker or r.value is None:
+                continue
+            try:
+                fval = float(r.value)
+                if math.isnan(fval) or math.isinf(fval):
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            dt = _coerce_to_date(r.date)
+            if dt is None:
+                continue
+            if start_dt is not None and dt < start_dt:
+                continue
+
+            u_key = str(r.ticker).strip().upper()
+            if u_key not in by_upper:
+                by_upper[u_key] = {}
+                meta_by_upper[u_key] = (str(r.ticker).strip(), str(r.name or "").strip())
+            elif not meta_by_upper[u_key][1] and r.name:
+                meta_by_upper[u_key] = (meta_by_upper[u_key][0], str(r.name).strip())
+
+            by_upper[u_key][dt] = fval
+
+        for u_key, req_ticker in upper_map.items():
+            if u_key in by_upper and by_upper[u_key]:
+                db_ticker, db_name = meta_by_upper[u_key]
+                sorted_pts = sorted(by_upper[u_key].items(), key=lambda x: x[0])
+                result[req_ticker] = {
+                    "ticker": db_ticker,
+                    "name": db_name or db_ticker,
+                    "points": sorted_pts,
+                }
+                result[u_key] = result[req_ticker]
+
+    return result
+
+
+def _seed_sample_timeseries() -> None:
+    """Befüllt `ts_db` mit realistischen Beispiel-Zeitreihen, falls die Tabelle noch leer ist."""
+    with get_db_session() as session:
+        existing_row = session.execute(select(TimeSeriesModel.ticker).limit(1)).first()
+        if existing_row is not None:
+            return
+
+        # Quartals-Stichtage von Q1 2021 bis Q4 2026 (24 Quartale)
+        quarter_dates = [
+            date(2021, 3, 31), date(2021, 6, 30), date(2021, 9, 30), date(2021, 12, 31),
+            date(2022, 3, 31), date(2022, 6, 30), date(2022, 9, 30), date(2022, 12, 31),
+            date(2023, 3, 31), date(2023, 6, 30), date(2023, 9, 30), date(2023, 12, 31),
+            date(2024, 3, 31), date(2024, 6, 30), date(2024, 9, 30), date(2024, 12, 31),
+            date(2025, 3, 31), date(2025, 6, 30), date(2025, 9, 30), date(2025, 12, 31),
+            date(2026, 3, 31), date(2026, 6, 30), date(2026, 9, 30), date(2026, 11, 5),
+        ]
+
+        series_catalog = [
+            (
+                "SNB_RATE",
+                "SNB Leitzins (CHF)",
+                [
+                    -0.75, -0.75, -0.75, -0.75,
+                    -0.75, -0.25, 0.50, 1.00,
+                    1.50, 1.75, 1.75, 1.75,
+                    1.50, 1.25, 1.00, 0.50,
+                    0.25, 0.00, 0.00, 0.00,
+                    0.00, 0.00, 0.00, 0.00,
+                ],
+            ),
+            (
+                "ECB_RATE",
+                "EZB Einlagesatz (EUR)",
+                [
+                    -0.50, -0.50, -0.50, -0.50,
+                    -0.50, -0.50, 0.75, 2.00,
+                    3.00, 3.50, 4.00, 4.00,
+                    4.00, 3.75, 3.50, 3.00,
+                    2.50, 2.25, 2.00, 2.00,
+                    1.75, 1.75, 1.75, 1.75,
+                ],
+            ),
+            (
+                "FED_RATE",
+                "US Fed Funds Rate (USD)",
+                [
+                    0.25, 0.25, 0.25, 0.25,
+                    0.50, 1.75, 3.25, 4.50,
+                    5.00, 5.25, 5.50, 5.50,
+                    5.50, 5.50, 5.00, 4.50,
+                    4.25, 4.00, 3.75, 3.50,
+                    3.25, 3.25, 3.00, 3.00,
+                ],
+            ),
+            (
+                "SMI",
+                "Swiss Market Index (SMI)",
+                [
+                    11047, 11942, 11642, 12875,
+                    12161, 10741, 10267, 10729,
+                    11106, 11280, 10963, 11138,
+                    11730, 11993, 12168, 11850,
+                    12340, 12580, 12410, 12790,
+                    13020, 13180, 13350, 13490,
+                ],
+            ),
+            (
+                "SP500",
+                "S&P 500 Index",
+                [
+                    3972, 4297, 4307, 4766,
+                    4530, 3785, 3585, 3839,
+                    4109, 4450, 4288, 4769,
+                    5254, 5460, 5762, 5910,
+                    6020, 6150, 6080, 6290,
+                    6410, 6520, 6610, 6695,
+                ],
+            ),
+            (
+                "STOXX600",
+                "STOXX Europe 600",
+                [
+                    429, 452, 454, 487,
+                    455, 407, 387, 424,
+                    457, 461, 450, 479,
+                    512, 511, 522, 515,
+                    534, 546, 540, 558,
+                    569, 575, 582, 588,
+                ],
+            ),
+            (
+                "CH_10Y",
+                "Eidgenossen 10J Rendite (%)",
+                [
+                    -0.28, -0.22, -0.15, -0.13,
+                    0.62, 1.18, 1.24, 1.58,
+                    1.19, 0.96, 1.09, 0.70,
+                    0.68, 0.58, 0.42, 0.35,
+                    0.44, 0.48, 0.45, 0.50,
+                    0.52, 0.55, 0.54, 0.56,
+                ],
+            ),
+            (
+                "CH_CPI",
+                "Inflation Schweiz YoY (%)",
+                [
+                    -0.2, 0.6, 0.9, 1.5,
+                    2.4, 3.4, 3.3, 2.8,
+                    2.9, 1.7, 1.7, 1.7,
+                    1.0, 1.3, 0.8, 0.7,
+                    0.6, 0.7, 0.8, 0.8,
+                    0.9, 0.8, 0.8, 0.7,
+                ],
+            ),
+            (
+                "CH_GDP",
+                "BIP-Wachstum Schweiz QoQ (%)",
+                [
+                    -0.3, 1.8, 1.5, 0.4,
+                    0.5, 0.3, 0.2, 0.0,
+                    0.3, -0.1, 0.3, 0.3,
+                    0.5, 0.7, 0.4, 0.3,
+                    0.4, 0.5, 0.4, 0.5,
+                    0.4, 0.5, 0.4, 0.5,
+                ],
+            ),
+            (
+                "EPS_CH",
+                "Gewinnbeitrag Schweiz (CHF Mrd.)",
+                [
+                    12.4, 13.8, 13.2, 14.1,
+                    13.5, 12.9, 12.4, 13.0,
+                    13.8, 14.2, 14.0, 14.5,
+                    15.1, 15.6, 15.8, 16.2,
+                    16.5, 17.0, 16.8, 17.4,
+                    17.9, 18.3, 18.6, 19.0,
+                ],
+            ),
+            (
+                "EPS_US",
+                "Gewinnbeitrag USA (CHF Mrd.)",
+                [
+                    18.0, 19.5, 20.1, 21.4,
+                    20.2, 18.8, 18.1, 19.0,
+                    20.4, 21.6, 22.0, 23.1,
+                    24.5, 25.4, 26.2, 27.0,
+                    27.8, 28.5, 28.1, 29.4,
+                    30.2, 31.0, 31.8, 32.5,
+                ],
+            ),
+            (
+                "EPS_EU",
+                "Gewinnbeitrag Europa (CHF Mrd.)",
+                [
+                    9.2, 10.4, 10.1, 10.8,
+                    10.0, 9.1, 8.6, 9.3,
+                    9.9, 10.2, 9.8, 10.3,
+                    10.8, 11.1, 11.0, 11.4,
+                    11.7, 12.1, 11.9, 12.4,
+                    12.8, 13.1, 13.3, 13.6,
+                ],
+            ),
+        ]
+
+        rows_to_add: list[TimeSeriesModel] = []
+        for ticker, name, values in series_catalog:
+            for dt, val in zip(quarter_dates, values):
+                rows_to_add.append(
+                    TimeSeriesModel(
+                        ticker=ticker,
+                        date=dt,
+                        name=name,
+                        value=float(val),
+                    )
+                )
+        session.add_all(rows_to_add)
+
+
+# ============================================================================
 # Initialisierung & Beispiel-Publikationen (Seed Data)
 # ============================================================================
 
@@ -543,6 +860,7 @@ SAMPLE_SVG_EQUITY = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 
 def init_db_and_seed() -> None:
     """Erstellt alle MSSQL/SQLAlchemy-Tabellen und legt initiale Beispielartikel an, falls leer."""
     Base.metadata.create_all(bind=engine)
+    _seed_sample_timeseries()
 
     # Lege Beispiel-Assets an
     save_asset(

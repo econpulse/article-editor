@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 from datetime import date
 from typing import Any, Literal, Union
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _new_block_id() -> str:
@@ -93,6 +93,79 @@ class FigureBlock(BaseModel):
     )
 
 
+ChartSeriesType = Literal["line", "step", "dot", "area", "bar", "stacked_bar"]
+
+_VALID_CHART_TYPES = ("line", "step", "dot", "area", "bar", "stacked_bar")
+
+
+class TimeSeriesItem(BaseModel):
+    ticker: str = Field(default="", description="Ticker in der Tabelle ts_db")
+    chart_type: ChartSeriesType = Field(default="line", description="Primäre Darstellungsart der Zeitreihe")
+    chart_types: list[ChartSeriesType] = Field(
+        default_factory=list,
+        description="Eine oder mehrere kombinierte Darstellungsarten derselben Zeitreihe (z.B. ['line', 'dot'] oder ['step', 'area'])",
+    )
+    label: str = Field(default="", description="Optionaler Legenden-Name (überschreibt ts_db.name)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_chart_types(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        raw_types = out.get("chart_types")
+        single_type = out.get("chart_type") or "line"
+        if single_type not in _VALID_CHART_TYPES:
+            single_type = "line"
+
+        cleaned_types: list[str] = []
+        if isinstance(raw_types, (list, tuple)):
+            for t in raw_types:
+                ts = str(t).strip()
+                if ts in _VALID_CHART_TYPES and ts not in cleaned_types:
+                    cleaned_types.append(ts)
+
+        if not cleaned_types:
+            cleaned_types = [single_type]
+
+        out["chart_types"] = cleaned_types
+        out["chart_type"] = cleaned_types[0]
+        return out
+
+
+class DbChartBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["db_chart"] = "db_chart"
+    title: str = Field(default="", description="Grafik-Titel")
+    subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
+    source: str = Field(default="Quelle: Bloomberg, LUKB Investment Office", description="Quellenangabe")
+    layout: Literal["column", "full"] = Field(
+        default="column",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+    start_date: str = Field(default="2022-01-01", description="Startdatum im Chart (YYYY-MM-DD)")
+    rebasing: Literal["none", "index_100"] = Field(
+        default="none",
+        description="'none' = Originalwerte, 'index_100' = Indexiert auf 100 am Startdatum",
+    )
+    series: list[TimeSeriesItem] = Field(
+        default_factory=lambda: [
+            TimeSeriesItem(ticker="SNB_RATE", chart_type="step", label=""),
+            TimeSeriesItem(ticker="ECB_RATE", chart_type="step", label=""),
+            TimeSeriesItem(ticker="FED_RATE", chart_type="step", label=""),
+        ],
+        description="Bis zu 5 Zeitreihen aus ts_db",
+    )
+    asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
+
+    @field_validator("series", mode="before")
+    @classmethod
+    def validate_series_seq(cls, v: Any) -> list[Any]:
+        if isinstance(v, (list, tuple)):
+            return list(v)[:5]
+        return []
+
+
 class TableColumn(BaseModel):
     field: str
     title: str
@@ -144,6 +217,7 @@ ContentBlock = Union[
     HeadingBlock,
     RichTextBlock,
     FigureBlock,
+    DbChartBlock,
     TableBlock,
     CalloutBlock,
     BoxStartBlock,
@@ -158,6 +232,8 @@ def parse_block(raw: dict[str, Any]) -> ContentBlock:
         return HeadingBlock.model_validate(raw)
     if btype == "figure":
         return FigureBlock.model_validate(raw)
+    if btype == "db_chart":
+        return DbChartBlock.model_validate(raw)
     if btype == "table":
         return TableBlock.model_validate(raw)
     if btype == "callout":

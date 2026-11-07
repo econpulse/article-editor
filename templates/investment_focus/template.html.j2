@@ -248,7 +248,8 @@
       font-weight: 500;
       color: var(--lukb-navy);
       font-size: 1.02rem;
-      margin: 0 0 3px 0;
+      line-height: 1.25;
+      margin: 0 0 1px 0;
     }
 
     .blk-box-subtitle {
@@ -256,7 +257,8 @@
       font-weight: 300;
       color: var(--lukb-muted);
       font-size: 0.85rem;
-      margin: 0 0 10px 0;
+      line-height: 1.3;
+      margin: 0 0 7px 0;
     }
 
     .blk-figure-img-container {
@@ -391,7 +393,7 @@
             <div class="blk-callout-content">{{ blk.html | safe }}</div>
           </aside>
 
-        {% elif blk.type == "figure" %}
+        {% elif blk.type in ("figure", "db_chart") %}
           <figure class="blk-figure {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
             {% if blk.title %}
               <div class="blk-box-title">{{ blk.title }}</div>

@@ -20,10 +20,12 @@ from database.repository import (
     get_asset,
     init_db_and_seed,
     list_articles,
+    list_available_tickers,
     save_article,
     save_asset,
 )
 from schemas.article import ArticleDocument
+from services.chart_generator import generate_db_chart_svg
 from services.renderer import (
     list_available_templates,
     render_pdf_bytes,
@@ -45,10 +47,11 @@ def _slugify_filename(title: str) -> str:
 
 
 def _collect_article_assets_map(doc: ArticleDocument) -> dict[str, str]:
-    """Lädt für alle Grafik-Blöcke eines Artikels die zugehörigen Data-URIs aus der DB."""
+    """Lädt für alle Grafik- und DB-Chart-Blöcke eines Artikels die zugehörigen Data-URIs."""
     assets_map: dict[str, str] = {}
     for blk in doc.blocks:
-        if blk.get("type") == "figure":
+        btype = blk.get("type")
+        if btype == "figure":
             aid = blk.get("asset_id", "")
             if aid and aid not in assets_map:
                 rec = get_asset(aid)
@@ -56,6 +59,12 @@ def _collect_article_assets_map(doc: ArticleDocument) -> dict[str, str]:
                     b64 = base64.b64encode(rec["data"]).decode("ascii")
                     mime = rec.get("mime_type", "image/svg+xml")
                     assets_map[aid] = f"data:{mime};base64,{b64}"
+        elif btype == "db_chart":
+            bid = blk.get("id", "")
+            if bid:
+                svg_markup = generate_db_chart_svg(blk)
+                b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+                assets_map[bid] = f"data:image/svg+xml;base64,{b64}"
     return assets_map
 
 
@@ -371,10 +380,18 @@ app_ui = ui.page_fluid(
                         **{"data-add-block-type": "richtext"},
                     ),
                     ui.tags.button(
-                        "+ Grafik (inkl. Titel/Untertitel)",
+                        "+ Grafik (Upload)",
                         type="button",
                         class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
                         **{"data-add-block-type": "figure"},
+                    ),
+                    ui.tags.button(
+                        "+ DB-Chart (Zeitreihe)",
+                        type="button",
+                        class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        style="border-color:#009FE3;background:#F0F9FF;color:#002855;",
+                        **{"data-add-block-type": "db_chart"},
+                        title="Zeitreihen-Diagramm direkt aus der MSSQL-Tabelle ts_db erstellen (max. 5 Ticker)",
                     ),
                     ui.tags.button(
                         "+ Tabelle (inkl. Excel-Paste)",
@@ -789,7 +806,12 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         assets_map = _collect_article_assets_map(doc)
         await session.send_custom_message(
             "lukb_load_article",
-            {"article": doc.model_dump(), "assets": assets_map, "self_session_id": session_id},
+            {
+                "article": doc.model_dump(),
+                "assets": assets_map,
+                "available_tickers": list_available_tickers(),
+                "self_session_id": session_id,
+            },
         )
         await _send_article_list(doc.id)
         await _send_preview(doc)
@@ -843,6 +865,27 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         if doc is not None:
             await _send_preview(doc)
 
+    # Einzelne DB-Chart-Vorschau im Block sofort aktualisieren
+    @reactive.effect
+    @reactive.event(input.lukb_preview_db_chart)
+    async def _on_preview_db_chart() -> None:
+        payload = input.lukb_preview_db_chart()
+        if not isinstance(payload, dict) or "block" not in payload:
+            return
+        blk = payload["block"]
+        bid = blk.get("id", "")
+        if not bid:
+            return
+        svg_markup = generate_db_chart_svg(blk)
+        b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+        await session.send_custom_message(
+            "lukb_db_chart_svg",
+            {
+                "block_id": bid,
+                "data_uri": f"data:image/svg+xml;base64,{b64}",
+            },
+        )
+
     # Live-Fokus-Meldung eines Autors (welcher Block / welches Feld wird gerade editiert?)
     @reactive.effect
     @reactive.event(input.lukb_collab_focus)
@@ -888,6 +931,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             current_article_id.set(merged_doc.id)
             current_doc.set(merged_doc)
 
+            save_info["assets"] = _collect_article_assets_map(merged_doc)
             await session.send_custom_message("lukb_autosave_ack", save_info)
             await _send_article_list(merged_doc.id)
             await _send_preview(merged_doc)

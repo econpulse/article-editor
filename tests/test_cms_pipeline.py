@@ -261,12 +261,107 @@ def test_concurrent_multi_author_block_merge():
     delete_article(base_doc.id)
 
 
+def test_db_chart_timeseries_block():
+    """
+    Prüft den Inhaltsblock `db_chart` (Grafik aus Datenbank `ts_db`):
+    - Abfrage verfügbarer Ticker aus `ts_db`
+    - Kombination aller 6 Chart-Typen (line, step, dot, area, bar, stacked_bar) mit max. 5 Tickern
+    - Originalwerte (`rebasing="none"`) sowie Indexierung auf 100 (`rebasing="index_100"`)
+    - Nahtloses Typst-PDF-, SVG-Preview- und Web-HTML5-Rendering
+    """
+    from database.repository import list_available_tickers, query_timeseries_data
+    from schemas.article import ArticleDocument
+    from services.chart_generator import generate_db_chart_svg
+
+    init_db_and_seed()
+    tickers = list_available_tickers()
+    assert len(tickers) >= 5
+    ticker_codes = {t["ticker"] for t in tickers}
+    assert {"SMI", "SP500", "SNB_RATE", "ECB_RATE", "EPS_CH", "EPS_US"}.issubset(ticker_codes)
+
+    ts_data = query_timeseries_data(["SMI", "snb_rate"], start_date="2023-01-01")
+    assert "SMI" in ts_data
+    assert "SNB_RATE" in ts_data
+    assert len(ts_data["SMI"]["points"]) >= 4
+
+    # 1. Kombination aus Stacked Bar, Bar, Step, Line und Dot
+    combo_block = {
+        "id": "blk_dbchart_combo",
+        "type": "db_chart",
+        "title": "Kombinierter Datenbank-Chart",
+        "subtitle": "Gewinnbeiträge und Leitzinsen seit 2022",
+        "source": "Quelle: ts_db, LUKB Investment Office",
+        "layout": "column",
+        "start_date": "2022-01-01",
+        "rebasing": "none",
+        # Übergabe als Tupel wie aus Shiny.setInputValue (6 Elemente -> wird auf max. 5 begrenzt)
+        "series": (
+            {"ticker": "EPS_CH", "chart_type": "stacked_bar", "label": "EPS Schweiz"},
+            {"ticker": "EPS_US", "chart_type": "stacked_bar", "label": "EPS USA"},
+            {"ticker": "EPS_EU", "chart_type": "bar", "label": "EPS Europa"},
+            {"ticker": "FED_RATE", "chart_type": "step", "label": "Fed Funds Rate"},
+            {"ticker": "ECB_RATE", "chart_type": "dot", "label": ""},
+            {"ticker": "SNB_RATE", "chart_type": "line", "label": "Wird auf 5 gekürzt"},
+        ),
+    }
+
+    # 2. Indexierter Vergleich (Startdatum = 100) mit Mehrfach-Typen pro Zeitreihe (z.B. step+area und line+dot)
+    indexed_block = {
+        "id": "blk_dbchart_idx",
+        "type": "db_chart",
+        "title": "Aktienmärkte im Vergleich (Indexiert = 100)",
+        "subtitle": "Relative Wertentwicklung seit 2022",
+        "source": "Quelle: Bloomberg, LUKB Investment Office",
+        "layout": "full",
+        "start_date": "2022-01-01",
+        "rebasing": "index_100",
+        "series": [
+            {"ticker": "SMI", "chart_types": ("step", "area"), "label": "SMI (CHF)"},
+            {"ticker": "SP500", "chart_types": ["line", "dot"], "label": "S&P 500"},
+            {"ticker": "STOXX600", "chart_type": "dot", "label": "STOXX Europe 600"},
+        ],
+    }
+
+    svg_combo = generate_db_chart_svg(combo_block)
+    assert svg_combo.startswith("<svg")
+    assert "EPS Schweiz" in svg_combo
+    assert "EZB Einlagesatz (EUR)" in svg_combo  # Automatischer Name aus ts_db
+    assert 'font-size="22.5"' in svg_combo  # Vergrösserte Achsenschrift im 1-spaltigen Format
+
+    svg_idx = generate_db_chart_svg(indexed_block)
+    assert svg_idx.startswith("<svg")
+    assert 'font-size="14.5"' in svg_idx  # Achsenschrift im 2-spaltigen Format ('full')
+    assert "stroke-dasharray=\"4,3\"" in svg_idx  # 100er-Referenzlinie
+    assert 'fill-opacity="0.18"' in svg_idx  # Step + Area Fläche
+
+    doc = ArticleDocument(
+        id="art-dbchart-test",
+        template_id="investment_focus",
+        blocks=[combo_block, indexed_block],
+    )
+    assert len(doc.blocks[0]["series"]) == 5, "Maximal 5 Ticker pro DB-Chart erlaubt"
+    assert doc.blocks[1]["series"][0]["chart_types"] == ["step", "area"]
+    assert doc.blocks[1]["series"][1]["chart_types"] == ["line", "dot"]
+
+    pdf_bytes = render_pdf_bytes(doc)
+    assert pdf_bytes.startswith(b"%PDF-")
+
+    svg_pages = render_preview_svg_pages(doc)
+    assert len(svg_pages) >= 1
+
+    html_out = render_web_html(doc)
+    assert "Kombinierter Datenbank-Chart" in html_out
+    assert "Aktienmärkte im Vergleich (Indexiert = 100)" in html_out
+    assert "data:image/svg+xml;base64," in html_out
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
     test_shiny_tuple_deserialization_in_pydantic()
     test_textbox_start_end_markers_grouping()
     test_concurrent_multi_author_block_merge()
+    test_db_chart_timeseries_block()
     test_full_cms_workflow()
     assert app is not None
     print("ALL TESTS PASSED SUCCESSFULLY!")

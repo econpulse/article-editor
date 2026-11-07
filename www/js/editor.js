@@ -9,7 +9,9 @@
   const state = {
     article: null,
     baseArticle: null, // Snapshot für 3-Wege-Merge bei gleichzeitigem Editieren
-    assetCache: {}, // asset_id -> data_uri
+    assetCache: {}, // asset_id / block_id -> data_uri
+    availableTickers: [], // [{ticker, name, min_date, max_date}, ...] aus ts_db
+    dbChartTimers: {}, // block_id -> timeoutId
     isDirty: false,
     autosaveTimer: null,
     sortableInstance: null,
@@ -245,6 +247,24 @@
         layout: "column",
       };
     }
+    if (type === "db_chart") {
+      return {
+        id: uid("blk"),
+        type: "db_chart",
+        title: "Zeitreihen-Vergleich",
+        subtitle: "Entwicklung seit Startdatum",
+        source: "Quelle: Bloomberg, LUKB Investment Office",
+        layout: "column",
+        start_date: "2022-01-01",
+        rebasing: "none",
+        series: [
+          { ticker: "SNB_RATE", chart_type: "step", label: "" },
+          { ticker: "ECB_RATE", chart_type: "step", label: "" },
+          { ticker: "FED_RATE", chart_type: "step", label: "" },
+        ],
+        asset_id: "",
+      };
+    }
     if (type === "table") {
       return {
         id: uid("blk"),
@@ -299,7 +319,9 @@
       case "richtext":
         return "Text-Absatz";
       case "figure":
-        return "Grafik-Container";
+        return "Grafik-Container (Upload)";
+      case "db_chart":
+        return "DB-Chart (Zeitreihe aus ts_db)";
       case "table":
         return "Daten-Tabelle";
       case "callout":
@@ -473,6 +495,8 @@
       buildCalloutBlockBody(body, blk);
     } else if (blk.type === "figure") {
       buildFigureBlockBody(body, blk);
+    } else if (blk.type === "db_chart") {
+      buildDbChartBlockBody(body, blk);
     } else if (blk.type === "table") {
       buildTableBlockBody(body, blk);
     }
@@ -666,6 +690,7 @@
     });
     layoutSel.addEventListener("change", function () {
       blk.layout = layoutSel.value;
+      requestDbChartPreview(blk, true);
       markDirty();
     });
     layoutWrap.appendChild(layoutLbl);
@@ -805,6 +830,469 @@
     container.appendChild(srcWrap);
   }
 
+  const LUKB_SERIES_COLORS = ["#002855", "#009FE3", "#C59B27", "#005A9C", "#6482A6"];
+
+  function ensureTickersDatalist() {
+    let dl = document.getElementById("lukb-ts-tickers-datalist");
+    if (!dl) {
+      dl = document.createElement("datalist");
+      dl.id = "lukb-ts-tickers-datalist";
+      document.body.appendChild(dl);
+    }
+    dl.innerHTML = "";
+    (state.availableTickers || []).forEach(function (t) {
+      const opt = document.createElement("option");
+      opt.value = t.ticker;
+      opt.label = t.name ? t.ticker + " — " + t.name : t.ticker;
+      dl.appendChild(opt);
+    });
+  }
+
+  function lookupTickerName(tickerStr) {
+    if (!tickerStr) return "";
+    const upper = String(tickerStr).trim().toUpperCase();
+    const found = (state.availableTickers || []).find(function (t) {
+      return String(t.ticker || "").toUpperCase() === upper;
+    });
+    return found && found.name ? found.name : "";
+  }
+
+  function requestDbChartPreview(blk, immediate) {
+    if (!blk || !blk.id || blk.type !== "db_chart") return;
+    if (state.dbChartTimers[blk.id]) {
+      clearTimeout(state.dbChartTimers[blk.id]);
+      delete state.dbChartTimers[blk.id];
+    }
+    const sendReq = function () {
+      if (window.Shiny && window.Shiny.setInputValue) {
+        window.Shiny.setInputValue(
+          "lukb_preview_db_chart",
+          {
+            block: deepClone(blk),
+            ts: Date.now(),
+          },
+          { priority: "event" }
+        );
+      }
+    };
+    if (immediate) {
+      sendReq();
+    } else {
+      state.dbChartTimers[blk.id] = setTimeout(sendReq, 220);
+    }
+  }
+
+  function buildDbChartBlockBody(container, blk) {
+    ensureTickersDatalist();
+
+    if (!Array.isArray(blk.series) || blk.series.length === 0) {
+      blk.series = [{ ticker: "SMI", chart_type: "line", label: "" }];
+    }
+    if (!blk.start_date) {
+      blk.start_date = "2022-01-01";
+    }
+    if (!blk.rebasing) {
+      blk.rebasing = "none";
+    }
+
+    // Zeile 1: Grafik-Titel & Layout-Breite
+    const topGrid = document.createElement("div");
+    topGrid.style.display = "grid";
+    topGrid.style.gridTemplateColumns = "1fr 190px";
+    topGrid.style.gap = "10px";
+    topGrid.style.marginBottom = "10px";
+
+    const titleWrap = document.createElement("div");
+    const titleLbl = document.createElement("label");
+    titleLbl.className = "field-label";
+    titleLbl.textContent = "Grafik-Titel (Yoga Sans Medium)";
+    const titleInp = document.createElement("input");
+    titleInp.type = "text";
+    titleInp.className = "cms-input font-medium";
+    titleInp.placeholder = "z.B. Leitzinsentwicklung oder Aktienmarktvergleich";
+    titleInp.value = blk.title || "";
+    titleInp.addEventListener("input", function () {
+      blk.title = titleInp.value;
+      markDirty();
+    });
+    titleWrap.appendChild(titleLbl);
+    titleWrap.appendChild(titleInp);
+
+    const layoutWrap = document.createElement("div");
+    const layoutLbl = document.createElement("label");
+    layoutLbl.className = "field-label";
+    layoutLbl.textContent = "Satz-Breite im PDF";
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      requestDbChartPreview(blk, true);
+      markDirty();
+    });
+    layoutWrap.appendChild(layoutLbl);
+    layoutWrap.appendChild(layoutSel);
+
+    topGrid.appendChild(titleWrap);
+    topGrid.appendChild(layoutWrap);
+    container.appendChild(topGrid);
+
+    // Zeile 2: Grafik-Untertitel
+    const subWrap = document.createElement("div");
+    subWrap.className = "field-group";
+    const subLbl = document.createElement("label");
+    subLbl.className = "field-label";
+    subLbl.textContent = "Grafik-Untertitel (z.B. Einheit, Indexierung, Zeitraum)";
+    const subInp = document.createElement("input");
+    subInp.type = "text";
+    subInp.className = "cms-input";
+    subInp.placeholder = "z.B. In Prozent oder Indexiert (Start = 100)";
+    subInp.value = blk.subtitle || "";
+    subInp.addEventListener("input", function () {
+      blk.subtitle = subInp.value;
+      markDirty();
+    });
+    subWrap.appendChild(subLbl);
+    subWrap.appendChild(subInp);
+    container.appendChild(subWrap);
+
+    // Zeile 3: Startdatum & Skalierung (Originalwerte vs. Indexiert 100)
+    const configGrid = document.createElement("div");
+    configGrid.className = "db-chart-config-bar";
+
+    const dateWrap = document.createElement("div");
+    const dateLbl = document.createElement("label");
+    dateLbl.className = "field-label";
+    dateLbl.textContent = "Startdatum im Chart";
+    const dateRow = document.createElement("div");
+    dateRow.style.display = "flex";
+    dateRow.style.gap = "6px";
+    dateRow.style.alignItems = "center";
+
+    const dateInp = document.createElement("input");
+    dateInp.type = "date";
+    dateInp.className = "cms-input";
+    dateInp.style.maxWidth = "155px";
+    dateInp.value = blk.start_date || "2022-01-01";
+    dateInp.addEventListener("change", function () {
+      blk.start_date = dateInp.value || "2022-01-01";
+      requestDbChartPreview(blk, true);
+      markDirty();
+    });
+    dateRow.appendChild(dateInp);
+
+    // Schnellwahl-Buttons für Startdatum
+    [
+      { label: "2021", date: "2021-01-01" },
+      { label: "2023", date: "2023-01-01" },
+      { label: "2025", date: "2025-01-01" },
+    ].forEach(function (preset) {
+      const pBtn = document.createElement("button");
+      pBtn.type = "button";
+      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+      pBtn.style.padding = "4px 7px";
+      pBtn.style.fontSize = "11px";
+      pBtn.textContent = preset.label;
+      pBtn.title = "Startdatum auf " + preset.date + " setzen";
+      pBtn.addEventListener("click", function () {
+        blk.start_date = preset.date;
+        dateInp.value = preset.date;
+        requestDbChartPreview(blk, true);
+        markDirty();
+      });
+      dateRow.appendChild(pBtn);
+    });
+
+    dateWrap.appendChild(dateLbl);
+    dateWrap.appendChild(dateRow);
+
+    const rebaseWrap = document.createElement("div");
+    const rebaseLbl = document.createElement("label");
+    rebaseLbl.className = "field-label";
+    rebaseLbl.textContent = "Darstellung / Skalierung";
+    const rebaseSel = document.createElement("select");
+    rebaseSel.className = "cms-select";
+    [
+      { val: "none", label: "Originalwerte (Rohdaten aus ts_db)" },
+      { val: "index_100", label: "Indexiert auf 100 (am Startdatum = 100)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.rebasing || "none") === o.val) opt.selected = true;
+      rebaseSel.appendChild(opt);
+    });
+    rebaseSel.addEventListener("change", function () {
+      blk.rebasing = rebaseSel.value;
+      requestDbChartPreview(blk, true);
+      markDirty();
+    });
+    rebaseWrap.appendChild(rebaseLbl);
+    rebaseWrap.appendChild(rebaseSel);
+
+    configGrid.appendChild(dateWrap);
+    configGrid.appendChild(rebaseWrap);
+    container.appendChild(configGrid);
+
+    // Zeile 4: Zeitreihen-Builder (maximal 5 Ticker)
+    const seriesSection = document.createElement("div");
+    seriesSection.className = "db-chart-series-section";
+
+    const seriesHeader = document.createElement("div");
+    seriesHeader.className = "db-chart-series-header";
+
+    const seriesTitle = document.createElement("span");
+    seriesTitle.className = "field-label";
+    seriesTitle.style.margin = "0";
+
+    const addSeriesBtn = document.createElement("button");
+    addSeriesBtn.type = "button";
+    addSeriesBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    addSeriesBtn.textContent = "+ Zeitreihe hinzufügen";
+
+    seriesHeader.appendChild(seriesTitle);
+    seriesHeader.appendChild(addSeriesBtn);
+    seriesSection.appendChild(seriesHeader);
+
+    const seriesListEl = document.createElement("div");
+    seriesListEl.className = "db-chart-series-list";
+    seriesSection.appendChild(seriesListEl);
+
+    // Schnell-Auswahl verfügbarer Ticker aus ts_db
+    if (Array.isArray(state.availableTickers) && state.availableTickers.length > 0) {
+      const catalogRow = document.createElement("div");
+      catalogRow.className = "db-chart-ticker-catalog";
+      const catLabel = document.createElement("span");
+      catLabel.className = "db-chart-catalog-label";
+      catLabel.textContent = "Verfügbare Ticker in ts_db (Klick zum Einfügen): ";
+      catalogRow.appendChild(catLabel);
+
+      state.availableTickers.forEach(function (item) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "db-ticker-chip";
+        chip.textContent = item.ticker;
+        chip.title = item.name ? item.ticker + " — " + item.name : item.ticker;
+        chip.addEventListener("click", function () {
+          const emptyRow = blk.series.find((s) => !s.ticker || !s.ticker.trim());
+          if (emptyRow) {
+            emptyRow.ticker = item.ticker;
+          } else if (blk.series.length < 5) {
+            blk.series.push({ ticker: item.ticker, chart_type: "line", label: "" });
+          } else {
+            blk.series[blk.series.length - 1].ticker = item.ticker;
+          }
+          renderSeriesRows();
+          requestDbChartPreview(blk, true);
+          markDirty();
+        });
+        catalogRow.appendChild(chip);
+      });
+      seriesSection.appendChild(catalogRow);
+    }
+
+    function renderSeriesRows() {
+      seriesListEl.innerHTML = "";
+      const count = blk.series.length;
+      seriesTitle.textContent =
+        "Zeitreihen aus ts_db (" +
+        count +
+        " / 5 Ticker — pro Reihe auch mehrere Typen wählbar, z.B. Line + Dot oder Step + Area)";
+      addSeriesBtn.disabled = count >= 5;
+
+      blk.series.forEach(function (sItem, sIdx) {
+        if (!Array.isArray(sItem.chart_types) || sItem.chart_types.length === 0) {
+          sItem.chart_types = [sItem.chart_type || "line"];
+        }
+        sItem.chart_type = sItem.chart_types[0];
+
+        const row = document.createElement("div");
+        row.className = "db-chart-series-row";
+
+        const colorDot = document.createElement("span");
+        colorDot.className = "db-series-color-dot";
+        colorDot.style.backgroundColor = LUKB_SERIES_COLORS[sIdx % LUKB_SERIES_COLORS.length];
+        colorDot.title = "Farbe der Zeitreihe " + (sIdx + 1);
+
+        const tickerInp = document.createElement("input");
+        tickerInp.type = "text";
+        tickerInp.className = "cms-input font-medium";
+        tickerInp.setAttribute("list", "lukb-ts-tickers-datalist");
+        tickerInp.placeholder = "Ticker (z.B. SMI)";
+        tickerInp.value = sItem.ticker || "";
+
+        const typeTogglesWrap = document.createElement("div");
+        typeTogglesWrap.className = "db-series-type-toggles";
+        [
+          { val: "line", label: "Line", title: "Linie (kombinierbar mit Dot, Area etc.)" },
+          { val: "step", label: "Step", title: "Stufenlinie (kombinierbar mit Area, Dot etc.)" },
+          { val: "dot", label: "Dot", title: "Datenpunkte (kombinierbar mit Line, Step, Area, Bar)" },
+          { val: "area", label: "Area", title: "Fläche (kombinierbar mit Line, Step, Dot)" },
+          { val: "bar", label: "Bar", title: "Gruppierte Balken" },
+          { val: "stacked_bar", label: "Stacked", title: "Gestapelte Balken" },
+        ].forEach(function (optInfo) {
+          const tBtn = document.createElement("button");
+          tBtn.type = "button";
+          const isActive = sItem.chart_types.indexOf(optInfo.val) !== -1;
+          tBtn.className = "db-type-toggle-btn" + (isActive ? " active" : "");
+          tBtn.textContent = optInfo.label;
+          tBtn.title = optInfo.title;
+          tBtn.addEventListener("click", function () {
+            const cur = Array.isArray(sItem.chart_types)
+              ? sItem.chart_types.slice()
+              : [sItem.chart_type || "line"];
+            const existingIdx = cur.indexOf(optInfo.val);
+            if (existingIdx !== -1) {
+              // Mindestens ein Typ muss pro Zeitreihe aktiv bleiben
+              if (cur.length > 1) {
+                cur.splice(existingIdx, 1);
+              }
+            } else {
+              // Bar & Stacked Bar schliessen sich innerhalb derselben Zeitreihe gegenseitig aus
+              if (optInfo.val === "bar") {
+                const sbIdx = cur.indexOf("stacked_bar");
+                if (sbIdx !== -1) cur.splice(sbIdx, 1);
+              } else if (optInfo.val === "stacked_bar") {
+                const bIdx = cur.indexOf("bar");
+                if (bIdx !== -1) cur.splice(bIdx, 1);
+              }
+              cur.push(optInfo.val);
+            }
+            sItem.chart_types = cur;
+            sItem.chart_type = cur[0];
+            renderSeriesRows();
+            requestDbChartPreview(blk, true);
+            markDirty();
+          });
+          typeTogglesWrap.appendChild(tBtn);
+        });
+
+        const labelInp = document.createElement("input");
+        labelInp.type = "text";
+        labelInp.className = "cms-input";
+        const dbNameHint = lookupTickerName(sItem.ticker);
+        labelInp.placeholder = dbNameHint
+          ? "Legende: " + dbNameHint
+          : "Legenden-Name (optional, sonst ts_db.name)";
+        labelInp.value = sItem.label || "";
+
+        tickerInp.addEventListener("input", function () {
+          sItem.ticker = tickerInp.value.trim();
+          const hint = lookupTickerName(sItem.ticker);
+          labelInp.placeholder = hint
+            ? "Legende: " + hint
+            : "Legenden-Name (optional, sonst ts_db.name)";
+          requestDbChartPreview(blk, false);
+          markDirty();
+        });
+
+        labelInp.addEventListener("input", function () {
+          sItem.label = labelInp.value;
+          requestDbChartPreview(blk, false);
+          markDirty();
+        });
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn-icon-only danger";
+        delBtn.title = "Zeitreihe entfernen";
+        delBtn.textContent = "✕";
+        delBtn.disabled = blk.series.length <= 1;
+        delBtn.addEventListener("click", function () {
+          if (blk.series.length <= 1) return;
+          blk.series.splice(sIdx, 1);
+          renderSeriesRows();
+          requestDbChartPreview(blk, true);
+          markDirty();
+        });
+
+        row.appendChild(colorDot);
+        row.appendChild(tickerInp);
+        row.appendChild(typeTogglesWrap);
+        row.appendChild(labelInp);
+        row.appendChild(delBtn);
+        seriesListEl.appendChild(row);
+      });
+    }
+
+    addSeriesBtn.addEventListener("click", function () {
+      if (blk.series.length >= 5) return;
+      blk.series.push({ ticker: "", chart_type: "line", chart_types: ["line"], label: "" });
+      renderSeriesRows();
+      markDirty();
+    });
+
+    renderSeriesRows();
+    container.appendChild(seriesSection);
+
+    // Zeile 5: Live-SVG-Vorschau im Block
+    const previewBox = document.createElement("div");
+    previewBox.className = "db-chart-preview-box";
+
+    const previewImg = document.createElement("img");
+    previewImg.className = "figure-preview-thumb db-chart-preview-img";
+    previewImg.dataset.blockId = blk.id;
+    previewImg.alt = blk.title || "DB-Chart Vorschau";
+    if (state.assetCache[blk.id]) {
+      previewImg.src = state.assetCache[blk.id];
+    } else {
+      requestDbChartPreview(blk, true);
+    }
+    previewBox.appendChild(previewImg);
+
+    const previewFooter = document.createElement("div");
+    previewFooter.style.display = "flex";
+    previewFooter.style.justifyContent = "space-between";
+    previewFooter.style.alignItems = "center";
+    previewFooter.style.marginTop = "4px";
+
+    const hintSpan = document.createElement("span");
+    hintSpan.style.fontSize = "11.5px";
+    hintSpan.style.color = "#5A687C";
+    hintSpan.textContent = "Direktabfrage aus MSSQL-Tabelle ts_db (LUKB Vektor-SVG)";
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.type = "button";
+    refreshBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    refreshBtn.textContent = "↻ Daten aus ts_db neu laden";
+    refreshBtn.addEventListener("click", function () {
+      requestDbChartPreview(blk, true);
+      markDirty();
+    });
+
+    previewFooter.appendChild(hintSpan);
+    previewFooter.appendChild(refreshBtn);
+    previewBox.appendChild(previewFooter);
+    container.appendChild(previewBox);
+
+    // Zeile 6: Quellenangabe
+    const srcWrap = document.createElement("div");
+    const srcLbl = document.createElement("label");
+    srcLbl.className = "field-label";
+    srcLbl.textContent = "Quellenangabe / Fussnote unter der Grafik";
+    const srcInp = document.createElement("input");
+    srcInp.type = "text";
+    srcInp.className = "cms-input";
+    srcInp.placeholder = "Quelle: Bloomberg, LUKB Investment Office";
+    srcInp.value = blk.source || "";
+    srcInp.addEventListener("input", function () {
+      blk.source = srcInp.value;
+      markDirty();
+    });
+    srcWrap.appendChild(srcLbl);
+    srcWrap.appendChild(srcInp);
+    container.appendChild(srcWrap);
+  }
+
   function buildTableBlockBody(container, blk) {
     // Zeile 1: Tabellen-Titel & Satz-Breite
     const topGrid = document.createElement("div");
@@ -846,6 +1334,7 @@
     });
     layoutSel.addEventListener("change", function () {
       blk.layout = layoutSel.value;
+      requestDbChartPreview(blk, true);
       markDirty();
     });
     layoutWrap.appendChild(layoutLbl);
@@ -1962,6 +2451,10 @@
       state.isDirty = false;
       state.article = msg.article;
       state.baseArticle = deepClone(msg.article);
+      if (Array.isArray(msg.available_tickers)) {
+        state.availableTickers = msg.available_tickers;
+        ensureTickersDatalist();
+      }
       if (msg.assets) {
         Object.keys(msg.assets).forEach(function (k) {
           state.assetCache[k] = msg.assets[k];
@@ -1991,12 +2484,35 @@
 
     // 3. Bestätigt erfolgreichen Autosave
     window.Shiny.addCustomMessageHandler("lukb_autosave_ack", function (msg) {
+      if (msg.assets) {
+        Object.keys(msg.assets).forEach(function (k) {
+          state.assetCache[k] = msg.assets[k];
+          const chartImg = document.querySelector(
+            '.db-chart-preview-img[data-block-id="' + k + '"]'
+          );
+          if (chartImg) {
+            chartImg.src = msg.assets[k];
+          }
+        });
+      }
       if (msg.article && !state.isDirty) {
         state.baseArticle = deepClone(msg.article);
       }
       if (!state.isDirty) {
         const suffix = msg.merged ? " (mit Co-Autor zusammengeführt)" : "";
         setAutosaveIndicator("saved", "Gespeichert um " + (msg.saved_at || "") + suffix);
+      }
+    });
+
+    // 3a. Aktualisiert einzelne DB-Chart-SVG-Vorschau im Block sofort
+    window.Shiny.addCustomMessageHandler("lukb_db_chart_svg", function (msg) {
+      if (!msg || !msg.block_id || !msg.data_uri) return;
+      state.assetCache[msg.block_id] = msg.data_uri;
+      const chartImg = document.querySelector(
+        '.db-chart-preview-img[data-block-id="' + msg.block_id + '"]'
+      );
+      if (chartImg) {
+        chartImg.src = msg.data_uri;
       }
     });
 

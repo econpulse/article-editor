@@ -188,16 +188,20 @@
     below: 1.1em
   )[
     #if blk.title != "" [
-      #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
-      #v(2pt)
+      #block(above: 0pt, below: if blk.subtitle != "" { 2.5pt } else { 5pt })[
+        #set par(leading: 0.28em, justify: false)
+        #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
+      ]
     ]
     #if blk.subtitle != "" [
-      #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
-      #v(6pt)
+      #block(above: 0pt, below: 5pt)[
+        #set par(leading: 0.28em, justify: false)
+        #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
+      ]
     ]
     #if blk.resolved_image != "" [
       #align(center)[
-        #image(blk.resolved_image, width: if blk.layout == "full" { 92% } else { 100% })
+        #image(blk.resolved_image, width: 100%)
       ]
     ] else [
       #rect(
@@ -252,12 +256,16 @@
     below: 1.1em
   )[
     #if blk.title != "" [
-      #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
-      #v(2pt)
+      #block(above: 0pt, below: if blk.subtitle != "" { 2.5pt } else { 5pt })[
+        #set par(leading: 0.28em, justify: false)
+        #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
+      ]
     ]
     #if blk.subtitle != "" [
-      #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
-      #v(6pt)
+      #block(above: 0pt, below: 5pt)[
+        #set par(leading: 0.28em, justify: false)
+        #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
+      ]
     ]
     #table(
       columns: col-widths,
@@ -317,7 +325,7 @@
     parbreak()
   } else if blk.type == "callout" {
     render-callout(blk.title, blk.typst_markup)
-  } else if blk.type == "figure" {
+  } else if blk.type in ("figure", "db_chart") {
     let bcopy = blk
     if in-box {
       bcopy.insert("layout", "column")
@@ -427,7 +435,7 @@
   let runs = ()
   let curr-cols = ()
   for blk in blocks {
-    let is-full = (blk.type in ("figure", "table")) and (blk.at("layout", default: "column") == "full")
+    let is-full = (blk.type in ("figure", "db_chart", "table")) and (blk.at("layout", default: "column") == "full")
     if is-full {
       if curr-cols.len() > 0 {
         runs.push((kind: "cols", items: curr-cols))
