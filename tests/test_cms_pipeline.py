@@ -269,7 +269,7 @@ def test_db_chart_timeseries_block():
     - Originalwerte (`rebasing="none"`) sowie Indexierung auf 100 (`rebasing="index_100"`)
     - Nahtloses Typst-PDF-, SVG-Preview- und Web-HTML5-Rendering
     """
-    from database.repository import list_available_tickers, query_timeseries_data
+    from database.repository import list_available_tickers, query_timeseries_data, search_tickers
     from schemas.article import ArticleDocument
     from services.chart_generator import generate_db_chart_svg
 
@@ -278,6 +278,13 @@ def test_db_chart_timeseries_block():
     assert len(tickers) >= 5
     ticker_codes = {t["ticker"] for t in tickers}
     assert {"SMI", "SP500", "SNB_RATE", "ECB_RATE", "EPS_CH", "EPS_US"}.issubset(ticker_codes)
+
+    # Schnelle Ticker-Suche prüfen (Prefix -> Substring Ticker -> Substring Name, mit Limit)
+    prefix_hits = search_tickers("EPS", limit=5)
+    assert len(prefix_hits) >= 3
+    assert all(h["ticker"].startswith("EPS") for h in prefix_hits[:3])
+    name_hits = search_tickers("Leitzins", limit=5)
+    assert any(h["ticker"] == "SNB_RATE" for h in name_hits)
 
     ts_data = query_timeseries_data(["SMI", "snb_rate"], start_date="2023-01-01")
     assert "SMI" in ts_data

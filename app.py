@@ -23,6 +23,7 @@ from database.repository import (
     list_available_tickers,
     save_article,
     save_asset,
+    search_tickers,
 )
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
@@ -809,7 +810,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             {
                 "article": doc.model_dump(),
                 "assets": assets_map,
-                "available_tickers": list_available_tickers(),
+                "available_tickers": list_available_tickers(limit=25),
                 "self_session_id": session_id,
             },
         )
@@ -883,6 +884,25 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             {
                 "block_id": bid,
                 "data_uri": f"data:image/svg+xml;base64,{b64}",
+            },
+        )
+
+    # Schnelle Ticker-Autovervollständigung für tausende Ticker in ts_db
+    @reactive.effect
+    @reactive.event(input.lukb_search_tickers)
+    async def _on_search_tickers() -> None:
+        payload = input.lukb_search_tickers()
+        if not isinstance(payload, dict):
+            return
+        query = str(payload.get("query", ""))
+        req_id = payload.get("request_id", 0)
+        results = search_tickers(query=query, limit=15)
+        await session.send_custom_message(
+            "lukb_ticker_suggestions",
+            {
+                "request_id": req_id,
+                "query": query,
+                "results": results,
             },
         )
 

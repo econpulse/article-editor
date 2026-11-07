@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import math
+import time
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any
@@ -477,41 +478,95 @@ def _coerce_to_date(val: Any) -> date | None:
     return None
 
 
-def list_available_tickers() -> list[dict[str, Any]]:
+_TICKER_CATALOG_CACHE: list[dict[str, str]] | None = None
+_TICKER_CACHE_TS: float = 0.0
+_TICKER_CACHE_TTL_SEC: float = 900.0  # 15 Minuten In-Memory-Cache für Tausende Ticker
+
+
+def _get_cached_ticker_catalog(force_refresh: bool = False) -> list[dict[str, str]]:
     """
-    Liefert alle in `ts_db` vorhandenen Ticker samt Namen und Datumsbereich
-    für die Autovervollständigung im Editor.
+    Lädt das Verzeichnis eindeutiger `(ticker, name)`-Paare aus `ts_db` einmalig in den
+    Server-Speicher (ohne teure MIN/MAX-Datumsaggregation über Millionen Zeilen).
+    Dadurch antwortet die Ticker-Autovervollständigung auch bei Tausenden Tickern in < 1 ms.
     """
+    global _TICKER_CATALOG_CACHE, _TICKER_CACHE_TS
+    now_ts = time.monotonic()
+    if (
+        not force_refresh
+        and _TICKER_CATALOG_CACHE is not None
+        and (now_ts - _TICKER_CACHE_TS) < _TICKER_CACHE_TTL_SEC
+    ):
+        return _TICKER_CATALOG_CACHE
+
     try:
         with get_db_session() as session:
-            stmt = (
-                select(
-                    TimeSeriesModel.ticker,
-                    func.max(TimeSeriesModel.name).label("name"),
-                    func.min(TimeSeriesModel.date).label("min_date"),
-                    func.max(TimeSeriesModel.date).label("max_date"),
-                )
-                .group_by(TimeSeriesModel.ticker)
-                .order_by(TimeSeriesModel.ticker.asc())
-            )
+            stmt = select(TimeSeriesModel.ticker, TimeSeriesModel.name).distinct()
             rows = session.execute(stmt).all()
-            out: list[dict[str, Any]] = []
+            by_upper: dict[str, dict[str, str]] = {}
             for r in rows:
                 if not r.ticker:
                     continue
-                min_d = _coerce_to_date(r.min_date)
-                max_d = _coerce_to_date(r.max_date)
-                out.append(
-                    {
-                        "ticker": str(r.ticker).strip(),
-                        "name": str(r.name or r.ticker).strip(),
-                        "min_date": min_d.isoformat() if min_d else "",
-                        "max_date": max_d.isoformat() if max_d else "",
+                t_clean = str(r.ticker).strip()
+                if not t_clean:
+                    continue
+                u_key = t_clean.upper()
+                n_clean = str(r.name or "").strip()
+                if u_key not in by_upper or (not by_upper[u_key]["name"] and n_clean):
+                    by_upper[u_key] = {
+                        "ticker": t_clean,
+                        "name": n_clean or t_clean,
+                        "_t_upper": u_key,
+                        "_n_upper": (n_clean or t_clean).upper(),
                     }
-                )
-            return out
+            catalog = sorted(by_upper.values(), key=lambda x: x["_t_upper"])
+            _TICKER_CATALOG_CACHE = catalog
+            _TICKER_CACHE_TS = now_ts
+            return catalog
     except Exception:
-        return []
+        return _TICKER_CATALOG_CACHE or []
+
+
+def search_tickers(query: str = "", limit: int = 15) -> list[dict[str, str]]:
+    """
+    Durchsucht den In-Memory-Ticker-Katalog nach Ticker-Kürzel oder Zeitreihen-Namen
+    und gibt maximal `limit` Treffer zurück (Präfix-Treffer zuerst, dann Teilstring-Treffer).
+    """
+    catalog = _get_cached_ticker_catalog()
+    q = (query or "").strip().upper()
+    max_items = max(1, min(50, int(limit or 15)))
+
+    if not q:
+        return [{"ticker": it["ticker"], "name": it["name"]} for it in catalog[:max_items]]
+
+    prefix_matches: list[dict[str, str]] = []
+    ticker_sub_matches: list[dict[str, str]] = []
+    name_sub_matches: list[dict[str, str]] = []
+
+    for it in catalog:
+        tu = it["_t_upper"]
+        nu = it["_n_upper"]
+        if tu.startswith(q):
+            prefix_matches.append({"ticker": it["ticker"], "name": it["name"]})
+            if len(prefix_matches) >= max_items:
+                break
+        elif q in tu:
+            if len(prefix_matches) + len(ticker_sub_matches) < max_items:
+                ticker_sub_matches.append({"ticker": it["ticker"], "name": it["name"]})
+        elif q in nu:
+            if len(prefix_matches) + len(ticker_sub_matches) + len(name_sub_matches) < max_items:
+                name_sub_matches.append({"ticker": it["ticker"], "name": it["name"]})
+
+    combined = prefix_matches + ticker_sub_matches + name_sub_matches
+    return combined[:max_items]
+
+
+def list_available_tickers(limit: int | None = None) -> list[dict[str, Any]]:
+    """
+    Liefert Ticker samt Namen aus dem schnellen Katalog-Cache.
+    """
+    catalog = _get_cached_ticker_catalog()
+    items = catalog if limit is None else catalog[: max(1, int(limit))]
+    return [{"ticker": it["ticker"], "name": it["name"]} for it in items]
 
 
 def query_timeseries_data(

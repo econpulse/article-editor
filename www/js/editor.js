@@ -10,7 +10,9 @@
     article: null,
     baseArticle: null, // Snapshot für 3-Wege-Merge bei gleichzeitigem Editieren
     assetCache: {}, // asset_id / block_id -> data_uri
-    availableTickers: [], // [{ticker, name, min_date, max_date}, ...] aus ts_db
+    availableTickers: [], // Initiale Top-Ticker [{ticker, name}, ...] aus ts_db
+    tickerNameMap: {}, // O(1) Lookup: UPPERCASE_TICKER -> Name
+    tickerQueryCache: {}, // Schneller Client-Cache: queryLower -> [{ticker, name}, ...]
     dbChartTimers: {}, // block_id -> timeoutId
     isDirty: false,
     autosaveTimer: null,
@@ -832,29 +834,256 @@
 
   const LUKB_SERIES_COLORS = ["#002855", "#009FE3", "#C59B27", "#005A9C", "#6482A6"];
 
-  function ensureTickersDatalist() {
-    let dl = document.getElementById("lukb-ts-tickers-datalist");
-    if (!dl) {
-      dl = document.createElement("datalist");
-      dl.id = "lukb-ts-tickers-datalist";
-      document.body.appendChild(dl);
-    }
-    dl.innerHTML = "";
-    (state.availableTickers || []).forEach(function (t) {
-      const opt = document.createElement("option");
-      opt.value = t.ticker;
-      opt.label = t.name ? t.ticker + " — " + t.name : t.ticker;
-      dl.appendChild(opt);
+  function indexTickerItems(items) {
+    if (!Array.isArray(items)) return;
+    items.forEach(function (t) {
+      if (t && t.ticker) {
+        state.tickerNameMap[String(t.ticker).trim().toUpperCase()] = t.name || "";
+      }
     });
   }
 
   function lookupTickerName(tickerStr) {
     if (!tickerStr) return "";
     const upper = String(tickerStr).trim().toUpperCase();
-    const found = (state.availableTickers || []).find(function (t) {
-      return String(t.ticker || "").toUpperCase() === upper;
+    return state.tickerNameMap[upper] || "";
+  }
+
+  // Schneller, leichtgewichtiger Autocomplete-Dialog für tausende Ticker in ts_db
+  const tickerSuggest = {
+    popoverEl: null,
+    activeInput: null,
+    onSelectCallback: null,
+    items: [],
+    activeIndex: -1,
+    requestId: 0,
+    debounceTimer: null,
+  };
+
+  function ensureTickerSuggestPopover() {
+    if (tickerSuggest.popoverEl) return tickerSuggest.popoverEl;
+    const pop = document.createElement("div");
+    pop.id = "lukb-ticker-suggest-popover";
+    pop.className = "db-ticker-suggest-popover";
+    pop.style.display = "none";
+    document.body.appendChild(pop);
+    tickerSuggest.popoverEl = pop;
+
+    window.addEventListener(
+      "scroll",
+      function (ev) {
+        if (
+          tickerSuggest.popoverEl &&
+          tickerSuggest.popoverEl.style.display !== "none" &&
+          ev.target !== tickerSuggest.popoverEl
+        ) {
+          positionTickerSuggestPopover();
+        }
+      },
+      true
+    );
+    window.addEventListener("resize", function () {
+      if (tickerSuggest.popoverEl && tickerSuggest.popoverEl.style.display !== "none") {
+        positionTickerSuggestPopover();
+      }
     });
-    return found && found.name ? found.name : "";
+    return pop;
+  }
+
+  function positionTickerSuggestPopover() {
+    const pop = tickerSuggest.popoverEl;
+    const inp = tickerSuggest.activeInput;
+    if (!pop || !inp || !document.body.contains(inp)) {
+      closeTickerSuggestPopover();
+      return;
+    }
+    const rect = inp.getBoundingClientRect();
+    pop.style.left = Math.round(rect.left) + "px";
+    pop.style.top = Math.round(rect.bottom + 4) + "px";
+    pop.style.minWidth = Math.max(290, Math.round(rect.width)) + "px";
+  }
+
+  function closeTickerSuggestPopover() {
+    if (tickerSuggest.debounceTimer) {
+      clearTimeout(tickerSuggest.debounceTimer);
+      tickerSuggest.debounceTimer = null;
+    }
+    if (tickerSuggest.popoverEl) {
+      tickerSuggest.popoverEl.style.display = "none";
+      tickerSuggest.popoverEl.innerHTML = "";
+    }
+    tickerSuggest.items = [];
+    tickerSuggest.activeIndex = -1;
+  }
+
+  function renderTickerSuggestItems(results) {
+    const pop = ensureTickerSuggestPopover();
+    if (!tickerSuggest.activeInput || document.activeElement !== tickerSuggest.activeInput) {
+      closeTickerSuggestPopover();
+      return;
+    }
+    indexTickerItems(results);
+    tickerSuggest.items = Array.isArray(results) ? results : [];
+    tickerSuggest.activeIndex = tickerSuggest.items.length > 0 ? 0 : -1;
+    pop.innerHTML = "";
+
+    if (tickerSuggest.items.length === 0) {
+      const emptyEl = document.createElement("div");
+      emptyEl.className = "db-ticker-suggest-empty";
+      emptyEl.textContent = "Kein passender Ticker in ts_db gefunden";
+      pop.appendChild(emptyEl);
+      positionTickerSuggestPopover();
+      pop.style.display = "block";
+      return;
+    }
+
+    tickerSuggest.items.forEach(function (item, idx) {
+      const rowEl = document.createElement("div");
+      rowEl.className =
+        "db-ticker-suggest-item" + (idx === tickerSuggest.activeIndex ? " active" : "");
+
+      const codeSpan = document.createElement("span");
+      codeSpan.className = "db-ticker-suggest-code";
+      codeSpan.textContent = item.ticker;
+
+      const nameSpan = document.createElement("span");
+      nameSpan.className = "db-ticker-suggest-name";
+      nameSpan.textContent = item.name || "";
+
+      rowEl.appendChild(codeSpan);
+      rowEl.appendChild(nameSpan);
+
+      rowEl.addEventListener("mouseenter", function () {
+        tickerSuggest.activeIndex = idx;
+        updateTickerSuggestHighlight();
+      });
+
+      rowEl.addEventListener("mousedown", function (ev) {
+        ev.preventDefault(); // Fokus auf Input behalten
+        if (tickerSuggest.onSelectCallback) {
+          tickerSuggest.onSelectCallback(item);
+        }
+        closeTickerSuggestPopover();
+      });
+
+      pop.appendChild(rowEl);
+    });
+
+    positionTickerSuggestPopover();
+    pop.style.display = "block";
+  }
+
+  function updateTickerSuggestHighlight() {
+    if (!tickerSuggest.popoverEl) return;
+    const children = tickerSuggest.popoverEl.querySelectorAll(".db-ticker-suggest-item");
+    children.forEach(function (el, idx) {
+      if (idx === tickerSuggest.activeIndex) {
+        el.classList.add("active");
+        if (el.scrollIntoView) {
+          el.scrollIntoView({ block: "nearest" });
+        }
+      } else {
+        el.classList.remove("active");
+      }
+    });
+  }
+
+  function triggerTickerSuggestQuery(queryStr) {
+    const qNorm = String(queryStr || "").trim().toLowerCase();
+    if (state.tickerQueryCache[qNorm]) {
+      renderTickerSuggestItems(state.tickerQueryCache[qNorm]);
+      return;
+    }
+    if (qNorm === "" && Array.isArray(state.availableTickers) && state.availableTickers.length > 0) {
+      const initialSlice = state.availableTickers.slice(0, 15);
+      state.tickerQueryCache[""] = initialSlice;
+      renderTickerSuggestItems(initialSlice);
+      return;
+    }
+    if (tickerSuggest.debounceTimer) {
+      clearTimeout(tickerSuggest.debounceTimer);
+    }
+    tickerSuggest.debounceTimer = setTimeout(function () {
+      const reqId = ++tickerSuggest.requestId;
+      if (window.Shiny && window.Shiny.setInputValue) {
+        window.Shiny.setInputValue(
+          "lukb_search_tickers",
+          {
+            query: queryStr || "",
+            request_id: reqId,
+            ts: Date.now(),
+          },
+          { priority: "event" }
+        );
+      }
+    }, 80);
+  }
+
+  function attachTickerAutocomplete(inputEl, onSelect) {
+    inputEl.setAttribute("autocomplete", "off");
+    inputEl.setAttribute("spellcheck", "false");
+
+    inputEl.addEventListener("focus", function () {
+      tickerSuggest.activeInput = inputEl;
+      tickerSuggest.onSelectCallback = onSelect;
+      triggerTickerSuggestQuery(inputEl.value);
+    });
+
+    inputEl.addEventListener("input", function () {
+      tickerSuggest.activeInput = inputEl;
+      tickerSuggest.onSelectCallback = onSelect;
+      triggerTickerSuggestQuery(inputEl.value);
+    });
+
+    inputEl.addEventListener("keydown", function (ev) {
+      if (!tickerSuggest.popoverEl || tickerSuggest.popoverEl.style.display === "none") {
+        if (ev.key === "ArrowDown") {
+          tickerSuggest.activeInput = inputEl;
+          tickerSuggest.onSelectCallback = onSelect;
+          triggerTickerSuggestQuery(inputEl.value);
+          ev.preventDefault();
+        }
+        return;
+      }
+      if (ev.key === "ArrowDown") {
+        ev.preventDefault();
+        if (tickerSuggest.items.length > 0) {
+          tickerSuggest.activeIndex =
+            (tickerSuggest.activeIndex + 1) % tickerSuggest.items.length;
+          updateTickerSuggestHighlight();
+        }
+      } else if (ev.key === "ArrowUp") {
+        ev.preventDefault();
+        if (tickerSuggest.items.length > 0) {
+          tickerSuggest.activeIndex =
+            (tickerSuggest.activeIndex - 1 + tickerSuggest.items.length) %
+            tickerSuggest.items.length;
+          updateTickerSuggestHighlight();
+        }
+      } else if (ev.key === "Enter") {
+        if (
+          tickerSuggest.activeIndex >= 0 &&
+          tickerSuggest.activeIndex < tickerSuggest.items.length
+        ) {
+          ev.preventDefault();
+          const chosen = tickerSuggest.items[tickerSuggest.activeIndex];
+          if (onSelect && chosen) {
+            onSelect(chosen);
+          }
+          closeTickerSuggestPopover();
+        }
+      } else if (ev.key === "Escape" || ev.key === "Tab") {
+        closeTickerSuggestPopover();
+      }
+    });
+
+    inputEl.addEventListener("blur", function () {
+      setTimeout(function () {
+        if (document.activeElement !== tickerSuggest.activeInput) {
+          closeTickerSuggestPopover();
+        }
+      }, 120);
+    });
   }
 
   function requestDbChartPreview(blk, immediate) {
@@ -883,8 +1112,6 @@
   }
 
   function buildDbChartBlockBody(container, blk) {
-    ensureTickersDatalist();
-
     if (!Array.isArray(blk.series) || blk.series.length === 0) {
       blk.series = [{ ticker: "SMI", chart_type: "line", label: "" }];
     }
@@ -1067,39 +1294,6 @@
     seriesListEl.className = "db-chart-series-list";
     seriesSection.appendChild(seriesListEl);
 
-    // Schnell-Auswahl verfügbarer Ticker aus ts_db
-    if (Array.isArray(state.availableTickers) && state.availableTickers.length > 0) {
-      const catalogRow = document.createElement("div");
-      catalogRow.className = "db-chart-ticker-catalog";
-      const catLabel = document.createElement("span");
-      catLabel.className = "db-chart-catalog-label";
-      catLabel.textContent = "Verfügbare Ticker in ts_db (Klick zum Einfügen): ";
-      catalogRow.appendChild(catLabel);
-
-      state.availableTickers.forEach(function (item) {
-        const chip = document.createElement("button");
-        chip.type = "button";
-        chip.className = "db-ticker-chip";
-        chip.textContent = item.ticker;
-        chip.title = item.name ? item.ticker + " — " + item.name : item.ticker;
-        chip.addEventListener("click", function () {
-          const emptyRow = blk.series.find((s) => !s.ticker || !s.ticker.trim());
-          if (emptyRow) {
-            emptyRow.ticker = item.ticker;
-          } else if (blk.series.length < 5) {
-            blk.series.push({ ticker: item.ticker, chart_type: "line", label: "" });
-          } else {
-            blk.series[blk.series.length - 1].ticker = item.ticker;
-          }
-          renderSeriesRows();
-          requestDbChartPreview(blk, true);
-          markDirty();
-        });
-        catalogRow.appendChild(chip);
-      });
-      seriesSection.appendChild(catalogRow);
-    }
-
     function renderSeriesRows() {
       seriesListEl.innerHTML = "";
       const count = blk.series.length;
@@ -1126,8 +1320,7 @@
         const tickerInp = document.createElement("input");
         tickerInp.type = "text";
         tickerInp.className = "cms-input font-medium";
-        tickerInp.setAttribute("list", "lukb-ts-tickers-datalist");
-        tickerInp.placeholder = "Ticker (z.B. SMI)";
+        tickerInp.placeholder = "Ticker suchen (z.B. SMI)";
         tickerInp.value = sItem.ticker || "";
 
         const typeTogglesWrap = document.createElement("div");
@@ -1192,6 +1385,21 @@
             ? "Legende: " + hint
             : "Legenden-Name (optional, sonst ts_db.name)";
           requestDbChartPreview(blk, false);
+          markDirty();
+        });
+
+        attachTickerAutocomplete(tickerInp, function (chosenItem) {
+          if (!chosenItem || !chosenItem.ticker) return;
+          tickerInp.value = chosenItem.ticker;
+          sItem.ticker = chosenItem.ticker;
+          if (chosenItem.name) {
+            state.tickerNameMap[String(chosenItem.ticker).toUpperCase()] = chosenItem.name;
+          }
+          const hint = lookupTickerName(sItem.ticker);
+          labelInp.placeholder = hint
+            ? "Legende: " + hint
+            : "Legenden-Name (optional, sonst ts_db.name)";
+          requestDbChartPreview(blk, true);
           markDirty();
         });
 
@@ -2453,7 +2661,7 @@
       state.baseArticle = deepClone(msg.article);
       if (Array.isArray(msg.available_tickers)) {
         state.availableTickers = msg.available_tickers;
-        ensureTickersDatalist();
+        indexTickerItems(msg.available_tickers);
       }
       if (msg.assets) {
         Object.keys(msg.assets).forEach(function (k) {
@@ -2514,6 +2722,18 @@
       if (chartImg) {
         chartImg.src = msg.data_uri;
       }
+    });
+
+    // 3a-bis. Schnelle Ticker-Vorschläge aus dem Backend-Suchindex
+    window.Shiny.addCustomMessageHandler("lukb_ticker_suggestions", function (msg) {
+      if (!msg || !Array.isArray(msg.results)) return;
+      const qNorm = String(msg.query || "").trim().toLowerCase();
+      state.tickerQueryCache[qNorm] = msg.results;
+      indexTickerItems(msg.results);
+      if (msg.request_id && msg.request_id < tickerSuggest.requestId) {
+        return; // Veraltete Antwort verwerfen
+      }
+      renderTickerSuggestItems(msg.results);
     });
 
     // 3b. Echtzeit-Synchronisation bei Änderungen durch Co-Autoren (ohne Fokus-Verlust!)
