@@ -143,6 +143,10 @@ class DbChartBlock(BaseModel):
         default="column",
         description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
     )
+    chart_height_mm: int = Field(
+        default=36,
+        description="Höhe der eigentlichen Chartfläche (Y-Achsenbereich) in Millimeter (2mm-Schritte, Default: 36mm)",
+    )
     start_date: str = Field(default="2022-01-01", description="Startdatum im Chart (YYYY-MM-DD)")
     rebasing: Literal["none", "index_100"] = Field(
         default="none",
@@ -157,6 +161,18 @@ class DbChartBlock(BaseModel):
         description="Bis zu 5 Zeitreihen aus ts_db",
     )
     asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
+
+    @field_validator("chart_height_mm", mode="before")
+    @classmethod
+    def validate_chart_height_mm(cls, v: Any) -> int:
+        try:
+            val = int(round(float(v)))
+        except (ValueError, TypeError):
+            val = 36
+        val = max(20, min(120, val))
+        if val % 2 != 0:
+            val = int(round(val / 2.0) * 2)
+        return val
 
     @field_validator("series", mode="before")
     @classmethod
@@ -213,6 +229,32 @@ class CalloutBlock(BaseModel):
     )
 
 
+class SpacerBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["spacer"] = "spacer"
+    height_mm: int = Field(
+        default=8,
+        description="Vertikaler Abstand in Millimeter (in 2mm-Schritten, Default: 8mm)",
+    )
+
+    @field_validator("height_mm", mode="before")
+    @classmethod
+    def validate_height_mm(cls, v: Any) -> int:
+        try:
+            val = int(round(float(v)))
+        except (ValueError, TypeError):
+            val = 8
+        val = max(2, min(80, val))
+        if val % 2 != 0:
+            val = int(round(val / 2.0) * 2)
+        return val
+
+
+class ColbreakBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["colbreak"] = "colbreak"
+
+
 ContentBlock = Union[
     HeadingBlock,
     RichTextBlock,
@@ -222,6 +264,8 @@ ContentBlock = Union[
     CalloutBlock,
     BoxStartBlock,
     BoxEndBlock,
+    SpacerBlock,
+    ColbreakBlock,
 ]
 
 
@@ -242,6 +286,10 @@ def parse_block(raw: dict[str, Any]) -> ContentBlock:
         return BoxStartBlock.model_validate(raw)
     if btype == "box_end":
         return BoxEndBlock.model_validate(raw)
+    if btype == "spacer":
+        return SpacerBlock.model_validate(raw)
+    if btype == "colbreak":
+        return ColbreakBlock.model_validate(raw)
     return RichTextBlock.model_validate(raw)
 
 

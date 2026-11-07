@@ -257,6 +257,7 @@
         subtitle: "Entwicklung seit Startdatum",
         source: "Quelle: Bloomberg, LUKB Investment Office",
         layout: "column",
+        chart_height_mm: 36,
         start_date: "2022-01-01",
         rebasing: "none",
         series: [
@@ -307,6 +308,19 @@
         type: "box_end",
       };
     }
+    if (type === "spacer") {
+      return {
+        id: uid("blk"),
+        type: "spacer",
+        height_mm: 8,
+      };
+    }
+    if (type === "colbreak") {
+      return {
+        id: uid("blk"),
+        type: "colbreak",
+      };
+    }
     return {
       id: uid("blk"),
       type: "richtext",
@@ -332,6 +346,10 @@
         return "▼ START: Farbliche Textbox (alle Blöcke bis ENDE liegen in dieser Box)";
       case "box_end":
         return "▲ ENDE: Farbliche Textbox";
+      case "spacer":
+        return "Vertikaler Abstand (Spacer)";
+      case "colbreak":
+        return "Manueller Spaltenumbruch";
       default:
         return "Inhaltsblock";
     }
@@ -501,6 +519,10 @@
       buildDbChartBlockBody(body, blk);
     } else if (blk.type === "table") {
       buildTableBlockBody(body, blk);
+    } else if (blk.type === "spacer") {
+      buildSpacerBlockBody(body, blk);
+    } else if (blk.type === "colbreak") {
+      buildColbreakBlockBody(body, blk);
     }
 
     card.appendChild(body);
@@ -510,6 +532,132 @@
   // ==========================================================================
   // Spezifische Block-Editoren
   // ==========================================================================
+
+  function buildSpacerBlockBody(container, blk) {
+    if (!blk.height_mm) blk.height_mm = 8;
+
+    const row = document.createElement("div");
+    row.className = "db-spacer-editor-row";
+
+    const label = document.createElement("label");
+    label.className = "field-label";
+    label.style.margin = "0";
+    label.style.whiteSpace = "nowrap";
+    label.textContent = "Abstandshöhe:";
+
+    const numInp = document.createElement("input");
+    numInp.type = "number";
+    numInp.className = "cms-input font-medium";
+    numInp.style.maxWidth = "70px";
+    numInp.style.textAlign = "center";
+    numInp.style.padding = "4px 8px";
+    numInp.min = "2";
+    numInp.max = "80";
+    numInp.step = "2";
+    numInp.value = blk.height_mm;
+
+    const unit = document.createElement("span");
+    unit.style.fontSize = "12.5px";
+    unit.style.color = "var(--lukb-navy)";
+    unit.style.fontWeight = "500";
+    unit.textContent = "mm";
+
+    const previewLine = document.createElement("div");
+    previewLine.className = "db-spacer-preview-line";
+
+    const presetButtons = [];
+
+    function updateHeight(val) {
+      let num = parseInt(val, 10);
+      if (isNaN(num)) num = 8;
+      num = Math.max(2, Math.min(80, Math.round(num / 2) * 2));
+      blk.height_mm = num;
+      numInp.value = num;
+      updateVisual();
+      updatePresetActive();
+      markDirty();
+    }
+
+    function updateVisual() {
+      const hMm = blk.height_mm || 8;
+      const hPx = Math.round(hMm * 3.78);
+      previewLine.style.height = Math.max(14, hPx) + "px";
+      previewLine.textContent = "↕ " + hMm + " mm vertikaler Leerraum im Satz";
+    }
+
+    function updatePresetActive() {
+      const cur = blk.height_mm || 8;
+      presetButtons.forEach(function (pb) {
+        if (pb.val === cur) {
+          pb.btn.classList.add("active");
+        } else {
+          pb.btn.classList.remove("active");
+        }
+      });
+    }
+
+    numInp.addEventListener("change", function () {
+      updateHeight(numInp.value);
+    });
+
+    const presetsWrap = document.createElement("div");
+    presetsWrap.className = "db-spacer-presets";
+
+    [
+      { label: "4 mm", val: 4 },
+      { label: "8 mm (Std)", val: 8 },
+      { label: "12 mm", val: 12 },
+      { label: "16 mm", val: 16 },
+      { label: "24 mm", val: 24 },
+    ].forEach(function (preset) {
+      const pBtn = document.createElement("button");
+      pBtn.type = "button";
+      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn";
+      pBtn.style.padding = "3px 8px";
+      pBtn.style.fontSize = "11px";
+      pBtn.textContent = preset.label;
+      pBtn.addEventListener("click", function () {
+        updateHeight(preset.val);
+      });
+      presetsWrap.appendChild(pBtn);
+      presetButtons.push({ btn: pBtn, val: preset.val });
+    });
+
+    row.appendChild(label);
+    row.appendChild(numInp);
+    row.appendChild(unit);
+    row.appendChild(presetsWrap);
+
+    container.appendChild(row);
+    container.appendChild(previewLine);
+    updateVisual();
+    updatePresetActive();
+  }
+
+  function buildColbreakBlockBody(container, blk) {
+    const wrap = document.createElement("div");
+    wrap.className = "db-colbreak-editor-box";
+
+    const icon = document.createElement("span");
+    icon.className = "db-colbreak-icon";
+    icon.textContent = "⇥";
+
+    const textWrap = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "db-colbreak-title";
+    title.textContent = "Manueller Spaltenumbruch";
+
+    const desc = document.createElement("div");
+    desc.className = "db-colbreak-desc";
+    desc.textContent = "Erzwingt an dieser Position den Wechsel in Spalte 2 (bzw. auf die Folgeseite in Spalte 1).";
+
+    textWrap.appendChild(title);
+    textWrap.appendChild(desc);
+
+    wrap.appendChild(icon);
+    wrap.appendChild(textWrap);
+    container.appendChild(wrap);
+  }
 
   function buildHeadingBlockBody(container, blk) {
     const row = document.createElement("div");
@@ -1121,6 +1269,9 @@
     if (!blk.rebasing) {
       blk.rebasing = "none";
     }
+    if (!blk.chart_height_mm) {
+      blk.chart_height_mm = 36;
+    }
 
     // Zeile 1: Grafik-Titel & Layout-Breite
     const topGrid = document.createElement("div");
@@ -1442,7 +1593,113 @@
     renderSeriesRows();
     container.appendChild(seriesSection);
 
-    // Zeile 5: Live-SVG-Vorschau im Block
+    // Zeile 5: Eigener Container für Höhe der Chartfläche (Y-Achse in mm)
+    const heightBar = document.createElement("div");
+    heightBar.className = "db-chart-height-bar";
+
+    const heightLeft = document.createElement("div");
+    heightLeft.className = "db-chart-height-left";
+
+    const heightLbl = document.createElement("label");
+    heightLbl.className = "field-label";
+    heightLbl.style.margin = "0";
+    heightLbl.style.whiteSpace = "nowrap";
+    heightLbl.textContent = "Höhe Chartfläche (Y-Achse):";
+
+    const heightInp = document.createElement("input");
+    heightInp.type = "number";
+    heightInp.className = "cms-input font-medium";
+    heightInp.style.maxWidth = "70px";
+    heightInp.style.textAlign = "center";
+    heightInp.style.padding = "4px 8px";
+    heightInp.min = "20";
+    heightInp.max = "100";
+    heightInp.step = "2";
+    heightInp.value = blk.chart_height_mm || 36;
+
+    const presetButtons = [];
+
+    function updateChartHeight(newVal) {
+      let num = parseInt(newVal, 10);
+      if (isNaN(num)) num = 36;
+      num = Math.max(20, Math.min(100, Math.round(num / 2) * 2));
+      blk.chart_height_mm = num;
+      heightInp.value = num;
+      updatePresetActive();
+      requestDbChartPreview(blk, true);
+      markDirty();
+    }
+
+    function updatePresetActive() {
+      const cur = blk.chart_height_mm || 36;
+      presetButtons.forEach(function (pb) {
+        if (pb.val === cur) {
+          pb.btn.classList.add("active");
+        } else {
+          pb.btn.classList.remove("active");
+        }
+      });
+    }
+
+    heightInp.addEventListener("change", function () {
+      updateChartHeight(heightInp.value);
+    });
+
+    heightLeft.appendChild(heightLbl);
+    heightLeft.appendChild(heightInp);
+
+    const heightPresets = document.createElement("div");
+    heightPresets.className = "db-chart-height-presets";
+
+    const stepDownBtn = document.createElement("button");
+    stepDownBtn.type = "button";
+    stepDownBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    stepDownBtn.style.padding = "4px 8px";
+    stepDownBtn.textContent = "− 2 mm";
+    stepDownBtn.title = "Höhe um 2 mm verringern";
+    stepDownBtn.addEventListener("click", function () {
+      updateChartHeight((blk.chart_height_mm || 36) - 2);
+    });
+    heightPresets.appendChild(stepDownBtn);
+
+    const stepUpBtn = document.createElement("button");
+    stepUpBtn.type = "button";
+    stepUpBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    stepUpBtn.style.padding = "4px 8px";
+    stepUpBtn.textContent = "+ 2 mm";
+    stepUpBtn.title = "Höhe um 2 mm vergrössern";
+    stepUpBtn.addEventListener("click", function () {
+      updateChartHeight((blk.chart_height_mm || 36) + 2);
+    });
+    heightPresets.appendChild(stepUpBtn);
+
+    [
+      { label: "28 mm", val: 28, title: "Kompakt (28 mm)" },
+      { label: "36 mm (Standard)", val: 36, title: "Standardhöhe (36 mm)" },
+      { label: "46 mm", val: 46, title: "Erweitert (46 mm)" },
+      { label: "56 mm", val: 56, title: "Gross (56 mm)" },
+    ].forEach(function (preset) {
+      const pBtn = document.createElement("button");
+      pBtn.type = "button";
+      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn";
+      pBtn.style.padding = "4px 9px";
+      pBtn.style.fontSize = "11.5px";
+      pBtn.textContent = preset.label;
+      pBtn.title = preset.title;
+      pBtn.addEventListener("click", function () {
+        updateChartHeight(preset.val);
+      });
+      heightPresets.appendChild(pBtn);
+      presetButtons.push({ btn: pBtn, val: preset.val });
+    });
+
+    updatePresetActive();
+
+    heightBar.appendChild(heightLeft);
+    heightBar.appendChild(heightPresets);
+    container.appendChild(heightBar);
+
+    // Zeile 6: Live-SVG-Vorschau im Block
     const previewBox = document.createElement("div");
     previewBox.className = "db-chart-preview-box";
 

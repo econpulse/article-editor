@@ -116,7 +116,7 @@
     below: 1.1em
   )[
     #if blk.title != "" [
-      #block(above: 0pt, below: if blk.subtitle != "" { 2.5pt } else { 5pt })[
+      #block(above: 0pt, below: if blk.subtitle != "" { 3.8pt } else { 5pt })[
         #set par(leading: 0.28em, justify: false)
         #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
       ]
@@ -144,7 +144,7 @@
       ]
     ]
     #if blk.source != "" [
-      #v(4pt)
+      #v(3pt)
       #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#blk.source]
     ]
   ]
@@ -370,6 +370,11 @@
         box-breakable
       }
     })
+  } else if blk.type == "spacer" {
+    let h-mm = blk.at("height_mm", default: 8)
+    v(h-mm * 1mm)
+  } else if blk.type == "colbreak" {
+    colbreak()
   }
 }
 
@@ -381,45 +386,73 @@
     let bottom-margin = 2.4cm
     let avail-h = page-h - start-pos.y - bottom-margin
 
-    let item-heights = items.map(it => {
-      let h = measure(block(width: col-w, render-single-block(it, in-box: false))).height
-      if it.type == "heading" { h + 16pt } else { h + 8pt }
-    })
-    let total-h = item-heights.sum(default: 0pt)
-
-    let best-split-h = total-h
-    for split-idx in range(0, items.len() + 1) {
-      let left-h = item-heights.slice(0, split-idx).sum(default: 0pt)
-      let right-h = item-heights.slice(split-idx).sum(default: 0pt)
-      let candidate = calc.max(left-h, right-h)
-      if candidate < best-split-h {
-        best-split-h = candidate
-      }
-    }
-
-    let ideal-half = total-h / 2 + 20pt
-    let target-h = if best-split-h <= ideal-half + 110pt {
-      calc.max(ideal-half, best-split-h + 6pt)
-    } else {
-      ideal-half + 18pt
-    }
-
-    if avail-h > 100pt and target-h <= avail-h - 6pt {
-      block(
-        width: 100%,
-        height: target-h,
+    let manual-colbreak-idx = items.position(it => it.type == "colbreak")
+    if manual-colbreak-idx != none and avail-h > 100pt {
+      let left-items = items.slice(0, manual-colbreak-idx)
+      let right-items = items.slice(manual-colbreak-idx + 1)
+      let left-h = measure(block(width: col-w, for it in left-items [ #render-single-block(it, in-box: false) ])).height
+      let right-h = measure(block(width: col-w, for it in right-items [ #render-single-block(it, in-box: false) ])).height
+      let max-h = calc.max(left-h, right-h)
+      if max-h <= avail-h - 6pt {
+        grid(
+          columns: (1fr, 1fr),
+          column-gutter: gutter,
+          align: (top + left, top + left),
+          [
+            #for it in left-items [ #render-single-block(it, in-box: false) ]
+          ],
+          [
+            #for it in right-items [ #render-single-block(it, in-box: false) ]
+          ]
+        )
+      } else {
         columns(2, gutter: gutter)[
           #for it in items [
             #render-single-block(it, in-box: false)
           ]
         ]
-      )
+      }
     } else {
-      columns(2, gutter: gutter)[
-        #for it in items [
-          #render-single-block(it, in-box: false)
+      let item-heights = items.map(it => {
+        let h = measure(block(width: col-w, render-single-block(it, in-box: false))).height
+        if it.type == "heading" { h + 16pt } else { h + 8pt }
+      })
+      let total-h = item-heights.sum(default: 0pt)
+
+      let best-split-h = total-h
+      for split-idx in range(0, items.len() + 1) {
+        let left-h = item-heights.slice(0, split-idx).sum(default: 0pt)
+        let right-h = item-heights.slice(split-idx).sum(default: 0pt)
+        let candidate = calc.max(left-h, right-h)
+        if candidate < best-split-h {
+          best-split-h = candidate
+        }
+      }
+
+      let ideal-half = total-h / 2 + 20pt
+      let target-h = if best-split-h <= ideal-half + 110pt {
+        calc.max(ideal-half, best-split-h + 6pt)
+      } else {
+        ideal-half + 18pt
+      }
+
+      if avail-h > 100pt and target-h <= avail-h - 6pt {
+        block(
+          width: 100%,
+          height: target-h,
+          columns(2, gutter: gutter)[
+            #for it in items [
+              #render-single-block(it, in-box: false)
+            ]
+          ]
+        )
+      } else {
+        columns(2, gutter: gutter)[
+          #for it in items [
+            #render-single-block(it, in-box: false)
+          ]
         ]
-      ]
+      }
     }
   })
 }

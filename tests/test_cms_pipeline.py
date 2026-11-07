@@ -335,6 +335,29 @@ def test_db_chart_timeseries_block():
     assert "EZB Einlagesatz (EUR)" in svg_combo  # Automatischer Name aus ts_db
     assert 'font-size="22.5"' in svg_combo  # Vergrösserte Achsenschrift im 1-spaltigen Format
 
+    # Steuerbare Höhe der eigentlichen Chartfläche (Y-Achse):
+    # Standard: 36mm. Erhöhung um 10mm (z.B. auf 46mm) muss die Gesamthöhe des SVGs
+    # ausschliesslich über die Höhe der Y-Achse vergrössern (Schriftgrössen unverändert).
+    import re
+
+    h_match_default = re.search(r'height="(\d+)"', svg_combo)
+    assert h_match_default is not None
+    svg_h_36 = int(h_match_default.group(1))
+
+    taller_combo_block = dict(combo_block, chart_height_mm=46)
+    svg_taller = generate_db_chart_svg(taller_combo_block)
+    h_match_taller = re.search(r'height="(\d+)"', svg_taller)
+    assert h_match_taller is not None
+    svg_h_46 = int(h_match_taller.group(1))
+
+    # Differenz in SVG-Pixel entspricht exakt (46 - 36) mm * (680 / 87.1778) px/mm = 78 px
+    expected_diff = round(10.0 * (680.0 / 87.1778))
+    actual_diff = svg_h_46 - svg_h_36
+    assert abs(actual_diff - expected_diff) <= 1, f"Erwartete Höhendifferenz ~{expected_diff}px, erhalten: {actual_diff}px"
+    # Schriftgrössen und Legenden-Schriftgrössen müssen absolut identisch geblieben sein
+    assert 'font-size="22.5"' in svg_taller
+    assert 'font-size="20.5"' in svg_taller
+
     svg_idx = generate_db_chart_svg(indexed_block)
     assert svg_idx.startswith("<svg")
     assert 'font-size="14.5"' in svg_idx  # Achsenschrift im 2-spaltigen Format ('full')
@@ -362,6 +385,61 @@ def test_db_chart_timeseries_block():
     assert "data:image/svg+xml;base64," in html_out
 
 
+def test_layout_elements_spacer_and_colbreak():
+    """
+    Prüft die Layout-Elemente 'Vertikaler Abstand' (spacer) und 'Manueller Spaltenumbruch' (colbreak):
+    - Pydantic-Schema & 2mm-Schritt-Validierung
+    - Nahtlose Typst-PDF-Kompilierung (beide Templates: investment_focus und market_flash)
+    - Typst-SVG-Seitenrendering
+    - Web-HTML5-Rendering
+    """
+    from schemas.article import ArticleDocument, ColbreakBlock, SpacerBlock
+    from services.renderer import render_pdf_bytes, render_preview_svg_pages, render_web_html
+
+    sp1 = SpacerBlock(height_mm=12)
+    assert sp1.height_mm == 12
+    sp_odd = SpacerBlock(height_mm=15)
+    assert sp_odd.height_mm == 16, "Ungerade Werte müssen auf 2mm-Schritte gerundet werden"
+    cb = ColbreakBlock()
+    assert cb.type == "colbreak"
+
+    doc = ArticleDocument(
+        id="art-layout-test",
+        template_id="investment_focus",
+        blocks=[
+            {"id": "h1", "type": "heading", "level": 1, "text": "Erste Spalte"},
+            {"id": "rt1", "type": "richtext", "html": "<p>Inhalt vor dem Abstandhalter.</p>"},
+            {"id": "sp1", "type": "spacer", "height_mm": 14},
+            {"id": "rt2", "type": "richtext", "html": "<p>Inhalt nach dem Abstandhalter.</p>"},
+            {"id": "cb1", "type": "colbreak"},
+            {"id": "h2", "type": "heading", "level": 1, "text": "Zweite Spalte oben"},
+            {"id": "rt3", "type": "richtext", "html": "<p>Dieser Inhalt muss zwingend in Spalte 2 beginnen.</p>"},
+        ],
+    )
+
+    pdf_bytes = render_pdf_bytes(doc)
+    assert pdf_bytes.startswith(b"%PDF-"), "Typst muss mit spacer und colbreak valides PDF kompilieren"
+    assert len(pdf_bytes) > 5000
+
+    svg_pages = render_preview_svg_pages(doc)
+    assert len(svg_pages) >= 1
+    assert "<svg" in svg_pages[0]
+
+    html_out = render_web_html(doc)
+    assert "blk-spacer" in html_out
+    assert "14mm" in html_out
+    assert "blk-colbreak" in html_out
+
+    # Auch im market_flash Template testen
+    doc_flash = ArticleDocument(
+        id="art-flash-test",
+        template_id="market_flash",
+        blocks=doc.blocks,
+    )
+    flash_pdf = render_pdf_bytes(doc_flash)
+    assert flash_pdf.startswith(b"%PDF-")
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -369,6 +447,7 @@ if __name__ == "__main__":
     test_textbox_start_end_markers_grouping()
     test_concurrent_multi_author_block_merge()
     test_db_chart_timeseries_block()
+    test_layout_elements_spacer_and_colbreak()
     test_full_cms_workflow()
     assert app is not None
     print("ALL TESTS PASSED SUCCESSFULLY!")

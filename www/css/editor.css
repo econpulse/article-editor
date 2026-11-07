@@ -625,6 +625,67 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 .cms-block-card.block-type-db_chart { border-left-color: #0284C7; }
 .cms-block-card.block-type-table { border-left-color: #0D9488; }
 .cms-block-card.block-type-callout { border-left-color: var(--lukb-gold); }
+.cms-block-card.block-type-spacer { border-left-color: #8B5CF6; }
+.cms-block-card.block-type-colbreak { border-left-color: #F59E0B; }
+
+/* Vertikaler Abstand (Spacer) Block */
+.db-spacer-editor-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.db-spacer-presets {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.db-spacer-preview-line {
+  background: #F8FAFC;
+  border: 1.5px dashed #CBD5E1;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: #64748B;
+  transition: height 0.15s ease;
+}
+
+/* Manueller Spaltenumbruch Block */
+.db-colbreak-editor-box {
+  background: #FFFBEB;
+  border: 1px dashed #F59E0B;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.db-colbreak-icon {
+  font-size: 22px;
+  color: #B45309;
+  line-height: 1;
+}
+
+.db-colbreak-title {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 13px;
+  color: #92400E;
+}
+
+.db-colbreak-desc {
+  font-size: 11.5px;
+  color: #78350F;
+  margin-top: 2px;
+}
 
 /* Farbliche Textbox Start-/End-Marken & eingerückte Blöcke im Editor */
 .cms-block-card.block-textbox-marker {
@@ -830,6 +891,40 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   margin-bottom: 10px;
 }
 
+.db-chart-height-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  background: var(--lukb-surface-alt);
+  border: 1px solid var(--lukb-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 10px;
+}
+
+.db-chart-height-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.db-chart-height-presets {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.db-height-preset-btn.active,
+.db-height-preset-btn.active:hover {
+  background: var(--lukb-navy) !important;
+  color: #FFFFFF !important;
+  border-color: var(--lukb-navy) !important;
+}
+
 .db-chart-series-section {
   background: #F8FAFC;
   border: 1px solid var(--lukb-border);
@@ -966,7 +1061,8 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 
 .db-chart-preview-img {
   width: 100%;
-  max-height: 230px;
+  max-height: 480px;
+  object-fit: contain;
   margin-bottom: 4px;
 }
 

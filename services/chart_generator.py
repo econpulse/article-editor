@@ -315,17 +315,33 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
     y_label_right_x = max(12.0, round(max_y_label_w, 1))
     y_axis_gap = 10.0 if is_column_layout else 9.0
 
+    # Steuerbare Höhe der eigentlichen Chartfläche (Y-Achsenbereich) in 2mm-Schritten (Default: 36mm).
+    # Die Anpassung der Höhe des Gesamtcontainers erfolgt ausschliesslich über die Höhe der Y-Achse
+    # (Schriftgrössen und Abstände der Textelemente bleiben davon unbeeinflusst).
+    # Umrechnung von mm in SVG-Pixel bezogen auf die Druckbreite im Typst-PDF:
+    # - 1-spaltig ('column'): 87.1778 mm Satzbreite bei 680 px SVG-Breite (~7.800 px/mm)
+    # - 2-spaltig ('full')  : 180.0 mm Satzbreite bei 680 px SVG-Breite (~3.778 px/mm)
+    chart_height_mm_raw = block_data.get("chart_height_mm")
+    try:
+        chart_height_mm = float(chart_height_mm_raw) if chart_height_mm_raw is not None else 36.0
+    except (ValueError, TypeError):
+        chart_height_mm = 36.0
+    chart_height_mm = max(20.0, min(120.0, round(chart_height_mm / 2.0) * 2.0))
+
+    px_per_mm = (680.0 / 87.1778) if is_column_layout else (680.0 / 180.0)
+    plot_h = round(chart_height_mm * px_per_mm, 1)
+
     svg_w = 680
     plot_left = y_label_right_x + y_axis_gap
     plot_right = 678.0
     plot_top = 18.0
-    plot_bottom = 228.0 if is_column_layout else 238.0
+    plot_bottom = plot_top + plot_h
     plot_w = plot_right - plot_left
-    plot_h = plot_bottom - plot_top
 
     x_axis_label_y = plot_bottom + (31.0 if is_column_layout else 24.0)
     legend_start_y = x_axis_label_y + (34.0 if is_column_layout else 27.0)
-    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + 14.0))
+    # Abstand unterhalb der Legende um 25% gestrafft (10.5 px statt 14.0 px) für kompakteren Anschluss der Quelle
+    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + 10.5))
 
     def x_px(dt: date) -> float:
         return plot_left + ((float(dt.toordinal()) - min_ord) / span_ord) * plot_w

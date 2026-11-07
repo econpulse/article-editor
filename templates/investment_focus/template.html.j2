@@ -249,7 +249,7 @@
       color: var(--lukb-navy);
       font-size: 1.02rem;
       line-height: 1.25;
-      margin: 0 0 1px 0;
+      margin: 0 0 3px 0;
     }
 
     .blk-box-subtitle {
@@ -286,7 +286,7 @@
       font-weight: 300;
       color: var(--lukb-muted);
       font-size: 0.78rem;
-      margin: 8px 0 0 0;
+      margin: 6px 0 0 0;
     }
 
     table.lukb-data-table {
@@ -445,6 +445,12 @@
               <div class="blk-box-source">{{ blk.source }}</div>
             {% endif %}
           </div>
+
+        {% elif blk.type == "spacer" %}
+          <div class="blk-spacer" style="height: {{ blk.height_mm or 8 }}mm; width: 100%;"></div>
+
+        {% elif blk.type == "colbreak" %}
+          <div class="blk-colbreak" style="break-before: column; column-break-before: always; height: 0; margin: 0; padding: 0;"></div>
         {% endif %}
       {% endmacro %}
 
