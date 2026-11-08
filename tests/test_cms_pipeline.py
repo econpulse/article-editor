@@ -689,5 +689,8 @@ if __name__ == "__main__":
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()
+    from tests.test_connect_client import test_connect_client_not_configured, test_connect_client_configured_url
+    test_connect_client_not_configured()
+    test_connect_client_configured_url()
     assert app is not None
     print("ALL TESTS PASSED SUCCESSFULLY!")

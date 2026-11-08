@@ -87,6 +87,14 @@ def build_database_url() -> tuple[str, str]:
 DATABASE_URL, DATABASE_BACKEND_LABEL = build_database_url()
 
 # ============================================================================
+# Posit Connect API & Deployment Konfiguration
+# ============================================================================
+CONNECT_SERVER_URL = os.getenv("CONNECT_SERVER", os.getenv("CONNECT_SERVER_URL", "")).rstrip("/")
+CONNECT_API_KEY = os.getenv("CONNECT_API_KEY", "").strip()
+CONNECT_PORTAL_GUID = os.getenv("CONNECT_PORTAL_GUID", os.getenv("CONNECT_PORTAL_CONTENT_GUID", "")).strip()
+CONNECT_PORTAL_URL = os.getenv("CONNECT_PORTAL_URL", "").strip()
+
+# ============================================================================
 # LUKB Corporate Design & Typografie
 # ============================================================================
 LUKB_FONT_LIGHT = os.getenv("LUKB_FONT_LIGHT", "Yoga Sans for LUKB Light")

@@ -29,6 +29,7 @@ from database.repository import (
 )
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
+from services.connect_client import get_portal_target_url
 from services.renderer import (
     list_available_templates,
     render_docx_bytes,
@@ -179,7 +180,7 @@ app_ui = ui.page_fluid(
                     ui.tags.div(class_="lukb-dropdown-divider"),
                     ui.tags.a(
                         "↗ Portal ansehen",
-                        href="/portal/",
+                        href=get_portal_target_url(),
                         target="_blank",
                         class_="lukb-dropdown-item",
                         title="Öffnet das statische Content-Portal in einem neuen Browser-Tab",
@@ -1218,11 +1219,12 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 current_doc.set(doc)
                 await _send_article_list(doc.id)
                 count = res.get("total_published", 1)
-                ui.notification_show(
-                    f"✅ Artikel erfolgreich publiziert! ({count} Artikel auf dem Portal online)",
-                    type="message",
-                    duration=5,
-                )
+                connect_info = res.get("connect_deploy")
+                if connect_info and connect_info.get("deployed"):
+                    msg = f"✅ Artikel publiziert & auf Posit Connect bereitgestellt! ({count} online)"
+                else:
+                    msg = f"✅ Artikel erfolgreich publiziert! ({count} Artikel im Portal)"
+                ui.notification_show(msg, type="message", duration=5)
             else:
                 ui.notification_show(f"Publikationsfehler: {res.get('error')}", type="warning", duration=5)
         except Exception as exc:

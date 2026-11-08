@@ -239,6 +239,17 @@ def publish_article(doc: ArticleDocument, output_dir: Path | None = None) -> dic
 
     logger.info(f"Artikel {doc.id} erfolgreich publiziert unter articles/{slug}/index.html")
 
+    # 5. Optional: Automatisches Deployment auf Posit Connect (falls API konfiguriert)
+    connect_deploy = None
+    try:
+        from services.connect_client import deploy_bundle_to_connect, is_connect_configured
+        if is_connect_configured():
+            bundle_path = create_connect_bundle(output_dir=dist_dir)
+            connect_deploy = deploy_bundle_to_connect(bundle_path)
+    except Exception as exc:
+        logger.error(f"Fehler beim Posit Connect API Deployment: {exc}")
+        connect_deploy = {"success": False, "error": str(exc)}
+
     return {
         "success": True,
         "action": "published",
@@ -247,6 +258,7 @@ def publish_article(doc: ArticleDocument, output_dir: Path | None = None) -> dic
         "article_url": f"articles/{slug}/index.html",
         "pdf_url": f"articles/{slug}/{pdf_filename}" if has_pdf else None,
         "total_published": len(manifest["articles"]),
+        "connect_deploy": connect_deploy,
     }
 
 
@@ -281,12 +293,24 @@ def unpublish_article(article_id: str, output_dir: Path | None = None) -> dict[s
 
     logger.info(f"Artikel {article_id} (slug: {slug}) erfolgreich vom Portal entfernt.")
 
+    # Automatisches Deployment auf Posit Connect nach Entfernen
+    connect_deploy = None
+    try:
+        from services.connect_client import deploy_bundle_to_connect, is_connect_configured
+        if is_connect_configured():
+            bundle_path = create_connect_bundle(output_dir=dist_dir)
+            connect_deploy = deploy_bundle_to_connect(bundle_path)
+    except Exception as exc:
+        logger.error(f"Fehler beim Posit Connect API Deployment nach Unpublish: {exc}")
+        connect_deploy = {"success": False, "error": str(exc)}
+
     return {
         "success": True,
         "action": "unpublished",
         "article_id": article_id,
         "slug": slug,
         "total_published": len(manifest.get("articles", {})),
+        "connect_deploy": connect_deploy,
     }
 
 
