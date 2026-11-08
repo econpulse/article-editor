@@ -43,11 +43,21 @@ class ArticleMetadata(BaseModel):
         description="Publikationsdatum (ISO oder Anzeigeformat)",
     )
     category: str = Field(default="Anlagepolitik & Märkte", description="Rubrik / Publikationsreihe")
+    tags: list[str] = Field(default_factory=list, description="Themen-Tags / Schlagwörter")
     authors: list[AuthorItem] = Field(default_factory=list, description="Autorenliste")
     disclaimer: str = Field(
         default=DEFAULT_LUKB_DISCLAIMER,
         description="Rechtlicher Hinweis im Fussbereich",
     )
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def validate_tags_seq(cls, v: Any) -> list[str]:
+        if isinstance(v, str):
+            return [t.strip() for t in v.split(",") if t.strip()]
+        if isinstance(v, (list, tuple)):
+            return [str(t).strip() for t in v if str(t).strip()]
+        return []
 
     @field_validator("authors", mode="before")
     @classmethod
@@ -255,6 +265,86 @@ class ColbreakBlock(BaseModel):
     type: Literal["colbreak"] = "colbreak"
 
 
+class QuoteBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["quote"] = "quote"
+    quote: str = Field(default="", description="Zitat-Text")
+    author: str = Field(default="", description="Urheber / Autor des Zitats")
+    source: str = Field(default="", description="Quelle / Kontext / Funktion")
+    layout: Literal["column", "full"] = Field(
+        default="column",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+
+
+class DividerBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["divider"] = "divider"
+    style: Literal["solid", "dashed", "dots"] = Field(
+        default="solid",
+        description="Darstellungsart der Trennlinie ('solid', 'dashed', 'dots')",
+    )
+
+
+class FootnotesBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["footnotes"] = "footnotes"
+    title: str = Field(default="Anmerkungen & Quellen", description="Titel des Fussnotenblocks")
+    items: list[dict[str, str]] = Field(
+        default_factory=lambda: [
+            {"num": "1", "text": "Quelle oder methodische Anmerkung zu den Daten."},
+        ],
+        description="Liste von Fussnoteneinträgen [{'num': '1', 'text': '...'}]",
+    )
+    layout: Literal["column", "full"] = Field(
+        default="column",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def validate_footnotes_items(cls, v: Any) -> list[dict[str, str]]:
+        if not isinstance(v, (list, tuple)):
+            return []
+        cleaned = []
+        for item in v:
+            if isinstance(item, dict):
+                cleaned.append({
+                    "num": str(item.get("num", "")),
+                    "text": str(item.get("text", "")),
+                })
+        return cleaned
+
+
+class GlossaryBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["glossary"] = "glossary"
+    title: str = Field(default="Glossar & Begriffserklärungen", description="Titel des Glossarblocks")
+    auto_collect: bool = Field(default=True, description="Automatisch alle im Artikel markierten Begriffe sammeln")
+    custom_items: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Manuell definierte Glossar-Einträge [{'term': '...', 'definition': '...'}]",
+    )
+    layout: Literal["column", "full"] = Field(
+        default="column",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+
+    @field_validator("custom_items", mode="before")
+    @classmethod
+    def validate_custom_items(cls, v: Any) -> list[dict[str, str]]:
+        if not isinstance(v, (list, tuple)):
+            return []
+        cleaned = []
+        for item in v:
+            if isinstance(item, dict):
+                cleaned.append({
+                    "term": str(item.get("term", "")),
+                    "definition": str(item.get("definition", "")),
+                })
+        return cleaned
+
+
 ContentBlock = Union[
     HeadingBlock,
     RichTextBlock,
@@ -266,6 +356,10 @@ ContentBlock = Union[
     BoxEndBlock,
     SpacerBlock,
     ColbreakBlock,
+    QuoteBlock,
+    DividerBlock,
+    FootnotesBlock,
+    GlossaryBlock,
 ]
 
 
@@ -290,6 +384,14 @@ def parse_block(raw: dict[str, Any]) -> ContentBlock:
         return SpacerBlock.model_validate(raw)
     if btype == "colbreak":
         return ColbreakBlock.model_validate(raw)
+    if btype == "quote":
+        return QuoteBlock.model_validate(raw)
+    if btype == "divider":
+        return DividerBlock.model_validate(raw)
+    if btype == "footnotes":
+        return FootnotesBlock.model_validate(raw)
+    if btype == "glossary":
+        return GlossaryBlock.model_validate(raw)
     return RichTextBlock.model_validate(raw)
 
 

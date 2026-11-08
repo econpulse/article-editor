@@ -340,8 +340,8 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
 
     x_axis_label_y = plot_bottom + (31.0 if is_column_layout else 24.0)
     legend_start_y = x_axis_label_y + (34.0 if is_column_layout else 27.0)
-    # Abstand unterhalb der Legende um 25% gestrafft (10.5 px statt 14.0 px) für kompakteren Anschluss der Quelle
-    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + 10.5))
+    # Abstand unterhalb der Legende um weitere 25% gestrafft (7.0 px) für kompakten Anschluss der Quelle
+    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + 7.0))
 
     def x_px(dt: date) -> float:
         return plot_left + ((float(dt.toordinal()) - min_ord) / span_ord) * plot_w

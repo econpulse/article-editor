@@ -17,6 +17,8 @@ __pycache__/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/static_portal_dist/
+*.tar.gz
 
 # OS / IDE files
 .DS_Store

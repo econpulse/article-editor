@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LUKB Investment Office — Publikationen & Research</title>
+  <link rel="stylesheet" href="assets/portal.css">
+  <link rel="icon" type="image/svg+xml" href="assets/LUKB-Logo.svg">
+</head>
+<body>
+
+  <!-- Header Banner -->
+  <header class="portal-header">
+    <div class="portal-header-container">
+      <div class="portal-brand-bar">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <img src="assets/LUKB-Logo.svg" alt="Luzerner Kantonalbank" class="portal-logo" onerror="this.style.display='none'">
+          <span style="font-weight:600; font-size:1.15rem; letter-spacing:0.02em;">Luzerner Kantonalbank</span>
+        </div>
+        <div class="portal-brand-badge">Investment Office Portal</div>
+      </div>
+
+      <div class="portal-title-block">
+        <h1>Publikationen & Markteinschätzungen</h1>
+        <p>Aktuelle Analysen, Konjunkturausblicke und strategische Positionierungen unseres Investment Office — für Sie aufbereitet.</p>
+      </div>
+
+      <!-- Search & Filters -->
+      <div class="search-filter-card">
+        <div class="search-input-wrapper">
+          <svg class="search-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+          </svg>
+          <input type="text" id="portal-search" class="portal-search-input" placeholder="Artikel nach Titel, Themen, Autoren oder Stichworten durchsuchen..." autofocus>
+        </div>
+
+        <div class="filter-pills-row">
+          <span style="font-size:0.85rem; font-weight:600; color:var(--lukb-navy); margin-right:4px;">Rubriken:</span>
+          <button class="filter-pill active" data-category="all">Alle ({{ articles | length }})</button>
+          {% for cat, count in categories.items() %}
+          <button class="filter-pill" data-category="{{ cat }}">{{ cat }} ({{ count }})</button>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Grid -->
+  <main class="portal-main">
+    <div class="portal-stats-bar">
+      <span id="results-count">{{ articles | length }} Artikel publiziert</span>
+      <span>Stand: {{ build_date }}</span>
+    </div>
+
+    <div class="portal-grid" id="article-grid">
+      {% for art in articles %}
+      <article class="article-card" 
+               data-category="{{ art.category }}" 
+               data-search="{{ art.title }} {{ art.subtitle }} {{ art.lead }} {{ art.category }} {{ art.authors_str }} {{ art.tags_str }}">
+        <div class="card-top-accent {{ art.template_id }}"></div>
+        <div class="card-body">
+          <div class="card-meta-line">
+            <span class="card-category">{{ art.category }}</span>
+            <span class="card-date">{{ art.date_display }}</span>
+          </div>
+
+          <h2 class="card-title">
+            <a href="articles/{{ art.slug }}/index.html">{{ art.title }}</a>
+          </h2>
+
+          {% if art.lead %}
+          <p class="card-lead">{{ art.lead }}</p>
+          {% endif %}
+
+          {% if art.authors %}
+          <div class="card-authors">
+            Von <span class="card-author-name">
+              {% for a in art.authors %}
+                {{ a.name }}{% if a.role %} ({{ a.role }}){% endif %}{% if not loop.last %} · {% endif %}
+              {% endfor %}
+            </span>
+          </div>
+          {% endif %}
+
+          <div class="card-actions">
+            <a href="articles/{{ art.slug }}/index.html" class="btn-card btn-card-primary">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+              Online lesen
+            </a>
+            {% if art.has_pdf %}
+            <a href="articles/{{ art.slug }}/{{ art.slug }}.pdf" download class="btn-card btn-card-secondary" title="Druckreifes Typst-PDF herunterladen">
+              <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+              PDF
+            </a>
+            {% endif %}
+          </div>
+        </div>
+      </article>
+      {% endfor %}
+
+      <!-- Empty State -->
+      <div class="portal-empty-state" id="portal-empty" style="display: none;">
+        <div class="empty-icon">🔍</div>
+        <div class="empty-title">Keine Artikel gefunden</div>
+        <div class="empty-text">Zu Ihrer aktuellen Suchanfrage oder Filtereinstellung liegen keine Publikationen vor.</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="portal-footer">
+    <div class="portal-footer-container">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <span style="font-weight:600; color:var(--lukb-navy);">Luzerner Kantonalbank AG · Investment Office</span>
+        <span>Interne Publikations-Plattform</span>
+      </div>
+      <div class="portal-disclaimer">
+        Die in diesem Portal bereitgestellten Informationen dienen ausschliesslich Informationszwecken und stellen keine individuelle Anlageberatung dar. Vervielfältigung oder Weitergabe nur mit Genehmigung der Luzerner Kantonalbank.
+      </div>
+    </div>
+  </footer>
+
+  <script src="assets/portal.js"></script>
+</body>
+</html>

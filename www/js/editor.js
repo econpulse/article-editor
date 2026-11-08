@@ -84,12 +84,80 @@
     if (!state.article) return;
     state.isDirty = true;
     setAutosaveIndicator("dirty", "Ungespeicherte Änderungen …");
+    updateLiveStatsCounter();
     if (state.autosaveTimer) {
       clearTimeout(state.autosaveTimer);
     }
     state.autosaveTimer = setTimeout(function () {
       flushAutosave(false);
     }, 1000);
+  }
+
+  function updateLiveStatsCounter() {
+    const counterEl = document.getElementById("lukb-stats-counter");
+    if (!counterEl || !state.article) return;
+
+    let totalWords = 0;
+    const countText = (str) => {
+      if (!str) return;
+      const clean = String(str).replace(/<[^>]+>/g, " ").trim();
+      if (!clean) return;
+      const words = clean.split(/\s+/).filter(Boolean);
+      totalWords += words.length;
+    };
+
+    const meta = state.article.metadata || {};
+    countText(meta.title);
+    countText(meta.subtitle);
+    countText(meta.lead);
+
+    let estPages = 0;
+    const blocks = state.article.blocks || [];
+    blocks.forEach((b) => {
+      if (b.type === "heading") {
+        countText(b.text);
+      } else if (b.type === "richtext") {
+        countText(b.html);
+      } else if (b.type === "callout") {
+        countText(b.title);
+        countText(b.html);
+        estPages += 0.12;
+      } else if (b.type === "quote") {
+        countText(b.quote);
+        countText(b.author);
+        countText(b.source);
+        estPages += (b.layout === "full" ? 0.2 : 0.12);
+      } else if (b.type === "table") {
+        countText(b.title);
+        countText(b.subtitle);
+        (b.rows || []).forEach(r => Object.values(r).forEach(v => countText(String(v))));
+        estPages += (b.layout === "full" ? 0.38 : 0.22);
+      } else if (b.type === "figure" || b.type === "db_chart") {
+        countText(b.title);
+        countText(b.subtitle);
+        estPages += (b.layout === "full" ? 0.45 : 0.25);
+      } else if (b.type === "spacer") {
+        estPages += ((b.height_mm || 8) / 250);
+      } else if (b.type === "footnotes") {
+        countText(b.title);
+        (b.items || []).forEach(it => countText(it.text));
+        estPages += 0.12;
+      } else if (b.type === "glossary") {
+        countText(b.title);
+        (b.custom_items || []).forEach(it => {
+          countText(it.term);
+          countText(it.definition);
+        });
+        estPages += (b.layout === "full" ? 0.25 : 0.15);
+      }
+    });
+
+    estPages += (totalWords / 500);
+
+    const readingTimeMin = Math.max(1, Math.round((totalWords / 200) * 10) / 10);
+    const pagesFormatted = (Math.max(0.4, Math.round(estPages * 10) / 10)).toFixed(1);
+
+    counterEl.textContent = `📊 ${totalWords} Wörter · ~${readingTimeMin} Min. · ca. ${pagesFormatted} A4-Seiten`;
   }
 
   function flushAutosave(createRevision, revisionNote) {
@@ -141,6 +209,37 @@
     setVal("meta-disclaimer", meta.disclaimer || "");
 
     renderAuthorsList();
+    renderTagsList();
+    updateLiveStatsCounter();
+  }
+
+  function renderTagsList() {
+    const container = document.getElementById("meta-tags-container");
+    if (!container || !state.article) return;
+    container.innerHTML = "";
+
+    if (!Array.isArray(state.article.metadata.tags)) {
+      state.article.metadata.tags = [];
+    }
+
+    state.article.metadata.tags.forEach(function (tag, idx) {
+      const chip = document.createElement("span");
+      chip.className = "tag-chip";
+      chip.textContent = tag;
+
+      const del = document.createElement("span");
+      del.className = "tag-chip-del";
+      del.textContent = "✕";
+      del.title = "Tag entfernen";
+      del.addEventListener("click", function () {
+        state.article.metadata.tags.splice(idx, 1);
+        renderTagsList();
+        markDirty();
+      });
+
+      chip.appendChild(del);
+      container.appendChild(chip);
+    });
   }
 
   function renderAuthorsList() {
@@ -221,6 +320,30 @@
         state.article.metadata.authors.push({ name: "", role: "" });
         renderAuthorsList();
         markDirty();
+      });
+    }
+
+    const tagInput = document.getElementById("meta-tag-input");
+    if (tagInput) {
+      tagInput.addEventListener("keydown", function (e) {
+        if (!state.article) return;
+        if (!Array.isArray(state.article.metadata.tags)) {
+          state.article.metadata.tags = [];
+        }
+        if (e.key === "Enter" || e.key === ",") {
+          e.preventDefault();
+          const val = tagInput.value.replace(/,/g, "").trim();
+          if (val && !state.article.metadata.tags.includes(val)) {
+            state.article.metadata.tags.push(val);
+            tagInput.value = "";
+            renderTagsList();
+            markDirty();
+          }
+        } else if (e.key === "Backspace" && !tagInput.value && state.article.metadata.tags.length > 0) {
+          state.article.metadata.tags.pop();
+          renderTagsList();
+          markDirty();
+        }
       });
     }
   }
@@ -321,6 +444,44 @@
         type: "colbreak",
       };
     }
+    if (type === "quote") {
+      return {
+        id: uid("blk"),
+        type: "quote",
+        quote: "Die Schweizer Wirtschaft beweist trotz globalem Gegenwind beachtliche Robustheit.",
+        author: "Thomas Grüter",
+        source: "Chief Investment Officer",
+        layout: "column",
+      };
+    }
+    if (type === "divider") {
+      return {
+        id: uid("blk"),
+        type: "divider",
+        style: "solid",
+      };
+    }
+    if (type === "footnotes") {
+      return {
+        id: uid("blk"),
+        type: "footnotes",
+        title: "Anmerkungen & Quellen",
+        items: [
+          { num: "1", text: "Quelle: Bloomberg, LUKB Investment Office" },
+        ],
+        layout: "column",
+      };
+    }
+    if (type === "glossary") {
+      return {
+        id: uid("blk"),
+        type: "glossary",
+        title: "Glossar & Begriffserklärungen",
+        auto_collect: true,
+        custom_items: [],
+        layout: "column",
+      };
+    }
     return {
       id: uid("blk"),
       type: "richtext",
@@ -350,6 +511,14 @@
         return "Vertikaler Abstand (Spacer)";
       case "colbreak":
         return "Manueller Spaltenumbruch";
+      case "quote":
+        return "Zitat / Pull-Quote";
+      case "divider":
+        return "Horizontale Trennlinie";
+      case "footnotes":
+        return "Fussnoten- & Quellenapparat";
+      case "glossary":
+        return "Glossar-Verzeichnis";
       default:
         return "Inhaltsblock";
     }
@@ -523,6 +692,14 @@
       buildSpacerBlockBody(body, blk);
     } else if (blk.type === "colbreak") {
       buildColbreakBlockBody(body, blk);
+    } else if (blk.type === "quote") {
+      buildQuoteBlockBody(body, blk);
+    } else if (blk.type === "divider") {
+      buildDividerBlockBody(body, blk);
+    } else if (blk.type === "footnotes") {
+      buildFootnotesBlockBody(body, blk);
+    } else if (blk.type === "glossary") {
+      buildGlossaryBlockBody(body, blk);
     }
 
     card.appendChild(body);
@@ -532,6 +709,501 @@
   // ==========================================================================
   // Spezifische Block-Editoren
   // ==========================================================================
+
+  function buildQuoteBlockBody(container, blk) {
+    const topRow = document.createElement("div");
+    topRow.style.display = "flex";
+    topRow.style.justifyContent = "space-between";
+    topRow.style.alignItems = "center";
+    topRow.style.marginBottom = "8px";
+
+    const topLbl = document.createElement("label");
+    topLbl.className = "field-label";
+    topLbl.style.margin = "0";
+    topLbl.textContent = "Zitat / Pull-Quote (LUKB Corporate Design)";
+
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    layoutSel.style.width = "180px";
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      markDirty();
+    });
+
+    topRow.appendChild(topLbl);
+    topRow.appendChild(layoutSel);
+    container.appendChild(topRow);
+
+    const qWrap = document.createElement("div");
+    qWrap.className = "quote-editor-box";
+    qWrap.style.marginBottom = "10px";
+
+    const qTextarea = document.createElement("textarea");
+    qTextarea.className = "cms-textarea";
+    qTextarea.rows = 3;
+    qTextarea.style.fontStyle = "italic";
+    qTextarea.style.fontSize = "13.5px";
+    qTextarea.placeholder = "Zitattext eingeben (ohne Anführungszeichen, werden automatisch formatiert) …";
+    qTextarea.value = blk.quote || "";
+    qTextarea.addEventListener("input", function () {
+      blk.quote = qTextarea.value;
+      markDirty();
+    });
+    qWrap.appendChild(qTextarea);
+    container.appendChild(qWrap);
+
+    const metaGrid = document.createElement("div");
+    metaGrid.style.display = "grid";
+    metaGrid.style.gridTemplateColumns = "1fr 1fr";
+    metaGrid.style.gap = "10px";
+
+    const authWrap = document.createElement("div");
+    const authLbl = document.createElement("label");
+    authLbl.className = "field-label";
+    authLbl.textContent = "Urheber / Zitatgeber (z.B. Name & Titel)";
+    const authInp = document.createElement("input");
+    authInp.type = "text";
+    authInp.className = "cms-input font-medium";
+    authInp.placeholder = "z.B. Thomas Grüter";
+    authInp.value = blk.author || "";
+    authInp.addEventListener("input", function () {
+      blk.author = authInp.value;
+      markDirty();
+    });
+    authWrap.appendChild(authLbl);
+    authWrap.appendChild(authInp);
+
+    const srcWrap = document.createElement("div");
+    const srcLbl = document.createElement("label");
+    srcLbl.className = "field-label";
+    srcLbl.textContent = "Kontext / Quelle / Funktion";
+    const srcInp = document.createElement("input");
+    srcInp.type = "text";
+    srcInp.className = "cms-input";
+    srcInp.placeholder = "z.B. Chief Investment Officer";
+    srcInp.value = blk.source || "";
+    srcInp.addEventListener("input", function () {
+      blk.source = srcInp.value;
+      markDirty();
+    });
+    srcWrap.appendChild(srcLbl);
+    srcWrap.appendChild(srcInp);
+
+    metaGrid.appendChild(authWrap);
+    metaGrid.appendChild(srcWrap);
+    container.appendChild(metaGrid);
+  }
+
+  function buildDividerBlockBody(container, blk) {
+    if (!blk.style) blk.style = "solid";
+
+    const row = document.createElement("div");
+    row.className = "divider-style-selector";
+
+    const lbl = document.createElement("label");
+    lbl.className = "field-label";
+    lbl.style.margin = "0";
+    lbl.textContent = "Stil der Trennlinie:";
+    row.appendChild(lbl);
+
+    const btnGroup = document.createElement("div");
+    btnGroup.style.display = "flex";
+    btnGroup.style.gap = "6px";
+
+    const previewLine = document.createElement("div");
+    previewLine.className = "divider-preview-line";
+
+    const updatePreview = () => {
+      previewLine.style.borderTop =
+        blk.style === "dashed"
+          ? "2px dashed #94A3B8"
+          : blk.style === "dots"
+          ? "2.5px dotted #94A3B8"
+          : "1.5px solid #94A3B8";
+    };
+
+    [
+      { style: "solid", label: "Durchgezogen —" },
+      { style: "dashed", label: "Gestrichelt - - -" },
+      { style: "dots", label: "Gepunktet · · ·" },
+    ].forEach(function (opt) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className =
+        "btn-lukb btn-lukb-sm " +
+        (blk.style === opt.style ? "btn-lukb-navy" : "btn-lukb-ghost");
+      btn.textContent = opt.label;
+      btn.addEventListener("click", function () {
+        blk.style = opt.style;
+        Array.from(btnGroup.children).forEach(b => {
+          b.className = "btn-lukb btn-lukb-sm btn-lukb-ghost";
+        });
+        btn.className = "btn-lukb btn-lukb-sm btn-lukb-navy";
+        updatePreview();
+        markDirty();
+      });
+      btnGroup.appendChild(btn);
+    });
+
+    row.appendChild(btnGroup);
+    container.appendChild(row);
+    updatePreview();
+    container.appendChild(previewLine);
+  }
+
+  function buildFootnotesBlockBody(container, blk) {
+    if (!blk.title) blk.title = "Anmerkungen & Quellen";
+    if (!Array.isArray(blk.items)) blk.items = [];
+
+    const topGrid = document.createElement("div");
+    topGrid.style.display = "grid";
+    topGrid.style.gridTemplateColumns = "1fr 180px";
+    topGrid.style.gap = "10px";
+    topGrid.style.marginBottom = "8px";
+
+    const titleWrap = document.createElement("div");
+    const titleLbl = document.createElement("label");
+    titleLbl.className = "field-label";
+    titleLbl.textContent = "Titel des Fussnoten- / Endnotenkastens";
+    const titleInp = document.createElement("input");
+    titleInp.type = "text";
+    titleInp.className = "cms-input font-medium";
+    titleInp.value = blk.title || "";
+    titleInp.addEventListener("input", function () {
+      blk.title = titleInp.value;
+      markDirty();
+    });
+    titleWrap.appendChild(titleLbl);
+    titleWrap.appendChild(titleInp);
+
+    const layoutWrap = document.createElement("div");
+    const layoutLbl = document.createElement("label");
+    layoutLbl.className = "field-label";
+    layoutLbl.textContent = "Satz-Breite im PDF";
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      markDirty();
+    });
+    layoutWrap.appendChild(layoutLbl);
+    layoutWrap.appendChild(layoutSel);
+
+    topGrid.appendChild(titleWrap);
+    topGrid.appendChild(layoutWrap);
+    container.appendChild(topGrid);
+
+    const itemsList = document.createElement("div");
+    itemsList.className = "footnotes-items-list";
+
+    function renderItems() {
+      itemsList.innerHTML = "";
+      blk.items.forEach(function (item, idx) {
+        const row = document.createElement("div");
+        row.className = "footnote-row-item";
+
+        const numInp = document.createElement("input");
+        numInp.type = "text";
+        numInp.className = "cms-input font-medium";
+        numInp.style.textAlign = "center";
+        numInp.placeholder = String(idx + 1);
+        numInp.value = item.num || String(idx + 1);
+        numInp.addEventListener("input", function () {
+          item.num = numInp.value;
+          markDirty();
+        });
+
+        const txtInp = document.createElement("input");
+        txtInp.type = "text";
+        txtInp.className = "cms-input";
+        txtInp.placeholder = "Quellenangabe, Datenstand oder methodischer Hinweis …";
+        txtInp.value = item.text || "";
+        txtInp.addEventListener("input", function () {
+          item.text = txtInp.value;
+          markDirty();
+        });
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn-icon-only danger";
+        delBtn.title = "Eintrag entfernen";
+        delBtn.textContent = "✕";
+        delBtn.addEventListener("click", function () {
+          blk.items.splice(idx, 1);
+          renderItems();
+          markDirty();
+        });
+
+        row.appendChild(numInp);
+        row.appendChild(txtInp);
+        row.appendChild(delBtn);
+        itemsList.appendChild(row);
+      });
+    }
+
+    renderItems();
+    container.appendChild(itemsList);
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    addBtn.style.marginTop = "8px";
+    addBtn.textContent = "+ Fussnoten-Eintrag hinzufügen";
+    addBtn.addEventListener("click", function () {
+      const nextNum = String(blk.items.length + 1);
+      blk.items.push({ num: nextNum, text: "" });
+      renderItems();
+      markDirty();
+    });
+    container.appendChild(addBtn);
+  }
+
+  function scanArticleGlossaryTerms() {
+    if (!state.article || !Array.isArray(state.article.blocks)) return [];
+    const termsMap = new Map();
+
+    const scanHtml = (htmlStr) => {
+      if (!htmlStr) return;
+      const tmp = document.createElement("div");
+      tmp.innerHTML = htmlStr;
+      tmp.querySelectorAll(".glossary-term").forEach(el => {
+        const term = el.textContent.trim();
+        const tip = el.getAttribute("data-tooltip") || "";
+        if (term && tip && !termsMap.has(term)) {
+          termsMap.set(term, tip);
+        }
+      });
+    };
+
+    state.article.blocks.forEach(b => {
+      if (b.type === "richtext" || b.type === "callout") {
+        scanHtml(b.html);
+      }
+    });
+
+    const res = [];
+    termsMap.forEach((definition, term) => {
+      res.push({ term: term, definition: definition });
+    });
+    res.sort((a, b) => a.term.localeCompare(b.term));
+    return res;
+  }
+
+  function updateGlossaryBlockPreviews() {
+    document.querySelectorAll(".glossary-auto-detected-box").forEach(box => {
+      const parent = box.closest(".cms-block-card");
+      if (parent && parent.dataset.blockId) {
+        const blk = (state.article.blocks || []).find(b => b.id === parent.dataset.blockId);
+        if (blk && blk.type === "glossary") {
+          renderGlossaryDetectedSection(box, blk);
+        }
+      }
+    });
+  }
+
+  function renderGlossaryDetectedSection(container, blk) {
+    container.innerHTML = "";
+    const autoTerms = scanArticleGlossaryTerms();
+
+    const header = document.createElement("div");
+    header.className = "glossary-detected-header";
+    header.innerHTML = `<strong>Automatisch im Text erkannte Begriffe (${autoTerms.length})</strong>` +
+      `<span style="font-size:11px;color:#0284C7;font-weight:500;">Live synchronisiert</span>`;
+    container.appendChild(header);
+
+    if (autoTerms.length === 0) {
+      const hint = document.createElement("div");
+      hint.style.fontSize = "12px";
+      hint.style.color = "#64748B";
+      hint.style.fontStyle = "italic";
+      hint.textContent = "Bisher keine Begriffe mit 'ℹ Glossar' im Text markiert. Markieren Sie ein beliebiges Fachwort im Fließtext und klicken Sie in der Textleiste auf 'ℹ Glossar'.";
+      container.appendChild(hint);
+      return;
+    }
+
+    const list = document.createElement("div");
+    list.className = "glossary-detected-pills";
+    autoTerms.forEach(item => {
+      const row = document.createElement("div");
+      row.className = "glossary-detected-pill-item";
+      row.innerHTML = `<span class="glossary-detected-term">${item.term}</span> — ` +
+        `<span class="glossary-detected-def">${item.definition}</span>`;
+      list.appendChild(row);
+    });
+    container.appendChild(list);
+  }
+
+  function buildGlossaryBlockBody(container, blk) {
+    if (!blk.title) blk.title = "Glossar & Begriffserklärungen";
+    if (blk.auto_collect === undefined) blk.auto_collect = true;
+    if (!Array.isArray(blk.custom_items)) blk.custom_items = [];
+
+    // Zeile 1: Titel & Satzbreite
+    const topGrid = document.createElement("div");
+    topGrid.style.display = "grid";
+    topGrid.style.gridTemplateColumns = "1fr 180px";
+    topGrid.style.gap = "10px";
+    topGrid.style.marginBottom = "10px";
+
+    const titleWrap = document.createElement("div");
+    const titleLbl = document.createElement("label");
+    titleLbl.className = "field-label";
+    titleLbl.textContent = "Titel des Glossar-Abschnitts";
+    const titleInp = document.createElement("input");
+    titleInp.type = "text";
+    titleInp.className = "cms-input font-medium";
+    titleInp.value = blk.title || "";
+    titleInp.addEventListener("input", function () {
+      blk.title = titleInp.value;
+      markDirty();
+    });
+    titleWrap.appendChild(titleLbl);
+    titleWrap.appendChild(titleInp);
+
+    const layoutWrap = document.createElement("div");
+    const layoutLbl = document.createElement("label");
+    layoutLbl.className = "field-label";
+    layoutLbl.textContent = "Satz-Breite im PDF";
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      markDirty();
+    });
+    layoutWrap.appendChild(layoutLbl);
+    layoutWrap.appendChild(layoutSel);
+
+    topGrid.appendChild(titleWrap);
+    topGrid.appendChild(layoutWrap);
+    container.appendChild(topGrid);
+
+    // Auto-Detected Sektion
+    const detectedBox = document.createElement("div");
+    detectedBox.className = "glossary-auto-detected-box";
+    renderGlossaryDetectedSection(detectedBox, blk);
+    container.appendChild(detectedBox);
+
+    // Manuelle Ergänzungen Sektion
+    const customWrap = document.createElement("div");
+    customWrap.style.marginTop = "10px";
+
+    const customHeader = document.createElement("div");
+    customHeader.style.display = "flex";
+    customHeader.style.justifyContent = "space-between";
+    customHeader.style.alignItems = "center";
+    customHeader.style.marginBottom = "6px";
+
+    const customLbl = document.createElement("label");
+    customLbl.className = "field-label";
+    customLbl.style.margin = "0";
+    customLbl.textContent = "Manuelle Glossar-Ergänzungen (optional):";
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    addBtn.textContent = "+ Begriff hinzufügen";
+
+    customHeader.appendChild(customLbl);
+    customHeader.appendChild(addBtn);
+    customWrap.appendChild(customHeader);
+
+    const customList = document.createElement("div");
+    customList.className = "footnotes-items-list";
+
+    function renderCustomItems() {
+      customList.innerHTML = "";
+      if (blk.custom_items.length === 0) {
+        const noCustom = document.createElement("div");
+        noCustom.style.fontSize = "11.5px";
+        noCustom.style.color = "#94A3B8";
+        noCustom.textContent = "Keine manuellen Einträge (alle Begriffe werden automatisch aus dem Text bezogen).";
+        customList.appendChild(noCustom);
+        return;
+      }
+
+      blk.custom_items.forEach(function (cItem, idx) {
+        const row = document.createElement("div");
+        row.className = "footnote-row-item";
+        row.style.gridTemplateColumns = "130px 1fr 32px";
+
+        const termInp = document.createElement("input");
+        termInp.type = "text";
+        termInp.className = "cms-input font-medium";
+        termInp.placeholder = "Begriff (z.B. Duration)";
+        termInp.value = cItem.term || "";
+        termInp.addEventListener("input", function () {
+          cItem.term = termInp.value;
+          markDirty();
+        });
+
+        const defInp = document.createElement("input");
+        defInp.type = "text";
+        defInp.className = "cms-input";
+        defInp.placeholder = "Definition / Erklärung …";
+        defInp.value = cItem.definition || "";
+        defInp.addEventListener("input", function () {
+          cItem.definition = defInp.value;
+          markDirty();
+        });
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn-icon-only danger";
+        delBtn.title = "Begriff entfernen";
+        delBtn.textContent = "✕";
+        delBtn.addEventListener("click", function () {
+          blk.custom_items.splice(idx, 1);
+          renderCustomItems();
+          markDirty();
+        });
+
+        row.appendChild(termInp);
+        row.appendChild(defInp);
+        row.appendChild(delBtn);
+        customList.appendChild(row);
+      });
+    }
+
+    addBtn.addEventListener("click", function () {
+      blk.custom_items.push({ term: "", definition: "" });
+      renderCustomItems();
+      markDirty();
+    });
+
+    renderCustomItems();
+    customWrap.appendChild(customList);
+    container.appendChild(customWrap);
+  }
 
   function buildSpacerBlockBody(container, blk) {
     if (!blk.height_mm) blk.height_mm = 8;
@@ -590,8 +1262,14 @@
       presetButtons.forEach(function (pb) {
         if (pb.val === cur) {
           pb.btn.classList.add("active");
+          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
+          pb.btn.style.setProperty("color", "#FFFFFF", "important");
+          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
         } else {
           pb.btn.classList.remove("active");
+          pb.btn.style.removeProperty("background");
+          pb.btn.style.removeProperty("color");
+          pb.btn.style.removeProperty("border-color");
         }
       });
     }
@@ -701,6 +1379,183 @@
     container.appendChild(row);
   }
 
+  let activePopover = null;
+
+  function closeActivePopover() {
+    if (activePopover && activePopover.parentNode) {
+      activePopover.parentNode.removeChild(activePopover);
+    }
+    activePopover = null;
+  }
+
+  document.addEventListener("mousedown", function (e) {
+    if (activePopover && !activePopover.contains(e.target)) {
+      closeActivePopover();
+    }
+  });
+
+  function openGlossaryTermPopover(targetEl, editable, onChange) {
+    closeActivePopover();
+
+    const popover = document.createElement("div");
+    popover.className = "lukb-term-popover";
+
+    const header = document.createElement("div");
+    header.className = "lukb-popover-header";
+    header.innerHTML = "<span>ℹ Glossar-Begriff</span>";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn-icon-only";
+    closeBtn.textContent = "✕";
+    closeBtn.style.padding = "0 4px";
+    closeBtn.addEventListener("click", closeActivePopover);
+    header.appendChild(closeBtn);
+    popover.appendChild(header);
+
+    const termLbl = document.createElement("label");
+    termLbl.className = "field-label";
+    termLbl.style.fontSize = "11px";
+    termLbl.style.marginBottom = "3px";
+    termLbl.textContent = "Begriff im Text:";
+    popover.appendChild(termLbl);
+
+    const termInp = document.createElement("input");
+    termInp.type = "text";
+    termInp.className = "cms-input font-medium";
+    termInp.style.marginBottom = "8px";
+    termInp.value = targetEl.textContent.trim();
+    popover.appendChild(termInp);
+
+    const tipLbl = document.createElement("label");
+    tipLbl.className = "field-label";
+    tipLbl.style.fontSize = "11px";
+    tipLbl.style.marginBottom = "3px";
+    tipLbl.textContent = "Erklärung / Tooltip:";
+    popover.appendChild(tipLbl);
+
+    const tipInp = document.createElement("textarea");
+    tipInp.className = "cms-textarea";
+    tipInp.rows = 2;
+    tipInp.style.fontSize = "12px";
+    tipInp.value = targetEl.getAttribute("data-tooltip") || "";
+    popover.appendChild(tipInp);
+
+    const actions = document.createElement("div");
+    actions.className = "lukb-popover-actions";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn-lukb btn-lukb-outline-light btn-lukb-sm";
+    removeBtn.style.color = "#DC2626";
+    removeBtn.style.borderColor = "#FCA5A5";
+    removeBtn.textContent = "✕ Markierung entfernen";
+    removeBtn.title = "Entfernt die Glossar-Markierung und behält das Wort als normalen Fließtext";
+    removeBtn.addEventListener("click", function () {
+      const textNode = document.createTextNode(targetEl.textContent);
+      targetEl.parentNode.replaceChild(textNode, targetEl);
+      closeActivePopover();
+      onChange(editable.innerHTML);
+      markDirty();
+      updateGlossaryBlockPreviews();
+    });
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn-lukb btn-lukb-primary btn-lukb-sm";
+    saveBtn.textContent = "Übernehmen";
+    saveBtn.addEventListener("click", function () {
+      targetEl.textContent = termInp.value.trim() || targetEl.textContent;
+      targetEl.setAttribute("data-tooltip", tipInp.value.trim());
+      closeActivePopover();
+      onChange(editable.innerHTML);
+      markDirty();
+      updateGlossaryBlockPreviews();
+    });
+
+    actions.appendChild(removeBtn);
+    actions.appendChild(saveBtn);
+    popover.appendChild(actions);
+
+    document.body.appendChild(popover);
+    activePopover = popover;
+
+    const rect = targetEl.getBoundingClientRect();
+    popover.style.top = (rect.bottom + window.scrollY + 6) + "px";
+    popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left + window.scrollX)) + "px";
+  }
+
+  function openFootnotePopover(targetEl, editable, onChange) {
+    closeActivePopover();
+
+    const popover = document.createElement("div");
+    popover.className = "lukb-term-popover";
+
+    const header = document.createElement("div");
+    header.className = "lukb-popover-header";
+    header.innerHTML = "<span>[¹] Inline-Fussnote</span>";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn-icon-only";
+    closeBtn.textContent = "✕";
+    closeBtn.style.padding = "0 4px";
+    closeBtn.addEventListener("click", closeActivePopover);
+    header.appendChild(closeBtn);
+    popover.appendChild(header);
+
+    const fnLbl = document.createElement("label");
+    fnLbl.className = "field-label";
+    fnLbl.style.fontSize = "11px";
+    fnLbl.style.marginBottom = "3px";
+    fnLbl.textContent = "Fussnotentext für Seitenende:";
+    popover.appendChild(fnLbl);
+
+    const fnInp = document.createElement("textarea");
+    fnInp.className = "cms-textarea";
+    fnInp.rows = 3;
+    fnInp.style.fontSize = "12px";
+    fnInp.value = targetEl.textContent.trim();
+    popover.appendChild(fnInp);
+
+    const actions = document.createElement("div");
+    actions.className = "lukb-popover-actions";
+
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "btn-lukb btn-lukb-outline-light btn-lukb-sm";
+    removeBtn.style.color = "#DC2626";
+    removeBtn.style.borderColor = "#FCA5A5";
+    removeBtn.textContent = "✕ Fussnote löschen";
+    removeBtn.title = "Löscht diese Fussnote vollständig";
+    removeBtn.addEventListener("click", function () {
+      targetEl.parentNode.removeChild(targetEl);
+      closeActivePopover();
+      onChange(editable.innerHTML);
+      markDirty();
+    });
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn-lukb btn-lukb-primary btn-lukb-sm";
+    saveBtn.textContent = "Übernehmen";
+    saveBtn.addEventListener("click", function () {
+      targetEl.textContent = fnInp.value.trim();
+      closeActivePopover();
+      onChange(editable.innerHTML);
+      markDirty();
+    });
+
+    actions.appendChild(removeBtn);
+    actions.appendChild(saveBtn);
+    popover.appendChild(actions);
+
+    document.body.appendChild(popover);
+    activePopover = popover;
+
+    const rect = targetEl.getBoundingClientRect();
+    popover.style.top = (rect.bottom + window.scrollY + 6) + "px";
+    popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left + window.scrollX)) + "px";
+  }
+
   function createRichTextWidget(initialHtml, onChange, extraRightEl) {
     const wrapper = document.createElement("div");
 
@@ -743,6 +1598,54 @@
       btnGroup.appendChild(btn);
     });
 
+    // Glossar / Begriffserklärung mit Hover-Tooltip (Web) & Glossar-Verzeichnis
+    const glossBtn = document.createElement("button");
+    glossBtn.type = "button";
+    glossBtn.className = "rt-btn";
+    glossBtn.textContent = "ℹ Glossar";
+    glossBtn.title = "Markierten Begriff mit Hover-Tooltip (Web) & Glossar-Verzeichnis am Textende versehen";
+    glossBtn.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      const selText = range.toString().trim();
+      const tip = prompt("Begriffserklärung für Tooltip & Glossar-Verzeichnis eingeben:", "");
+      if (!tip) return;
+      const span = document.createElement("span");
+      span.className = "glossary-term";
+      span.setAttribute("data-tooltip", tip);
+      span.textContent = selText || "Begriff";
+      range.deleteContents();
+      range.insertNode(span);
+      onChange(editable.innerHTML);
+      markDirty();
+      updateGlossaryBlockPreviews();
+    });
+    btnGroup.appendChild(glossBtn);
+
+    // Inline-Fussnote Button
+    const fnBtn = document.createElement("button");
+    fnBtn.type = "button";
+    fnBtn.className = "rt-btn";
+    fnBtn.textContent = "[¹] Fussnote";
+    fnBtn.title = "Inline-Fussnote einfügen (wird im PDF am Seitenende platziert)";
+    fnBtn.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      const sel = window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      const fnText = prompt("Fussnotentext für Seitenende eingeben:", "");
+      if (!fnText) return;
+      const fnTag = document.createElement("footnote");
+      fnTag.textContent = fnText;
+      range.collapse(false);
+      range.insertNode(fnTag);
+      onChange(editable.innerHTML);
+      markDirty();
+    });
+    btnGroup.appendChild(fnBtn);
+
     toolbar.appendChild(btnGroup);
     if (extraRightEl) {
       toolbar.appendChild(extraRightEl);
@@ -750,6 +1653,24 @@
 
     editable.addEventListener("input", function () {
       onChange(editable.innerHTML);
+      updateGlossaryBlockPreviews();
+    });
+
+    editable.addEventListener("click", function (e) {
+      const termEl = e.target.closest(".glossary-term");
+      if (termEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        openGlossaryTermPopover(termEl, editable, onChange);
+        return;
+      }
+      const fnEl = e.target.closest("footnote");
+      if (fnEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        openFootnotePopover(fnEl, editable, onChange);
+        return;
+      }
     });
 
     // Verhindere fremde Styles beim Einfügen aus Word/Webseiten
@@ -758,6 +1679,7 @@
       const text = (e.clipboardData || window.clipboardData).getData("text/plain");
       document.execCommand("insertText", false, text);
       onChange(editable.innerHTML);
+      updateGlossaryBlockPreviews();
     });
 
     wrapper.appendChild(toolbar);
@@ -1635,8 +2557,14 @@
       presetButtons.forEach(function (pb) {
         if (pb.val === cur) {
           pb.btn.classList.add("active");
+          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
+          pb.btn.style.setProperty("color", "#FFFFFF", "important");
+          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
         } else {
           pb.btn.classList.remove("active");
+          pb.btn.style.removeProperty("background");
+          pb.btn.style.removeProperty("color");
+          pb.btn.style.removeProperty("border-color");
         }
       });
     }
@@ -3228,6 +4156,32 @@
     });
   }
 
+  function bindDropdownListeners() {
+    document.addEventListener("click", function (ev) {
+      const toggle = ev.target.closest(".lukb-dropdown-toggle");
+      const dropdown = toggle ? toggle.closest(".lukb-dropdown") : null;
+
+      document.querySelectorAll(".lukb-dropdown.show").forEach(function (d) {
+        if (d !== dropdown) {
+          d.classList.remove("show");
+        }
+      });
+
+      if (dropdown) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        dropdown.classList.toggle("show");
+        return;
+      }
+
+      if (ev.target.closest(".lukb-dropdown-item")) {
+        document.querySelectorAll(".lukb-dropdown.show").forEach(function (d) {
+          d.classList.remove("show");
+        });
+      }
+    });
+  }
+
   function initEditorApp() {
     if (state._initialized) return;
     state._initialized = true;
@@ -3235,6 +4189,7 @@
     bindAddBlockButtons();
     bindSidebarAndModalListeners();
     bindFocusTrackingListeners();
+    bindDropdownListeners();
     registerShinyHandlers();
   }
 

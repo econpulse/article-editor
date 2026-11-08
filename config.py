@@ -19,10 +19,12 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 WWW_DIR = BASE_DIR / "www"
 FONTS_DIR = WWW_DIR / "fonts"
 DATA_DIR = BASE_DIR / "data"
+STATIC_PORTAL_DIR = Path(os.getenv("STATIC_PORTAL_DIR", str(DATA_DIR / "static_portal_dist"))).resolve()
 
 # Stelle sicher, dass Arbeitsverzeichnisse existieren
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 FONTS_DIR.mkdir(parents=True, exist_ok=True)
+STATIC_PORTAL_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def build_database_url() -> tuple[str, str]:

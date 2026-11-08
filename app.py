@@ -21,14 +21,17 @@ from database.repository import (
     init_db_and_seed,
     list_articles,
     list_available_tickers,
+    publish_article_to_portal,
     save_article,
     save_asset,
     search_tickers,
+    unpublish_article_from_portal,
 )
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
 from services.renderer import (
     list_available_templates,
+    render_docx_bytes,
     render_pdf_bytes,
     render_preview_svg_pages,
     render_web_html,
@@ -129,6 +132,12 @@ app_ui = ui.page_fluid(
                 id="lukb-autosave-pill",
                 class_="autosave-pill status-saved",
             ),
+            ui.span(
+                "📊 0 Wörter · ~1 Min. · ca. 0.5 Seiten",
+                id="lukb-stats-counter",
+                class_="editor-stats-badge",
+                title="Live-Wortzählung, Lesezeit (~200 WpM) und geschätzter A4-Füllstand",
+            ),
             ui.div(
                 id="lukb-collab-presence",
                 class_="collab-presence-bar",
@@ -144,15 +153,77 @@ app_ui = ui.page_fluid(
             class_="cms-topbar-center",
         ),
         ui.div(
-            ui.download_button(
-                "download_html",
-                "Web-HTML Export",
-                class_="btn-lukb btn-lukb-outline-light",
+            # Menü 1: Portal (Statische Posit Connect Plattform)
+            ui.div(
+                ui.tags.button(
+                    "🌐 Portal ▾",
+                    type="button",
+                    class_="btn-lukb btn-lukb-success lukb-dropdown-toggle",
+                    title="Aktionen für das statische Content-Portal (Posit Connect)",
+                ),
+                ui.div(
+                    ui.tags.button(
+                        "🌐 Auf Portal publizieren",
+                        type="button",
+                        class_="lukb-dropdown-item",
+                        title="Diesen Artikel auf das statische Portal veröffentlichen oder aktualisieren",
+                        onclick="Shiny.setInputValue('lukb_publish_portal', Math.random(), {priority: 'event'});",
+                    ),
+                    ui.tags.button(
+                        "❌ Vom Portal zurückziehen",
+                        type="button",
+                        class_="lukb-dropdown-item text-danger",
+                        title="Artikel vom statischen Portal entfernen (Status wird wieder Entwurf)",
+                        onclick="Shiny.setInputValue('lukb_unpublish_portal', Math.random(), {priority: 'event'});",
+                    ),
+                    ui.tags.div(class_="lukb-dropdown-divider"),
+                    ui.tags.a(
+                        "↗ Portal ansehen",
+                        href="/portal/",
+                        target="_blank",
+                        class_="lukb-dropdown-item",
+                        title="Öffnet das statische Content-Portal in einem neuen Browser-Tab",
+                    ),
+                    ui.download_button(
+                        "download_portal_bundle",
+                        "📦 Portal-Bundle herunterladen (.tar.gz)",
+                        class_="lukb-dropdown-item",
+                        title="Gesamtes statisches Portal als Posit Connect Deploy-Bundle herunterladen",
+                    ),
+                    class_="lukb-dropdown-menu",
+                ),
+                class_="lukb-dropdown",
             ),
-            ui.download_button(
-                "download_pdf",
-                "PDF Export (Typst)",
-                class_="btn-lukb btn-lukb-primary",
+            # Menü 2: Export (Dokumentenformate)
+            ui.div(
+                ui.tags.button(
+                    "📥 Export ▾",
+                    type="button",
+                    class_="btn-lukb btn-lukb-primary lukb-dropdown-toggle",
+                    title="Publikation exportieren (PDF, Word, Web-HTML)",
+                ),
+                ui.div(
+                    ui.download_button(
+                        "download_pdf",
+                        "📄 PDF Export (Typst)",
+                        class_="lukb-dropdown-item",
+                        title="Druckreifes Typst-PDF im LUKB Corporate Design herunterladen",
+                    ),
+                    ui.download_button(
+                        "download_docx",
+                        "📝 Word Export (.docx)",
+                        class_="lukb-dropdown-item",
+                        title="Microsoft Word Dokument herunterladen",
+                    ),
+                    ui.download_button(
+                        "download_html",
+                        "🌐 Web-HTML Export",
+                        class_="lukb-dropdown-item",
+                        title="Eigenständige Web-HTML-Datei herunterladen",
+                    ),
+                    class_="lukb-dropdown-menu",
+                ),
+                class_="lukb-dropdown",
             ),
             class_="cms-topbar-actions",
         ),
@@ -345,6 +416,25 @@ app_ui = ui.page_fluid(
                     ui.div(id="meta-authors-container", class_="authors-list-container"),
                     class_="field-group",
                 ),
+                # Zeile 5b: Themen-Tags / Schlagwörter
+                ui.div(
+                    ui.div(
+                        ui.tags.label("Themen-Tags / Schlagwörter", class_="field-label", style="margin:0;"),
+                        ui.span("Mit Enter oder Komma hinzufügen", style="font-size:11.5px;color:#5A687C;"),
+                        style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;",
+                    ),
+                    ui.div(
+                        ui.div(id="meta-tags-container", class_="tags-chips-container"),
+                        ui.tags.input(
+                            id="meta-tag-input",
+                            type="text",
+                            class_="cms-input tag-input-field",
+                            placeholder="+ Tag eingeben und Enter drücken (z.B. Aktien, SNB, Zinsen, Inflation) …",
+                        ),
+                        class_="tags-editor-box",
+                    ),
+                    class_="field-group",
+                ),
                 # Zeile 6: Aufklappbarer Disclaimer
                 ui.tags.details(
                     ui.tags.summary(
@@ -428,6 +518,36 @@ app_ui = ui.page_fluid(
                         style="border-color:#C59B27;background:#FFFBEB;color:#78350F;",
                         **{"data-add-block-type": "colbreak"},
                         title="Erzwingt an dieser Position den Umbruch in die nächste Spalte (colbreak)",
+                    ),
+                    ui.tags.button(
+                        "+ Zitat",
+                        type="button",
+                        class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        style="border-color:#009FE3;background:#F0F9FF;color:#002855;",
+                        **{"data-add-block-type": "quote"},
+                        title="Fügt ein typografisches Zitat / Pull-Quote mit Autoren- und Quellenzeile ein",
+                    ),
+                    ui.tags.button(
+                        "+ Trennlinie",
+                        type="button",
+                        class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        **{"data-add-block-type": "divider"},
+                        title="Fügt eine horizontale Trennlinie (durchgezogen, gestrichelt, gepunktet) ein",
+                    ),
+                    ui.tags.button(
+                        "+ Fussnoten",
+                        type="button",
+                        class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        **{"data-add-block-type": "footnotes"},
+                        title="Fügt einen strukturierten Fussnoten- / Quellenapparat ein",
+                    ),
+                    ui.tags.button(
+                        "+ Glossar",
+                        type="button",
+                        class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        style="border-color:#009FE3;background:#EBF5FB;color:#002855;",
+                        **{"data-add-block-type": "glossary"},
+                        title="Fügt ein Glossar-Verzeichnis am Textende ein (sammelt automatisch alle im Artikel markierten Begriffe)",
                     ),
                     class_="add-block-bar",
                 ),
@@ -1082,8 +1202,77 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         if doc is not None:
             await _send_preview(doc)
 
+    # ------------------------------------------------------------------------
+    # Statisches Content-Portal: Publizieren, Aktualisieren & Zurückziehen
+    # ------------------------------------------------------------------------
+    @reactive.effect
+    @reactive.event(input.lukb_publish_portal)
+    async def _on_publish_portal() -> None:
+        doc = current_doc.get()
+        if not doc:
+            return
+        try:
+            res = publish_article_to_portal(doc.id, user=_current_user())
+            if res.get("success"):
+                doc.status = "published"
+                current_doc.set(doc)
+                await _send_article_list(doc.id)
+                count = res.get("total_published", 1)
+                ui.notification_show(
+                    f"✅ Artikel erfolgreich publiziert! ({count} Artikel auf dem Portal online)",
+                    type="message",
+                    duration=5,
+                )
+            else:
+                ui.notification_show(f"Publikationsfehler: {res.get('error')}", type="warning", duration=5)
+        except Exception as exc:
+            ui.notification_show(f"Fehler beim Publizieren: {exc}", type="error", duration=6)
+
+    @reactive.effect
+    @reactive.event(input.lukb_unpublish_portal)
+    async def _on_unpublish_portal() -> None:
+        doc = current_doc.get()
+        if not doc:
+            return
+        try:
+            res = unpublish_article_from_portal(doc.id, user=_current_user(), new_status="draft")
+            if res.get("success"):
+                doc.status = "draft"
+                current_doc.set(doc)
+                await _send_article_list(doc.id)
+                ui.notification_show(
+                    "Artikel vom Portal zurückgezogen (Status auf 'Entwurf' gesetzt).",
+                    type="message",
+                    duration=5,
+                )
+            else:
+                ui.notification_show(f"Fehler: {res.get('error')}", type="warning", duration=5)
+        except Exception as exc:
+            ui.notification_show(f"Fehler: {exc}", type="error", duration=6)
+
+    # Posit Connect Static Bundle Download (.tar.gz)
+    @render.download_button(
+        filename=lambda: f"connect_static_portal_{datetime.now().strftime('%Y%m%d_%H%M')}.tar.gz",
+        media_type="application/gzip",
+    )
+    def download_portal_bundle():
+        from services.portal_publisher import create_connect_bundle
+        bundle_path = create_connect_bundle()
+        yield bundle_path.read_bytes()
+
+    # Word-Export (.docx) via python-docx
+    @render.download_button(
+        filename=lambda: f"{_slugify_filename(current_doc.get().metadata.title if current_doc.get() else 'Publikation')}.docx",
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+    def download_docx():
+        doc = current_doc.get()
+        if doc is None:
+            return
+        yield render_docx_bytes(doc)
+
     # PDF-Export via Typst
-    @render.download(
+    @render.download_button(
         filename=lambda: f"{_slugify_filename(current_doc.get().metadata.title if current_doc.get() else 'Publikation')}.pdf",
         media_type="application/pdf",
     )
@@ -1094,7 +1283,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         yield render_pdf_bytes(doc)
 
     # Web-HTML-Export via Jinja2
-    @render.download(
+    @render.download_button(
         filename=lambda: f"{_slugify_filename(current_doc.get().metadata.title if current_doc.get() else 'Publikation')}.html",
         media_type="text/html",
     )
@@ -1106,3 +1295,21 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
 
 
 app = App(app_ui, server, static_assets=WWW_DIR)
+
+# Statisches Content-Portal lokal unter /portal/ und /portal mounten (vor der Starlette Catch-All Route!)
+try:
+    from starlette.staticfiles import StaticFiles
+    from starlette.routing import Mount, Route
+    from starlette.responses import RedirectResponse
+    from config import STATIC_PORTAL_DIR
+
+    STATIC_PORTAL_DIR.mkdir(parents=True, exist_ok=True)
+
+    async def _portal_redirect(request):
+        return RedirectResponse(url="/portal/")
+
+    # Am Anfang der Starlette-Routenliste einfügen, damit /portal und /portal/ vor dem WWW_DIR-Catch-All greifen
+    app.starlette_app.routes.insert(0, Route("/portal", _portal_redirect))
+    app.starlette_app.routes.insert(1, Mount("/portal", StaticFiles(directory=str(STATIC_PORTAL_DIR), html=True), name="portal"))
+except Exception:
+    pass

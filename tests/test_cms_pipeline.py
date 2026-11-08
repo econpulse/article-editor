@@ -28,7 +28,13 @@ from database.repository import (
     save_asset,
 )
 from services.html_to_typst import html_to_typst
-from services.renderer import render_pdf_bytes, render_preview_svg_pages, render_web_html
+from services.renderer import (
+    format_publication_date,
+    render_docx_bytes,
+    render_pdf_bytes,
+    render_preview_svg_pages,
+    render_web_html,
+)
 from app import app
 
 
@@ -394,7 +400,7 @@ def test_layout_elements_spacer_and_colbreak():
     - Web-HTML5-Rendering
     """
     from schemas.article import ArticleDocument, ColbreakBlock, SpacerBlock
-    from services.renderer import render_pdf_bytes, render_preview_svg_pages, render_web_html
+    from services.renderer import render_docx_bytes, render_pdf_bytes, render_preview_svg_pages, render_web_html
 
     sp1 = SpacerBlock(height_mm=12)
     assert sp1.height_mm == 12
@@ -439,6 +445,236 @@ def test_layout_elements_spacer_and_colbreak():
     flash_pdf = render_pdf_bytes(doc_flash)
     assert flash_pdf.startswith(b"%PDF-")
 
+    # Word .docx Export testen
+    docx_bytes = render_docx_bytes(doc)
+    assert docx_bytes.startswith(b"PK\x03\x04"), "DOCX muss valides ZIP/OpenXML-Archiv sein"
+    assert len(docx_bytes) > 8000
+
+
+def test_smart_cms_features_3a_and_3b():
+    """
+    Testet alle Anforderungen aus 3A und 3B:
+    3A:
+      - Zitat / Pull-Quote (quote)
+      - Horizontale Trennlinie (divider)
+      - Fussnoten- / Endnoten-Apparat (footnotes)
+    3B:
+      - Themen-Tags / Schlagwörter (tags)
+      - Glossar / Infotext-Tooltip (<span data-tooltip="...">) & Inline-Fussnote (<footnote>)
+      - PDF-, HTML- und DOCX-Export
+    """
+    from schemas.article import (
+        ArticleDocument,
+        ArticleMetadata,
+        DividerBlock,
+        FootnotesBlock,
+        GlossaryBlock,
+        QuoteBlock,
+    )
+    from services.html_to_typst import html_to_typst
+    from services.renderer import (
+        extract_glossary_terms_from_article,
+        render_docx_bytes,
+        render_pdf_bytes,
+        render_preview_svg_pages,
+        render_web_html,
+    )
+
+    # 1. Tags Validierung (String und Liste)
+    meta1 = ArticleMetadata(tags="Aktien, SNB, Zinsen")
+    assert meta1.tags == ["Aktien", "SNB", "Zinsen"]
+    meta2 = ArticleMetadata(tags=["Inflation", " Gold "])
+    assert meta2.tags == ["Inflation", "Gold"]
+
+    # 2. Block-Validierung
+    qb = QuoteBlock(
+        quote="Die Schweizer Wirtschaft beweist beachtliche Robustheit.",
+        author="Thomas Grüter",
+        source="Chief Investment Officer",
+        layout="column",
+    )
+    assert qb.type == "quote"
+    assert qb.author == "Thomas Grüter"
+
+    div_solid = DividerBlock(style="solid")
+    assert div_solid.style == "solid"
+    div_dots = DividerBlock(style="dots")
+    assert div_dots.style == "dots"
+
+    fn_blk = FootnotesBlock(
+        title="Anmerkungen & Quellen",
+        items=[
+            {"num": "1", "text": "Quelle: Bloomberg, LUKB Investment Office"},
+            {"num": "2", "text": "Berechnungsbasis: Monatliche Renditen in CHF"},
+        ],
+    )
+    assert len(fn_blk.items) == 2
+    assert fn_blk.items[0]["num"] == "1"
+
+    gloss_blk = GlossaryBlock(
+        title="Glossar & Begriffserklärungen",
+        auto_collect=True,
+        custom_items=[{"term": "Duration", "definition": "Kennzahl für das Zinsänderungsrisiko einer Anleihe."}],
+    )
+    assert gloss_blk.type == "glossary"
+
+    # 3. HTML to Typst mit Glossar-Tooltip & Inline-Fussnote
+    sample_html = (
+        '<p>Die <span class="glossary-term" data-tooltip="Schweizerische Nationalbank">SNB</span> '
+        'steuert die Geldpolitik.<footnote>Siehe SNB-Geldpolitikbericht 2026.</footnote></p>'
+    )
+    typst_code = html_to_typst(sample_html)
+    assert "#underline" in typst_code
+    # Glossar-Begriff wird im Text dezent unterstrichen, aber erzeugt KEINE Seitenfussnote:
+    assert "#footnote[Schweizerische Nationalbank]" not in typst_code
+    # Die echte Inline-Fussnote wird wie gewünscht als Fussnote gerendert:
+    assert "#footnote[Siehe SNB-Geldpolitikbericht 2026.]" in typst_code
+
+    # Test der Auto-Extraction von Glossarbegriffen aus dem Text
+    extracted = extract_glossary_terms_from_article([{"type": "richtext", "html": sample_html}])
+    assert len(extracted) == 1
+    assert extracted[0]["term"] == "SNB"
+    assert extracted[0]["definition"] == "Schweizerische Nationalbank"
+
+    # 4. Gesamtdokument zusammenstellen
+    doc = ArticleDocument(
+        id="art-3a-3b-complete",
+        template_id="investment_focus",
+        metadata=ArticleMetadata(
+            title="Wirtschaftsausblick Schweiz 2026",
+            subtitle="Fokus Zinsen und Währungen",
+            lead="Die Teuerung bleibt im Zielband, während die Zentralbanken vor weiteren Weichenstellungen stehen.",
+            tags=["Geldpolitik", "SNB", "Franken", "Konjunktur"],
+            authors=[{"name": "Dr. Reto Krähenbühl", "role": "Leiter Makroökonomie"}],
+        ),
+        blocks=[
+            {"id": "h1", "type": "heading", "level": 1, "text": "Geldpolitische Lage"},
+            {"id": "rt1", "type": "richtext", "html": sample_html},
+            qb.model_dump(),
+            div_dots.model_dump(),
+            {"id": "rt2", "type": "richtext", "html": "<p>Nachfolgend die methodischen Erläuterungen.</p>"},
+            fn_blk.model_dump(),
+            gloss_blk.model_dump(),
+        ],
+    )
+
+    # 5. Typst PDF Rendering
+    pdf_bytes = render_pdf_bytes(doc)
+    assert pdf_bytes.startswith(b"%PDF-"), "Typst PDF muss fehlerfrei kompilieren"
+    assert len(pdf_bytes) > 8000
+
+    # 6. Typst SVG Rendering
+    svg_pages = render_preview_svg_pages(doc)
+    assert len(svg_pages) >= 1
+    assert "<svg" in svg_pages[0]
+
+    # 7. HTML Rendering
+    html_out = render_web_html(doc)
+    assert "blk-quote" in html_out
+    assert "Thomas Grüter" in html_out
+    assert "blk-divider-dots" in html_out
+    assert "blk-footnotes" in html_out
+    assert "blk-glossary" in html_out
+    assert "article-tag" in html_out
+    assert "Geldpolitik" in html_out
+    assert "Schweizerische Nationalbank" in html_out
+    assert "Duration" in html_out
+
+    # 8. DOCX Rendering
+    docx_bytes = render_docx_bytes(doc)
+    assert docx_bytes.startswith(b"PK\x03\x04")
+    assert len(docx_bytes) > 9000
+
+    # 9. Auch in market_flash (1-spaltig) kompilieren
+    doc_flash = ArticleDocument(
+        id="art-flash-3a-3b",
+        template_id="market_flash",
+        metadata=doc.metadata,
+        blocks=doc.blocks,
+    )
+    flash_pdf = render_pdf_bytes(doc_flash)
+    assert flash_pdf.startswith(b"%PDF-")
+
+
+def test_publication_date_and_page_numbering():
+    """
+    Testet:
+    1. Datumsformatierung in '8. November 2026' für Publikationsdatum.
+    2. Einbettung des Datums im Titel/Lead-Bereich der ersten Seite in allen Templates.
+    3. Seitenzahl-Format '(1/5)' bzw. '(aktuelle/Gesamt)' unten rechts in allen Templates.
+    """
+    # 1. Format-Prüfung
+    assert format_publication_date("2026-11-08") == "8. November 2026"
+    assert format_publication_date("2026-11-05") == "5. November 2026"
+    assert format_publication_date("2026-01-01") == "1. Januar 2026"
+    assert format_publication_date("08.11.2026") == "8. November 2026"
+    assert format_publication_date("8. November 2026") == "8. November 2026"
+
+    # 2. Template-Prüfung investment_focus
+    from schemas.article import ArticleDocument, ArticleMetadata
+
+    doc_focus = ArticleDocument(
+        id="art-test-date-focus",
+        template_id="investment_focus",
+        metadata=ArticleMetadata(
+            title="Wachstumsausblick Schweiz",
+            subtitle="Konjunktur & Zinsen",
+            lead="Die Schweizer Wirtschaft behauptet sich in einem anspruchsvollen weltwirtschaftlichen Umfeld.",
+            publication_date="2026-11-08",
+        ),
+        blocks=[
+            {"id": "b1", "type": "heading", "level": 1, "text": "Stabile Inlandsnachfrage"},
+            {
+                "id": "b2",
+                "type": "richtext",
+                "html": "<p>Der private Konsum bleibt der wichtigste Pfeiler der Schweizer Konjunktur.</p>" * 8,
+            },
+        ],
+    )
+
+    pdf_focus = render_pdf_bytes(doc_focus)
+    assert pdf_focus.startswith(b"%PDF-")
+    assert len(pdf_focus) > 5000
+
+    svg_focus = render_preview_svg_pages(doc_focus)
+    assert len(svg_focus) >= 1
+
+    html_focus = render_web_html(doc_focus)
+    assert "8. November 2026" in html_focus
+    assert "Wachstumsausblick Schweiz" in html_focus
+    assert "1/1" in html_focus
+
+    # 3. Template-Prüfung market_flash
+    doc_flash = ArticleDocument(
+        id="art-test-date-flash",
+        template_id="market_flash",
+        metadata=ArticleMetadata(
+            title="SNB Leitzinsentscheid",
+            subtitle="Market Flash",
+            lead="Die Schweizerische Nationalbank belässt den Leitzins unverändert.",
+            publication_date="2026-11-08",
+        ),
+        blocks=[
+            {"id": "bf1", "type": "heading", "level": 1, "text": "Entscheid im Einklang mit Konsens"},
+            {
+                "id": "bf2",
+                "type": "richtext",
+                "html": "<p>Die Inflationsentwicklung verläuft gemäss den Prognosen der Notenbank.</p>" * 8,
+            },
+        ],
+    )
+
+    pdf_flash = render_pdf_bytes(doc_flash)
+    assert pdf_flash.startswith(b"%PDF-")
+    assert len(pdf_flash) > 5000
+
+    svg_flash = render_preview_svg_pages(doc_flash)
+    assert len(svg_flash) >= 1
+
+    html_flash = render_web_html(doc_flash)
+    assert "8. November 2026" in html_flash
+    assert "SNB Leitzinsentscheid" in html_flash
+
 
 if __name__ == "__main__":
     test_mssql_url_builder()
@@ -448,6 +684,10 @@ if __name__ == "__main__":
     test_concurrent_multi_author_block_merge()
     test_db_chart_timeseries_block()
     test_layout_elements_spacer_and_colbreak()
+    test_smart_cms_features_3a_and_3b()
+    test_publication_date_and_page_numbering()
     test_full_cms_workflow()
+    from tests.test_portal_publisher import test_portal_publisher_flow
+    test_portal_publisher_flow()
     assert app is not None
     print("ALL TESTS PASSED SUCCESSFULLY!")

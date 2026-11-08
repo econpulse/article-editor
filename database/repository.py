@@ -396,13 +396,54 @@ def duplicate_article(article_id: str, user: str = "Investment Office") -> Artic
 
 
 def delete_article(article_id: str) -> bool:
-    """Löscht einen Artikel aus der Datenbank."""
+    """Löscht einen Artikel aus der Datenbank und entfernt ihn ggf. vom statischen Portal."""
+    try:
+        from services.portal_publisher import unpublish_article
+        unpublish_article(article_id)
+    except Exception:
+        pass
+
     with get_db_session() as session:
         row = session.get(ArticleModel, article_id)
         if not row:
             return False
         session.delete(row)
         return True
+
+
+def publish_article_to_portal(article_id: str, user: str = "Investment Office") -> dict[str, Any]:
+    """
+    Publiziert einen Artikel auf das statische Content-Portal:
+    - Setzt status auf 'published'
+    - Rendert HTML & druckreifes Typst-PDF
+    - Aktualisiert Portal-Übersicht & Volltext-Suchindex
+    """
+    doc = get_article(article_id)
+    if not doc:
+        return {"success": False, "error": f"Artikel {article_id} nicht gefunden"}
+
+    doc.status = "published"
+    save_article(doc, user=user, create_revision=True, revision_note="Auf statischem Portal publiziert")
+    from services.portal_publisher import publish_article
+    return publish_article(doc)
+
+
+def unpublish_article_from_portal(
+    article_id: str,
+    user: str = "Investment Office",
+    new_status: str = "draft",
+) -> dict[str, Any]:
+    """
+    Zieht einen publizierten Artikel vom statischen Portal zurück:
+    - Setzt den Datenbankstatus zurück auf 'draft' (oder 'review')
+    - Entfernt die statischen Dateien und aktualisiert Portal-Übersicht & Suchindex
+    """
+    doc = get_article(article_id)
+    if doc:
+        doc.status = new_status
+        save_article(doc, user=user, create_revision=True, revision_note="Vom statischen Portal zurückgezogen")
+    from services.portal_publisher import unpublish_article
+    return unpublish_article(article_id)
 
 
 def save_asset(

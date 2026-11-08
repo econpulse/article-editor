@@ -215,6 +215,17 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   border-radius: var(--radius-sm);
 }
 
+.editor-stats-badge {
+  font-size: 11.5px;
+  color: #FFFFFF;
+  background: rgba(0, 159, 227, 0.25);
+  border: 1px solid rgba(0, 159, 227, 0.5);
+  padding: 3px 9px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
 .cms-topbar-actions {
   display: flex;
   align-items: center;
@@ -249,6 +260,16 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 
 .btn-lukb-primary:hover {
   background: #0088C2;
+}
+
+.btn-lukb-success {
+  background: #0D9488;
+  color: #FFFFFF !important;
+  border-color: #0F766E;
+}
+
+.btn-lukb-success:hover {
+  background: #0F766E;
 }
 
 .btn-lukb-navy {
@@ -627,6 +648,225 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 .cms-block-card.block-type-callout { border-left-color: var(--lukb-gold); }
 .cms-block-card.block-type-spacer { border-left-color: #8B5CF6; }
 .cms-block-card.block-type-colbreak { border-left-color: #F59E0B; }
+.cms-block-card.block-type-quote { border-left-color: #009FE3; }
+.cms-block-card.block-type-divider { border-left-color: #94A3B8; }
+.cms-block-card.block-type-footnotes { border-left-color: #64748B; }
+.cms-block-card.block-type-glossary { border-left-color: #0284C7; }
+
+/* Tags Chips Editor */
+.tags-editor-box {
+  background: #FFFFFF;
+  border: 1px solid var(--lukb-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.tags-chips-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: #EFF6FF;
+  border: 1px solid #BFDBFE;
+  color: var(--lukb-navy);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  border-radius: 3px;
+}
+
+.tag-chip-del {
+  cursor: pointer;
+  color: #64748B;
+  font-size: 11px;
+  font-weight: bold;
+}
+
+.tag-chip-del:hover {
+  color: #DC2626;
+}
+
+.tag-input-field {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  padding: 4px 2px !important;
+  font-size: 12.5px;
+  background: transparent;
+}
+
+/* Styles für Quote, Divider, Footnotes im Block-Editor */
+.quote-editor-box {
+  border-left: 3px solid var(--lukb-cyan);
+  padding-left: 10px;
+}
+
+.divider-style-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.divider-preview-line {
+  margin-top: 10px;
+  width: 100%;
+}
+
+.footnotes-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.footnote-row-item {
+  display: grid;
+  grid-template-columns: 55px 1fr 32px;
+  gap: 8px;
+  align-items: center;
+}
+
+/* Inline-Hervorhebung für Glossar und Fussnoten im RichText-Editor */
+.richtext-editable .glossary-term {
+  background: #E0F2FE;
+  color: var(--lukb-navy);
+  border-bottom: 2px solid var(--lukb-cyan);
+  padding: 1px 5px;
+  border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.richtext-editable .glossary-term:hover {
+  background: #BAE6FD;
+  box-shadow: 0 1px 3px rgba(0, 159, 227, 0.25);
+}
+
+.richtext-editable .glossary-term::after {
+  content: " ℹ";
+  font-size: 10px;
+  color: var(--lukb-cyan);
+  font-weight: bold;
+}
+
+.richtext-editable footnote {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #F1F5F9;
+  border: 1px solid #CBD5E1;
+  color: var(--lukb-navy);
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  margin: 0 2px;
+  font-style: normal;
+  vertical-align: baseline;
+  transition: all 0.15s ease;
+}
+
+.richtext-editable footnote:hover {
+  background: #E2E8F0;
+  border-color: #94A3B8;
+}
+
+.richtext-editable footnote::before {
+  content: "[¹] ";
+  color: var(--lukb-cyan);
+  font-weight: bold;
+}
+
+/* Floating Inline Popover für Bearbeiten/Entfernen von Begriffen & Fussnoten */
+.lukb-term-popover {
+  position: absolute;
+  z-index: 99999;
+  background: #FFFFFF;
+  border: 1px solid #CBD5E1;
+  border-radius: 6px;
+  box-shadow: 0 10px 25px rgba(0, 40, 85, 0.22);
+  padding: 12px 14px;
+  width: 320px;
+  font-family: var(--font-heading);
+  color: var(--lukb-navy);
+  animation: popoverFadeIn 0.12s ease-out;
+}
+
+@keyframes popoverFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.lukb-popover-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--lukb-navy);
+}
+
+.lukb-popover-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+}
+
+/* Glossar-Block im Editor */
+.glossary-auto-detected-box {
+  background: #F0F9FF;
+  border: 1px solid #BAE6FD;
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+
+.glossary-detected-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--lukb-navy);
+}
+
+.glossary-detected-pills {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.glossary-detected-pill-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.glossary-detected-term {
+  font-weight: 600;
+  color: var(--lukb-navy);
+  white-space: nowrap;
+}
+
+.glossary-detected-def {
+  color: #475569;
+}
 
 /* Vertikaler Abstand (Spacer) Block */
 .db-spacer-editor-row {
@@ -919,7 +1159,11 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 }
 
 .db-height-preset-btn.active,
-.db-height-preset-btn.active:hover {
+.db-height-preset-btn.active:hover,
+.db-height-preset-btn.active:focus,
+.btn-lukb.db-height-preset-btn.active,
+.btn-lukb-ghost.db-height-preset-btn.active,
+button.db-height-preset-btn.active {
   background: var(--lukb-navy) !important;
   color: #FFFFFF !important;
   border-color: var(--lukb-navy) !important;
@@ -1538,4 +1782,80 @@ table.cms-grid-editor td {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+
+/* ============================================================================
+   LUKB Topbar Action Dropdown-Menüs (Portal & Export)
+   ============================================================================ */
+.lukb-dropdown {
+  position: relative;
+  display: inline-block;
+}
+
+.lukb-dropdown-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.lukb-dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 240px;
+  background: #FFFFFF;
+  border: 1px solid var(--lukb-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 25px -5px rgba(0, 45, 98, 0.2), 0 8px 10px -6px rgba(0, 45, 98, 0.1);
+  padding: 6px 0;
+  z-index: 1050;
+}
+
+.lukb-dropdown.show .lukb-dropdown-menu {
+  display: block;
+}
+
+.lukb-dropdown-item {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 16px;
+  color: var(--lukb-text) !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+  font-size: 13px !important;
+  font-family: var(--font-body);
+  text-align: left;
+  text-decoration: none !important;
+  cursor: pointer;
+  box-shadow: none !important;
+  transition: background 0.15s ease, color 0.15s ease;
+  white-space: nowrap;
+}
+
+.lukb-dropdown-item:hover,
+.lukb-dropdown-item:focus {
+  background: #F1F5F9 !important;
+  color: var(--lukb-navy) !important;
+}
+
+.lukb-dropdown-item.text-danger {
+  color: #DC2626 !important;
+}
+
+.lukb-dropdown-item.text-danger:hover {
+  background: #FEF2F2 !important;
+  color: #B91C1C !important;
+}
+
+.lukb-dropdown-divider {
+  height: 1px;
+  margin: 5px 0;
+  background: var(--lukb-border);
 }

@@ -40,6 +40,7 @@ class _HtmlToTypstParser(HTMLParser):
         self.list_stack: list[str] = []  # "ul" oder "ol"
         self.in_li: bool = False
         self.link_href_stack: list[str] = []
+        self.tooltip_stack: list[str | None] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         t = tag.lower()
@@ -74,6 +75,18 @@ class _HtmlToTypstParser(HTMLParser):
                 self.parts.append(f'#link("{safe_url}")[')
             else:
                 self.parts.append("[")
+        elif t == "span":
+            tooltip = ""
+            for k, v in attrs:
+                if k.lower() in ("data-tooltip", "title") and v:
+                    tooltip = v.strip()
+            if tooltip:
+                self.parts.append('#underline(stroke: 0.6pt + rgb("#009FE3"), offset: 1.5pt)[')
+                self.tooltip_stack.append(tooltip)
+            else:
+                self.tooltip_stack.append(None)
+        elif t == "footnote":
+            self.parts.append("#footnote[")
 
     def handle_endtag(self, tag: str) -> None:
         t = tag.lower()
@@ -82,6 +95,13 @@ class _HtmlToTypstParser(HTMLParser):
         elif t == "a":
             if self.link_href_stack:
                 self.link_href_stack.pop()
+            self.parts.append("]")
+        elif t == "span":
+            if self.tooltip_stack:
+                tip = self.tooltip_stack.pop()
+                if tip:
+                    self.parts.append("]")
+        elif t == "footnote":
             self.parts.append("]")
         elif t == "p" or t == "div":
             self.parts.append("\n\n")

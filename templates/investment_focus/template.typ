@@ -8,6 +8,23 @@
 #let meta = payload.metadata
 #let blocks = payload.blocks
 
+#let format-pub-date(d) = {
+  if d == none or d == "" { return "" }
+  let s = str(d).trim()
+  let months = ("", "Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "August", "September", "Oktober", "November", "Dezember")
+  let parts = s.split("-")
+  if parts.len() == 3 {
+    let y = parts.at(0)
+    let m = int(parts.at(1))
+    let d-part = parts.at(2).slice(0, calc.min(2, parts.at(2).len()))
+    let day = int(d-part)
+    if m >= 1 and m <= 12 {
+      return str(day) + ". " + months.at(m) + " " + y
+    }
+  }
+  return s
+}
+
 // LUKB Corporate Design Farbpalette
 #let lukb-navy = rgb("#002855")
 #let lukb-blue = rgb("#005A9C")
@@ -43,24 +60,57 @@
 #set par(
   justify: true,
   leading: 0.68em,
-  spacing: 1.05em
+  spacing: 2.0em
 )
 
 #set page(
   paper: "a4",
-  margin: (top: 1.25cm, bottom: 2.4cm, left: 1.5cm, right: 1.5cm),
+  margin: (top: 2cm, bottom: 2.4cm, left: 1.5cm, right: 1.5cm),
   footer-descent: 12pt,
   footer: context {
     let page-num = counter(page).get().first()
+    let total-pages = counter(page).final().first()
+    let page-str = text(font: font-body, weight: "light", size: 9.5pt, fill: lukb-muted)[#page-num/#total-pages]
+
     if page-num == 1 and meta.disclaimer != "" {
       align(top)[
         #block(
           width: 100%,
-          inset: (top: 6pt),
+          inset: (top: 5pt),
           stroke: (top: 0.5pt + black)
         )[
           #set par(justify: false, leading: 0.25em)
-          #text(font: font-body, weight: "light", size: 7pt, fill: black)[#meta.disclaimer]
+          #text(font: font-body, weight: "light", size: 6.8pt, fill: black)[#meta.disclaimer]
+          #v(2pt)
+          #align(right)[
+            #move(dy: -0.5cm)[#page-str]
+          ]
+        ]
+      ]
+    } else if page-num == 1 {
+      align(top)[
+        #block(
+          width: 100%,
+          inset: (top: 5pt),
+          stroke: (top: 0.5pt + lukb-border)
+        )[
+          #v(2pt)
+          #align(right)[
+            #move(dy: -0.5cm)[#page-str]
+          ]
+        ]
+      ]
+    } else {
+      align(top)[
+        #block(
+          width: 100%,
+          inset: (top: 5pt),
+          stroke: (top: 0.5pt + lukb-border)
+        )[
+          #v(2pt)
+          #align(right)[
+            #page-str
+          ]
         ]
       ]
     }
@@ -74,14 +124,17 @@
 #let render-heading(level, content-text) = {
   let sz = if level == 1 { 12.5pt } else if level == 2 { 10.8pt } else { 9.8pt }
   let col = if level == 1 { lukb-navy } else if level == 2 { lukb-blue } else { lukb-text }
+  let lead = if level == 1 { 0.42em } else if level == 2 { 0.38em } else { 0.34em }
+  let abv = 2.0em
+  let blw = 0.68em
   block(
     sticky: true,
     breakable: false,
-    above: 1.68em,
-    below: 0.68em
+    above: abv,
+    below: blw
   )[
     #set text(hyphenate: false)
-    #set par(leading: 0.25em, justify: false)
+    #set par(leading: lead, justify: false)
     #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
   ]
 }
@@ -98,10 +151,13 @@
     below: 1.1em
   )[
     #if title != "" [
-      #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#title]
-      #v(4pt)
+      #block(above: 0pt, below: 1.0em)[
+        #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#title]
+      ]
     ]
     #set text(size: 9pt)
+    #set par(spacing: 1.0em)
+    #set list(spacing: 0.65em)
     #eval(markup-str, mode: "markup")
   ]
 }
@@ -116,13 +172,13 @@
     below: 1.1em
   )[
     #if blk.title != "" [
-      #block(above: 0pt, below: if blk.subtitle != "" { 3.8pt } else { 5pt })[
+      #block(above: 0pt, below: if blk.subtitle != "" { 5.5pt } else { 6pt })[
         #set par(leading: 0.28em, justify: false)
         #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
       ]
     ]
     #if blk.subtitle != "" [
-      #block(above: 0pt, below: 5pt)[
+      #block(above: 0pt, below: 6pt)[
         #set par(leading: 0.28em, justify: false)
         #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
       ]
@@ -144,7 +200,7 @@
       ]
     ]
     #if blk.source != "" [
-      #v(3pt)
+      #v(2pt)
       #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#blk.source]
     ]
   ]
@@ -185,13 +241,13 @@
     below: 1.1em
   )[
     #if blk.title != "" [
-      #block(above: 0pt, below: if blk.subtitle != "" { 2.5pt } else { 5pt })[
+      #block(above: 0pt, below: if blk.subtitle != "" { 5.5pt } else { 6pt })[
         #set par(leading: 0.28em, justify: false)
         #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
       ]
     ]
     #if blk.subtitle != "" [
-      #block(above: 0pt, below: 5pt)[
+      #block(above: 0pt, below: 6pt)[
         #set par(leading: 0.28em, justify: false)
         #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
       ]
@@ -243,9 +299,112 @@
   }
 }
 
+#let render-quote-box(quote-text, author, source) = {
+  block(
+    width: 100%,
+    breakable: false,
+    stroke: (left: 3pt + lukb-cyan),
+    fill: rgb("#F8FAFC"),
+    inset: (left: 11pt, right: 8pt, y: 7pt),
+    radius: (right: 2pt),
+    above: 1.1em,
+    below: 1.1em
+  )[
+    #set par(leading: 0.38em)
+    #text(font: font-heading, style: "italic", size: 10.2pt, fill: lukb-navy)[
+      #quote-text
+    ]
+    #if author != "" or source != "" [
+      #v(4pt)
+      #if author != "" [
+        #text(font: font-heading, weight: "medium", size: 8.5pt, fill: lukb-navy)[#author]
+      ]
+      #if author != "" and source != "" [
+        #text(size: 8.5pt, fill: lukb-muted)[ · ]
+      ]
+      #if source != "" [
+        #text(font: font-body, weight: "light", size: 8pt, fill: lukb-muted)[#source]
+      ]
+    ]
+  ]
+}
+
+#let render-divider(style) = {
+  let dash-pattern = if style == "dashed" { "dashed" } else if style == "dots" { "dotted" } else { none }
+  block(
+    width: 100%,
+    above: 1.2em,
+    below: 1.2em,
+    line(
+      length: 100%,
+      stroke: (paint: lukb-border, thickness: 0.75pt, dash: dash-pattern)
+    )
+  )
+}
+
+#let render-footnotes-box(title, items) = {
+  block(
+    width: 100%,
+    breakable: false,
+    stroke: (top: 0.8pt + lukb-border),
+    inset: (top: 6pt, bottom: 4pt),
+    above: 1.3em,
+    below: 1.1em
+  )[
+    #if title != "" [
+      #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-blue)[#title]
+      #v(4pt)
+    ]
+    #for item in items [
+      #let num = item.at("num", default: "")
+      #let txt = item.at("text", default: "")
+      #block(above: 2pt, below: 2pt)[
+        #set par(leading: 0.28em)
+        #if num != "" [
+          #text(font: font-heading, weight: "medium", size: 7.5pt, fill: lukb-cyan)[\[#num\] ]
+        ]
+        #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#txt]
+      ]
+    ]
+  ]
+}
+
+#let render-glossary-box(title, items) = {
+  if items.len() > 0 [
+    #block(
+      width: 100%,
+      breakable: false,
+      stroke: (top: 0.8pt + lukb-border),
+      inset: (top: 7pt, bottom: 5pt),
+      above: 1.3em,
+      below: 1.1em
+    )[
+      #if title != "" [
+        #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-blue)[#title]
+        #v(5pt)
+      ]
+      #for item in items [
+        #let term = item.at("term", default: "")
+        #let def = item.at("definition", default: "")
+        #block(above: 2.5pt, below: 2.5pt)[
+          #set par(leading: 0.28em)
+          #text(font: font-heading, weight: "medium", size: 7.8pt, fill: lukb-navy)[#term]
+          #h(3pt)
+          #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-muted)[—]
+          #h(3pt)
+          #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-text)[#def]
+        ]
+      ]
+    ]
+  ]
+}
+
 // ============================================================================
 // Dokumenten-Kopf (Seite 1 Banner, Gesamttitel, Lead, Autoren)
+// Auf Seite 1 Ausgleich von 0.75cm, sodass Seite 1 bei 1.25cm beginnt und Folgeseiten bei 2cm
 // ============================================================================
+
+#v(-0.75cm)
 
 #block(
   width: 100%,
@@ -268,22 +427,47 @@
 
   #v(14pt)
 
-  #if meta.subtitle != "" [
-    #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue)[#meta.subtitle]
+  #let sub-line = if meta.subtitle != "" { meta.subtitle } else if meta.at("category", default: "") != "" { meta.category } else { "" }
+  #let display-date = format-pub-date(meta.publication_date)
+
+  #if sub-line != "" or display-date != "" [
+    #grid(
+      columns: (1fr, auto),
+      gutter: 10pt,
+      align(left + bottom)[
+        #if sub-line != "" [
+          #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue)[#sub-line]
+        ]
+      ],
+      align(right + bottom)[
+        #if display-date != "" [
+          #text(font: font-body, weight: "light", size: 11pt, fill: lukb-muted)[#display-date]
+        ]
+      ]
+    )
     #v(4pt)
   ]
 
-  #text(font: font-heading, weight: "medium", size: 20pt, fill: lukb-navy)[#meta.title]
+  #block(above: 12pt, below: 3em)[
+    #align(left)[
+      #set par(justify: false, leading: 0.42em)
+      #set text(hyphenate: false)
+      #text(font: font-heading, weight: "medium", size: 22pt, fill: lukb-navy)[#meta.title]
+    ]
+  ]
 
   #if meta.lead != "" [
-    #v(8pt)
-    #text(font: font-body, weight: "light", size: 10.8pt, fill: lukb-text)[
-      #eval(meta.lead_typst, mode: "markup")
+    #block(above: 0pt, below: 3em)[
+      #align(left)[
+        #set par(justify: false, leading: 0.68em)
+        #text(font: font-body, weight: "light", size: 10.8pt, fill: lukb-text)[
+          #eval(meta.lead_typst, mode: "markup")
+        ]
+      ]
     ]
   ]
 
   #if meta.authors.len() > 0 [
-    #v(10pt)
     #block(
       width: 100%,
       fill: lukb-surface,
@@ -300,6 +484,23 @@
         ]
       ]
     ]
+  ]
+
+  #if meta.at("tags", default: ()).len() > 0 [
+    #v(6pt)
+    #stack(
+      dir: ltr,
+      spacing: 5pt,
+      ..meta.tags.map(tag => box(
+        fill: rgb("#F1F5F9"),
+        stroke: 0.5pt + rgb("#CBD5E1"),
+        radius: 2pt,
+        inset: (x: 5pt, y: 2.5pt),
+        outset: 0pt,
+        baseline: 0%,
+        [#text(font: font-heading, size: 7.5pt, weight: "medium", fill: lukb-navy)[#tag]]
+      ))
+    )
   ]
 ]
 
@@ -375,6 +576,39 @@
     v(h-mm * 1mm)
   } else if blk.type == "colbreak" {
     colbreak()
+  } else if blk.type == "quote" {
+    let q-box = render-quote-box(
+      blk.at("quote_typst", default: blk.at("quote", default: "")),
+      blk.at("author_typst", default: blk.at("author", default: "")),
+      blk.at("source_typst", default: blk.at("source", default: ""))
+    )
+    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
+      place(bottom, scope: "parent", float: true, q-box)
+    } else {
+      q-box
+    }
+  } else if blk.type == "divider" {
+    render-divider(blk.at("style", default: "solid"))
+  } else if blk.type == "footnotes" {
+    let fn-box = render-footnotes-box(
+      blk.at("title_typst", default: blk.at("title", default: "Anmerkungen & Quellen")),
+      blk.at("items_typst", default: blk.at("items", default: ()))
+    )
+    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
+      place(bottom, scope: "parent", float: true, fn-box)
+    } else {
+      fn-box
+    }
+  } else if blk.type == "glossary" {
+    let g-box = render-glossary-box(
+      blk.at("title_typst", default: blk.at("title", default: "Glossar & Begriffserklärungen")),
+      blk.at("items_typst", default: blk.at("items", default: ()))
+    )
+    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
+      place(bottom, scope: "parent", float: true, g-box)
+    } else {
+      g-box
+    }
   }
 }
 
@@ -413,45 +647,71 @@
         ]
       }
     } else {
-      let item-heights = items.map(it => {
-        let h = measure(block(width: col-w, render-single-block(it, in-box: false))).height
-        if it.type == "heading" { h + 16pt } else { h + 8pt }
-      })
-      let total-h = item-heights.sum(default: 0pt)
+      // 1. Suche nach dem optimalen Trennpunkt zwischen eigenständigen Blöcken.
+      // Typografische Grundregel: Niemals direkt nach einer Überschrift trennen!
+      let best-split-idx = 0
+      let best-diff = 999999pt
+      let best-max-h = 999999pt
 
-      let best-split-h = total-h
-      for split-idx in range(0, items.len() + 1) {
-        let left-h = item-heights.slice(0, split-idx).sum(default: 0pt)
-        let right-h = item-heights.slice(split-idx).sum(default: 0pt)
-        let candidate = calc.max(left-h, right-h)
-        if candidate < best-split-h {
-          best-split-h = candidate
+      if items.len() >= 2 {
+        for split-idx in range(1, items.len()) {
+          let prev-is-heading = (items.at(split-idx - 1).type == "heading")
+          if not prev-is-heading {
+            let left-items = items.slice(0, split-idx)
+            let right-items = items.slice(split-idx)
+            let left-h = measure(block(width: col-w, for it in left-items [ #render-single-block(it, in-box: false) ])).height
+            let right-h = measure(block(width: col-w, for it in right-items [ #render-single-block(it, in-box: false) ])).height
+            let diff = calc.abs(left-h - right-h)
+            let max-h = calc.max(left-h, right-h)
+            if diff < best-diff {
+              best-diff = diff
+              best-split-idx = split-idx
+              best-max-h = max-h
+            }
+          }
         }
       }
 
-      let ideal-half = total-h / 2 + 20pt
-      let target-h = if best-split-h <= ideal-half + 110pt {
-        calc.max(ideal-half, best-split-h + 6pt)
+      // Wenn ein sauberer Block-Split gefunden wird, der auf die Seite passt:
+      // Rendere als 2-spaltiges Grid. Dadurch werden NIE Wörter oder Absätze
+      // über die Spaltengrenze hinweg zerrissen und die Spalten sind perfekt balanciert!
+      if best-split-idx > 0 and avail-h > 80pt and best-max-h <= (avail-h + 10pt) {
+        let left-items = items.slice(0, best-split-idx)
+        let right-items = items.slice(best-split-idx)
+        grid(
+          columns: (1fr, 1fr),
+          column-gutter: gutter,
+          align: (top + left, top + left),
+          [
+            #for it in left-items [ #render-single-block(it, in-box: false) ]
+          ],
+          [
+            #for it in right-items [ #render-single-block(it, in-box: false) ]
+          ]
+        )
       } else {
-        ideal-half + 18pt
-      }
+        // Fallback für mehrseitige Texte oder wenn nur ein einzelner Block vorliegt:
+        let total-h = measure(block(width: col-w, for it in items [ #render-single-block(it, in-box: false) ])).height
+        let ideal-half = total-h / 2 + 16pt
+        let target-h = calc.max(ideal-half, best-max-h + 6pt)
 
-      if avail-h > 100pt and target-h <= avail-h - 6pt {
-        block(
-          width: 100%,
-          height: target-h,
+        if avail-h > 100pt and target-h <= (avail-h - 6pt) {
+          block(
+            width: 100%,
+            height: target-h,
+            columns(2, gutter: gutter)[
+              #for it in items [
+                #render-single-block(it, in-box: false)
+              ]
+            ]
+          )
+        } else {
           columns(2, gutter: gutter)[
             #for it in items [
               #render-single-block(it, in-box: false)
             ]
           ]
-        )
-      } else {
-        columns(2, gutter: gutter)[
-          #for it in items [
-            #render-single-block(it, in-box: false)
-          ]
-        ]
+        }
       }
     }
   })
