@@ -166,7 +166,12 @@ def deploy_bundle_to_connect(bundle_path: Path) -> dict[str, Any]:
         if "CERTIFICATE_VERIFY_FAILED" in str(exc):
             err_msg = (
                 f"SSL-Zertifikatsfehler beim Zugriff auf Posit Connect ({exc}). "
-                "In Firmennetzen (Zscaler/interne CA) bitte CONNECT_VERIFY_SSL=false in .env setzen oder '--insecure' verwenden."
+                "In Firmennetzen (Zscaler/interne CA) bitte CONNECT_VERIFY_SSL=false in Vars/.env setzen."
+            )
+        elif "Name or service not known" in str(exc) or "getaddrinfo failed" in str(exc):
+            err_msg = (
+                f"DNS-Fehler beim Auflösen des Connect-Servers ({CONNECT_SERVER_URL}): {exc}. "
+                "Bitte CONNECT_SERVER prüfen (Tippfehler, Anführungszeichen oder interner Port http://localhost:3939)."
             )
         else:
             err_msg = str(exc)

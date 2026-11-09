@@ -89,12 +89,28 @@ DATABASE_URL, DATABASE_BACKEND_LABEL = build_database_url()
 # ============================================================================
 # Posit Connect API & Deployment Konfiguration
 # ============================================================================
-CONNECT_SERVER_URL = os.getenv("CONNECT_SERVER", os.getenv("CONNECT_SERVER_URL", "")).rstrip("/")
-CONNECT_API_KEY = os.getenv("CONNECT_API_KEY", "").strip()
-CONNECT_PORTAL_GUID = os.getenv("CONNECT_PORTAL_GUID", os.getenv("CONNECT_PORTAL_CONTENT_GUID", "")).strip()
-CONNECT_PORTAL_URL = os.getenv("CONNECT_PORTAL_URL", "").strip()
-CONNECT_VERIFY_SSL = os.getenv("CONNECT_VERIFY_SSL", "true").strip().lower() not in ("false", "0", "no", "off")
-CONNECT_CA_BUNDLE = os.getenv("CONNECT_CA_BUNDLE", os.getenv("REQUESTS_CA_BUNDLE", os.getenv("SSL_CERT_FILE", ""))).strip()
+def _clean_env_val(val: str) -> str:
+    val = (val or "").strip()
+    if (val.startswith('"') and val.endswith('"')) or (val.startswith("'") and val.endswith("'")):
+        val = val[1:-1].strip()
+    return val
+
+
+def _normalize_connect_url(url: str) -> str:
+    url = _clean_env_val(url)
+    if not url:
+        return ""
+    if not (url.startswith("http://") or url.startswith("https://")):
+        url = f"https://{url}"
+    return url.rstrip("/")
+
+
+CONNECT_SERVER_URL = _normalize_connect_url(os.getenv("CONNECT_SERVER", os.getenv("CONNECT_SERVER_URL", "")))
+CONNECT_API_KEY = _clean_env_val(os.getenv("CONNECT_API_KEY", ""))
+CONNECT_PORTAL_GUID = _clean_env_val(os.getenv("CONNECT_PORTAL_GUID", os.getenv("CONNECT_PORTAL_CONTENT_GUID", "")))
+CONNECT_PORTAL_URL = _normalize_connect_url(os.getenv("CONNECT_PORTAL_URL", ""))
+CONNECT_VERIFY_SSL = _clean_env_val(os.getenv("CONNECT_VERIFY_SSL", "true")).lower() not in ("false", "0", "no", "off")
+CONNECT_CA_BUNDLE = _clean_env_val(os.getenv("CONNECT_CA_BUNDLE", os.getenv("REQUESTS_CA_BUNDLE", os.getenv("SSL_CERT_FILE", ""))))
 
 # ============================================================================
 # LUKB Corporate Design & Typografie
