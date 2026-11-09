@@ -6,6 +6,7 @@ Einstiegspunkt für Shiny for Python & Posit Connect Deployment.
 from __future__ import annotations
 
 import base64
+from datetime import datetime
 import logging
 import re
 from typing import Any
@@ -1260,7 +1261,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
     def download_portal_bundle():
         from services.portal_publisher import create_connect_bundle
         bundle_path = create_connect_bundle()
-        yield bundle_path.read_bytes()
+        return str(bundle_path)
 
     # Word-Export (.docx) via python-docx
     @render.download_button(

@@ -163,10 +163,31 @@ def test_portal_publisher_flow() -> None:
         with tarfile.open(created_bundle, "r:gz") as tar:
             names = tar.getnames()
             assert "index.html" in names
+            assert "manifest.json" in names
             assert "search-index.json" in names
             assert any(n.startswith("assets/portal.css") for n in names)
             assert any(n.startswith(f"articles/{res2['slug']}/index.html") for n in names)
             assert any(n.startswith(f"articles/{res2['slug']}/{res2['slug']}.pdf") for n in names)
+
+        # -------------------------------------------------------------
+        # 6. Bundle-Erstellung bei leerem/neuem Verzeichnis (Auto-Recovery)
+        # -------------------------------------------------------------
+        empty_dist = Path(tmp_dir_str) / "empty_dist"
+        empty_bundle_file = Path(tmp_dir_str) / "empty_bundle.tar.gz"
+        empty_bundle = create_connect_bundle(output_dir=empty_dist, bundle_path=empty_bundle_file)
+        assert empty_bundle.exists()
+        assert empty_bundle.stat().st_size > 0
+        with tarfile.open(empty_bundle, "r:gz") as tar:
+            empty_names = tar.getnames()
+            assert "index.html" in empty_names
+            assert "manifest.json" in empty_names
+
+        # -------------------------------------------------------------
+        # 7. Prüfe App Download-Button Konfiguration (Import datetime etc.)
+        # -------------------------------------------------------------
+        import app
+        from datetime import datetime
+        assert hasattr(app, "datetime"), "app.py muss datetime importiert haben"
 
         print("All portal publisher tests passed successfully!")
 

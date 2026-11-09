@@ -375,13 +375,46 @@ def create_connect_bundle(
 ) -> Path:
     """
     Schnürt ein Posit-Connect-kompatibles .tar.gz Deployment-Archiv des statischen Portals.
+    Falls das Portal lokal noch nicht generiert wurde, wird es automatisch aufgebaut.
     """
+    import tempfile
+
     dist_dir = output_dir or STATIC_PORTAL_DIR
+    dist_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Sicherstellen, dass das Portal existiert (auch bei frischem Start oder im Deployment)
     if not (dist_dir / "index.html").exists():
-        raise FileNotFoundError(f"Kann kein Bundle schnüren: {dist_dir / 'index.html'} existiert nicht.")
+        try:
+            from database.repository import get_article, list_articles
+            articles_summary = list_articles()
+            docs = []
+            for item in articles_summary:
+                doc = get_article(item["id"])
+                if doc:
+                    docs.append(doc)
+            rebuild_full_portal(articles=docs, output_dir=dist_dir)
+        except Exception as exc:
+            logger.warning(f"Automatischer Portalaufbau vor Bundle-Erstellung fehlgeschlagen ({exc}), generiere Grundstruktur.")
+            _ensure_portal_assets(dist_dir)
+            manifest = _read_manifest(dist_dir)
+            _render_portal_index(dist_dir, manifest)
+            _write_manifest(dist_dir, manifest)
 
-    target_archive = bundle_path or (dist_dir.parent / "connect_static_portal_bundle.tar.gz")
+    # Posit Connect manifest.json sicherstellen
+    _write_connect_manifest(dist_dir)
 
+    # 2. Zielpfad bestimmen (mit Fallback auf tempfile bei schreibgeschützten Deployment-Systemen)
+    if bundle_path:
+        target_archive = bundle_path
+    else:
+        try:
+            target_archive = dist_dir.parent / "connect_static_portal_bundle.tar.gz"
+            # Prüfen ob im Ordner geschrieben werden darf
+            target_archive.touch(exist_ok=True)
+        except (PermissionError, OSError):
+            target_archive = Path(tempfile.gettempdir()) / "connect_static_portal_bundle.tar.gz"
+
+    # 3. Archiv packen
     with tarfile.open(target_archive, "w:gz") as tar:
         for item in dist_dir.rglob("*"):
             arcname = item.relative_to(dist_dir)
