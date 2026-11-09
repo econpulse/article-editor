@@ -485,7 +485,7 @@
     if (type === "publications") {
       const currentId = state.article ? state.article.id : "";
       const pool = (state.allArticles || []).filter(function (a) {
-        return a.id !== currentId && a.status !== "archived";
+        return a.id !== currentId && a.status === "published";
       });
       const initialItems = pool.slice(0, 5).map(function (a) {
         return {
@@ -1400,7 +1400,8 @@
     const h1Rule = document.createElement("div");
     h1Rule.style.height = "2px";
     h1Rule.style.backgroundColor = "#002855";
-    h1Rule.style.marginTop = "0px";
+    h1Rule.style.marginTop = "6px";
+    h1Rule.style.marginBottom = "6px";
     h1Rule.style.width = "100%";
     h1Rule.title = "Horizontale Linie über Spaltenbreite";
 
@@ -1410,8 +1411,8 @@
         input.style.fontSize = "17.5px"; // +2pt grösser
         input.style.color = "#002855";
         input.style.fontWeight = "600";
-        input.style.borderBottomLeftRadius = "0";
-        input.style.borderBottomRightRadius = "0";
+        input.style.borderBottomLeftRadius = "";
+        input.style.borderBottomRightRadius = "";
         h1Rule.style.display = "block";
       } else if (lvl === 2) {
         input.style.fontSize = "15.5px";
@@ -1528,7 +1529,7 @@
     refreshBtn.addEventListener("click", function () {
       const currentId = state.article ? state.article.id : "";
       const pool = (state.allArticles || []).filter(function (a) {
-        return a.id !== currentId && a.status !== "archived";
+        return a.id !== currentId && a.status === "published";
       });
       blk.items = pool.slice(0, 5).map(function (a) {
         return {
@@ -1682,13 +1683,13 @@
       );
       const currentId = state.article ? state.article.id : "";
       const available = (state.allArticles || []).filter(function (a) {
-        return a.id !== currentId && a.status !== "archived" && !currentSelectedIds.has(a.id);
+        return a.id !== currentId && a.status === "published" && !currentSelectedIds.has(a.id);
       });
 
       if (available.length === 0) {
         const opt = document.createElement("option");
         opt.value = "";
-        opt.textContent = "Keine weiteren Artikel im System verfügbar";
+        opt.textContent = "Keine weiteren publizierten Artikel im System verfügbar";
         select.appendChild(opt);
         addBtn.disabled = true;
         return;
@@ -1697,7 +1698,7 @@
       addBtn.disabled = false;
       const placeholder = document.createElement("option");
       placeholder.value = "";
-      placeholder.textContent = "— Publikation aus dem System auswählen —";
+      placeholder.textContent = "— Publizierte Publikation auswählen —";
       select.appendChild(placeholder);
 
       available.forEach(function (a) {

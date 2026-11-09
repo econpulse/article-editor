@@ -671,18 +671,18 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 .publications-items-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .publication-editor-row {
   display: grid;
   grid-template-columns: 24px 1fr 32px;
-  gap: 8px;
+  gap: 10px;
   align-items: center;
   background: var(--lukb-surface-alt);
   border: 1px solid var(--lukb-border);
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  padding: 10px 12px;
   transition: opacity 0.15s ease, background-color 0.15s ease;
 }
 

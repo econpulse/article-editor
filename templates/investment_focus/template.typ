@@ -126,18 +126,21 @@
   let col = if level == 1 { lukb-navy } else if level == 2 { lukb-blue } else { lukb-text }
   let lead = if level == 1 { 0.42em } else if level == 2 { 0.38em } else { 0.34em }
   let abv = 2.0em
-  let blw = if level == 1 { 0.85em } else { 0.68em }
+  let blw = if level == 1 { 0.55em } else { 0.68em }
   block(
+    width: 100%,
     sticky: true,
     breakable: false,
     above: abv,
-    below: blw,
-    stroke: if level == 1 { (bottom: 0.75pt + lukb-navy) } else { none },
-    inset: (bottom: 0pt)
+    below: blw
   )[
     #set text(hyphenate: false)
     #set par(leading: lead, justify: false)
     #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
+    #if level == 1 [
+      #v(5.5pt)
+      #line(length: 100%, stroke: 0.75pt + lukb-navy)
+    ]
   ]
 }
 
@@ -420,16 +423,16 @@
         #let ptitle = item.at("title", default: "")
         #let psub = item.at("subtitle", default: "")
         #let pdate = item.at("date", default: "")
-        #block(above: 3.5pt, below: 3.5pt)[
+        #block(above: 7pt, below: 7pt)[
           #grid(
             columns: (1fr, auto),
-            gutter: 6pt,
-            text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[#ptitle],
-            if pdate != "" { text(font: font-body, size: 7.2pt, fill: lukb-muted)[#pdate] }
+            gutter: 8pt,
+            text(font: font-heading, weight: "medium", size: 8.5pt, fill: lukb-navy)[#ptitle],
+            if pdate != "" { text(font: font-body, size: 7.5pt, fill: lukb-muted)[#pdate] }
           )
           #if psub != "" [
-            #block(above: 1pt, below: 0pt)[
-              #text(font: font-body, weight: "light", size: 7.3pt, fill: lukb-muted)[#psub]
+            #block(above: 2pt, below: 0pt)[
+              #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#psub]
             ]
           ]
         ]
