@@ -1222,10 +1222,23 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 count = res.get("total_published", 1)
                 connect_info = res.get("connect_deploy")
                 if connect_info and connect_info.get("deployed"):
-                    msg = f"✅ Artikel publiziert & auf Posit Connect bereitgestellt! ({count} online)"
+                    ui.notification_show(
+                        f"✅ Artikel publiziert & auf Posit Connect bereitgestellt! ({count} online)",
+                        type="message",
+                        duration=5,
+                    )
+                elif connect_info and not connect_info.get("success"):
+                    ui.notification_show(
+                        f"⚠️ Lokal publiziert, aber Connect-Update fehlgeschlagen: {connect_info.get('error')}",
+                        type="warning",
+                        duration=8,
+                    )
                 else:
-                    msg = f"✅ Artikel erfolgreich publiziert! ({count} Artikel im Portal)"
-                ui.notification_show(msg, type="message", duration=5)
+                    ui.notification_show(
+                        f"ℹ️ Lokal publiziert ({count} Artikel). Posit Connect nicht gekoppelt (CONNECT_PORTAL_GUID fehlt in Umgebungsvariablen).",
+                        type="message",
+                        duration=7,
+                    )
             else:
                 ui.notification_show(f"Publikationsfehler: {res.get('error')}", type="warning", duration=5)
         except Exception as exc:
@@ -1243,11 +1256,25 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 doc.status = "draft"
                 current_doc.set(doc)
                 await _send_article_list(doc.id)
-                ui.notification_show(
-                    "Artikel vom Portal zurückgezogen (Status auf 'Entwurf' gesetzt).",
-                    type="message",
-                    duration=5,
-                )
+                connect_info = res.get("connect_deploy")
+                if connect_info and connect_info.get("deployed"):
+                    ui.notification_show(
+                        "✅ Artikel vom Portal zurückgezogen & auf Posit Connect entfernt.",
+                        type="message",
+                        duration=5,
+                    )
+                elif connect_info and not connect_info.get("success"):
+                    ui.notification_show(
+                        f"⚠️ Lokal entfernt, aber Connect-Update fehlgeschlagen: {connect_info.get('error')}",
+                        type="warning",
+                        duration=8,
+                    )
+                else:
+                    ui.notification_show(
+                        "Artikel vom Portal zurückgezogen (Status auf 'Entwurf' gesetzt). Connect nicht gekoppelt.",
+                        type="message",
+                        duration=6,
+                    )
             else:
                 ui.notification_show(f"Fehler: {res.get('error')}", type="warning", duration=5)
         except Exception as exc:
