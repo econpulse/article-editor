@@ -292,6 +292,19 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
             ]
             bcopy["all_items"] = all_items
 
+        elif btype == "publications":
+            bcopy["title_typst"] = escape_typst_text(blk.get("title", "Weitere Publikationen"))
+            bcopy["items_typst"] = [
+                {
+                    "title": escape_typst_text(it.get("title", "")),
+                    "subtitle": escape_typst_text(it.get("subtitle", "")),
+                    "date": escape_typst_text(it.get("date", "")),
+                    "category": escape_typst_text(it.get("category", "")),
+                    "enabled": bool(it.get("enabled", True)),
+                }
+                for it in blk.get("items", [])
+            ]
+
         enriched_blocks.append(bcopy)
 
     payload["blocks"] = _group_blocks_into_render_items(enriched_blocks)
@@ -942,6 +955,39 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                     r_def = pi.add_run(item["definition"])
                     r_def.font.size = Pt(8.5)
                     r_def.font.color.rgb = RGBColor(0x1A, 0x24, 0x33)
+
+        elif btype == "publications":
+            title = blk.get("title", "").strip() or "Weitere Publikationen"
+            p = container.add_paragraph()
+            p.paragraph_format.space_before = Pt(12)
+            p.paragraph_format.space_after = Pt(4)
+            rt = p.add_run(title)
+            rt.bold = True
+            rt.font.size = Pt(11)
+            rt.font.color.rgb = RGBColor(0x00, 0x5A, 0x9C)
+
+            for item in blk.get("items", []):
+                if not item.get("enabled", True):
+                    continue
+                pi = container.add_paragraph()
+                pi.paragraph_format.space_before = Pt(1)
+                pi.paragraph_format.space_after = Pt(2)
+                r_title = pi.add_run("• " + item.get("title", ""))
+                r_title.bold = True
+                r_title.font.size = Pt(8.5)
+                r_title.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
+                if item.get("date"):
+                    r_date = pi.add_run(f" ({item.get('date')})")
+                    r_date.font.size = Pt(8)
+                    r_date.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
+                if item.get("subtitle"):
+                    ps = container.add_paragraph()
+                    ps.paragraph_format.left_indent = Inches(0.2)
+                    ps.paragraph_format.space_before = Pt(0)
+                    ps.paragraph_format.space_after = Pt(2)
+                    rs = ps.add_run(item.get("subtitle"))
+                    rs.font.size = Pt(8)
+                    rs.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
 
         elif btype == "textbox_group":
             tbl = container.add_table(rows=1, cols=1)

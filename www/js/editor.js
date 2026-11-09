@@ -255,7 +255,7 @@
       const nameInput = document.createElement("input");
       nameInput.type = "text";
       nameInput.className = "cms-input";
-      nameInput.placeholder = "Name (z.B. Dr. Reto Krähenbühl)";
+      nameInput.placeholder = "Titel Vorname Name";
       nameInput.value = author.name || "";
       nameInput.addEventListener("input", function () {
         state.article.metadata.authors[idx].name = nameInput.value;
@@ -357,7 +357,7 @@
       return {
         id: uid("blk"),
         type: "heading",
-        level: 1,
+        level: 2,
         text: "Neue Zwischenüberschrift",
       };
     }
@@ -482,6 +482,29 @@
         layout: "column",
       };
     }
+    if (type === "publications") {
+      const currentId = state.article ? state.article.id : "";
+      const pool = (state.allArticles || []).filter(function (a) {
+        return a.id !== currentId && a.status !== "archived";
+      });
+      const initialItems = pool.slice(0, 5).map(function (a) {
+        return {
+          article_id: a.id,
+          title: a.title || "Ohne Titel",
+          subtitle: a.subtitle || "",
+          date: a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
+          category: a.category || "",
+          enabled: true,
+        };
+      });
+      return {
+        id: uid("blk"),
+        type: "publications",
+        title: "Weitere Publikationen",
+        items: initialItems,
+        layout: "column",
+      };
+    }
     return {
       id: uid("blk"),
       type: "richtext",
@@ -519,6 +542,8 @@
         return "Fussnoten- & Quellenapparat";
       case "glossary":
         return "Glossar-Verzeichnis";
+      case "publications":
+        return "Weitere Publikationen";
       default:
         return "Inhaltsblock";
     }
@@ -700,6 +725,8 @@
       buildFootnotesBlockBody(body, blk);
     } else if (blk.type === "glossary") {
       buildGlossaryBlockBody(body, blk);
+    } else if (blk.type === "publications") {
+      buildPublicationsBlockBody(body, blk);
     }
 
     card.appendChild(body);
@@ -1338,45 +1365,392 @@
   }
 
   function buildHeadingBlockBody(container, blk) {
+    if (!blk.level) blk.level = 2; // Default ist H2-Titel
+
     const row = document.createElement("div");
     row.style.display = "grid";
-    row.style.gridTemplateColumns = "140px 1fr";
+    row.style.gridTemplateColumns = "155px 1fr";
     row.style.gap = "10px";
     row.style.alignItems = "center";
 
     const select = document.createElement("select");
     select.className = "cms-select font-medium";
     [
-      { val: 1, label: "H1 — Haupttitel" },
-      { val: 2, label: "H2 — Zwischentitel" },
+      { val: 2, label: "H2 — Zwischentitel (Default)" },
+      { val: 1, label: "H1 — Haupttitel (gross + Linie)" },
       { val: 3, label: "H3 — Untertitel" },
     ].forEach(function (opt) {
       const o = document.createElement("option");
       o.value = opt.val;
       o.textContent = opt.label;
-      if (Number(blk.level || 1) === opt.val) o.selected = true;
+      if (Number(blk.level || 2) === opt.val) o.selected = true;
       select.appendChild(o);
     });
-    select.addEventListener("change", function () {
-      blk.level = parseInt(select.value, 10) || 1;
-      markDirty();
-    });
+
+    const inputWrap = document.createElement("div");
+    inputWrap.style.display = "flex";
+    inputWrap.style.flexDirection = "column";
 
     const input = document.createElement("input");
     input.type = "text";
     input.className = "cms-input font-medium";
-    input.style.fontSize = "15.5px";
-    input.style.color = "#002855";
     input.placeholder = "Überschrift eingeben …";
     input.value = blk.text || "";
+
+    const h1Rule = document.createElement("div");
+    h1Rule.style.height = "2px";
+    h1Rule.style.backgroundColor = "#002855";
+    h1Rule.style.marginTop = "4px";
+    h1Rule.style.width = "100%";
+    h1Rule.title = "Horizontale Linie über Spaltenbreite";
+
+    function updateHeadingStyles() {
+      const lvl = Number(blk.level || 2);
+      if (lvl === 1) {
+        input.style.fontSize = "17.5px"; // +2pt grösser
+        input.style.color = "#002855";
+        input.style.fontWeight = "600";
+        h1Rule.style.display = "block";
+      } else if (lvl === 2) {
+        input.style.fontSize = "15.5px";
+        input.style.color = "#005A9C";
+        input.style.fontWeight = "500";
+        h1Rule.style.display = "none";
+      } else {
+        input.style.fontSize = "14px";
+        input.style.color = "#1A2433";
+        input.style.fontWeight = "500";
+        h1Rule.style.display = "none";
+      }
+    }
+
+    updateHeadingStyles();
+
+    select.addEventListener("change", function () {
+      blk.level = parseInt(select.value, 10) || 2;
+      updateHeadingStyles();
+      markDirty();
+    });
+
     input.addEventListener("input", function () {
       blk.text = input.value;
       markDirty();
     });
 
+    inputWrap.appendChild(input);
+    inputWrap.appendChild(h1Rule);
+
     row.appendChild(select);
-    row.appendChild(input);
+    row.appendChild(inputWrap);
     container.appendChild(row);
+  }
+
+  function buildPublicationsBlockBody(container, blk) {
+    if (!Array.isArray(blk.items)) {
+      blk.items = [];
+    }
+
+    // Zeile 1: Titel & Satz-Breite
+    const topGrid = document.createElement("div");
+    topGrid.style.display = "grid";
+    topGrid.style.gridTemplateColumns = "1fr 190px";
+    topGrid.style.gap = "10px";
+    topGrid.style.marginBottom = "10px";
+
+    const titleWrap = document.createElement("div");
+    const titleLbl = document.createElement("label");
+    titleLbl.className = "field-label";
+    titleLbl.textContent = "Block-Titel";
+    const titleInp = document.createElement("input");
+    titleInp.type = "text";
+    titleInp.className = "cms-input font-medium";
+    titleInp.value = blk.title || "Weitere Publikationen";
+    titleInp.addEventListener("input", function () {
+      blk.title = titleInp.value;
+      markDirty();
+    });
+    titleWrap.appendChild(titleLbl);
+    titleWrap.appendChild(titleInp);
+
+    const layoutWrap = document.createElement("div");
+    const layoutLbl = document.createElement("label");
+    layoutLbl.className = "field-label";
+    layoutLbl.textContent = "Satz-Breite im PDF";
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      markDirty();
+    });
+    layoutWrap.appendChild(layoutLbl);
+    layoutWrap.appendChild(layoutSel);
+
+    topGrid.appendChild(titleWrap);
+    topGrid.appendChild(layoutWrap);
+    container.appendChild(topGrid);
+
+    // Publikationsliste
+    const listWrap = document.createElement("div");
+    listWrap.className = "publications-editor-container";
+
+    const listHeader = document.createElement("div");
+    listHeader.style.display = "flex";
+    listHeader.style.justifyContent = "space-between";
+    listHeader.style.alignItems = "center";
+    listHeader.style.marginBottom = "8px";
+
+    const listLbl = document.createElement("label");
+    listLbl.className = "field-label";
+    listLbl.style.margin = "0";
+    listLbl.textContent = "Ausgewählte Publikationen (Checkbox zum Ein-/Ausblenden):";
+
+    const refreshBtn = document.createElement("button");
+    refreshBtn.type = "button";
+    refreshBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    refreshBtn.title = "Lädt die 5 neuesten Publikationen aus dem System";
+    refreshBtn.textContent = "🔄 Neueste 5 laden";
+    refreshBtn.addEventListener("click", function () {
+      const currentId = state.article ? state.article.id : "";
+      const pool = (state.allArticles || []).filter(function (a) {
+        return a.id !== currentId && a.status !== "archived";
+      });
+      blk.items = pool.slice(0, 5).map(function (a) {
+        return {
+          article_id: a.id,
+          title: a.title || "Ohne Titel",
+          subtitle: a.subtitle || "",
+          date: a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
+          category: a.category || "",
+          enabled: true,
+        };
+      });
+      renderItems();
+      markDirty();
+    });
+
+    listHeader.appendChild(listLbl);
+    listHeader.appendChild(refreshBtn);
+    listWrap.appendChild(listHeader);
+
+    const itemsContainer = document.createElement("div");
+    itemsContainer.className = "publications-items-list";
+
+    function renderItems() {
+      itemsContainer.innerHTML = "";
+      if (!blk.items || blk.items.length === 0) {
+        const emptyMsg = document.createElement("div");
+        emptyMsg.style.fontSize = "12px";
+        emptyMsg.style.color = "#64748B";
+        emptyMsg.style.padding = "10px";
+        emptyMsg.style.textAlign = "center";
+        emptyMsg.style.background = "#F8FAFC";
+        emptyMsg.style.borderRadius = "4px";
+        emptyMsg.textContent = "Keine Publikationen ausgewählt. Wählen Sie unten eine Publikation aus.";
+        itemsContainer.appendChild(emptyMsg);
+        updateDropdown();
+        return;
+      }
+
+      blk.items.forEach(function (item, idx) {
+        const row = document.createElement("div");
+        row.className = "publication-editor-row";
+        if (item.enabled === false) {
+          row.classList.add("disabled-pub");
+        }
+
+        const check = document.createElement("input");
+        check.type = "checkbox";
+        check.checked = item.enabled !== false;
+        check.title = check.checked ? "Aktiv (wird im Dokument angezeigt)" : "Deaktiviert (abgewählt)";
+        check.addEventListener("change", function () {
+          item.enabled = check.checked;
+          if (item.enabled) {
+            row.classList.remove("disabled-pub");
+          } else {
+            row.classList.add("disabled-pub");
+          }
+          markDirty();
+        });
+
+        const content = document.createElement("div");
+        content.className = "pub-content-col";
+
+        const titleInput = document.createElement("input");
+        titleInput.type = "text";
+        titleInput.className = "cms-input font-medium";
+        titleInput.style.fontSize = "13px";
+        titleInput.style.padding = "4px 8px";
+        titleInput.value = item.title || "";
+        titleInput.placeholder = "Titel der Publikation";
+        titleInput.addEventListener("input", function () {
+          item.title = titleInput.value;
+          markDirty();
+        });
+
+        const metaRow = document.createElement("div");
+        metaRow.style.display = "grid";
+        metaRow.style.gridTemplateColumns = "120px 1fr";
+        metaRow.style.gap = "8px";
+        metaRow.style.marginTop = "4px";
+
+        const dateInput = document.createElement("input");
+        dateInput.type = "text";
+        dateInput.className = "cms-input";
+        dateInput.style.fontSize = "11.5px";
+        dateInput.style.padding = "3px 6px";
+        dateInput.placeholder = "Datum (JJJJ-MM-TT)";
+        dateInput.value = item.date || "";
+        dateInput.addEventListener("input", function () {
+          item.date = dateInput.value;
+          markDirty();
+        });
+
+        const subInput = document.createElement("input");
+        subInput.type = "text";
+        subInput.className = "cms-input";
+        subInput.style.fontSize = "11.5px";
+        subInput.style.padding = "3px 6px";
+        subInput.placeholder = "Untertitel / Rubrik (optional)";
+        subInput.value = item.subtitle || "";
+        subInput.addEventListener("input", function () {
+          item.subtitle = subInput.value;
+          markDirty();
+        });
+
+        metaRow.appendChild(dateInput);
+        metaRow.appendChild(subInput);
+
+        content.appendChild(titleInput);
+        content.appendChild(metaRow);
+
+        const delBtn = document.createElement("button");
+        delBtn.type = "button";
+        delBtn.className = "btn-icon-only";
+        delBtn.style.color = "#B91C1C";
+        delBtn.title = "Publikation aus Liste entfernen";
+        delBtn.innerHTML = "🗑️";
+        delBtn.addEventListener("click", function () {
+          blk.items.splice(idx, 1);
+          renderItems();
+          markDirty();
+        });
+
+        row.appendChild(check);
+        row.appendChild(content);
+        row.appendChild(delBtn);
+        itemsContainer.appendChild(row);
+      });
+
+      updateDropdown();
+    }
+
+    listWrap.appendChild(itemsContainer);
+
+    // Hinzufügen-Sektion
+    const addSection = document.createElement("div");
+    addSection.className = "publications-add-section";
+    addSection.style.marginTop = "10px";
+    addSection.style.display = "flex";
+    addSection.style.gap = "8px";
+    addSection.style.alignItems = "center";
+
+    const select = document.createElement("select");
+    select.className = "cms-select";
+    select.style.flex = "1";
+    select.style.fontSize = "12.5px";
+
+    function updateDropdown() {
+      select.innerHTML = "";
+      const currentSelectedIds = new Set(
+        (blk.items || []).map(function (it) { return it.article_id; }).filter(Boolean)
+      );
+      const currentId = state.article ? state.article.id : "";
+      const available = (state.allArticles || []).filter(function (a) {
+        return a.id !== currentId && a.status !== "archived" && !currentSelectedIds.has(a.id);
+      });
+
+      if (available.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "Keine weiteren Artikel im System verfügbar";
+        select.appendChild(opt);
+        addBtn.disabled = true;
+        return;
+      }
+
+      addBtn.disabled = false;
+      const placeholder = document.createElement("option");
+      placeholder.value = "";
+      placeholder.textContent = "— Publikation aus dem System auswählen —";
+      select.appendChild(placeholder);
+
+      available.forEach(function (a) {
+        const opt = document.createElement("option");
+        opt.value = a.id;
+        const d = a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : "");
+        opt.textContent = (d ? "[" + d + "] " : "") + (a.title || "Ohne Titel");
+        select.appendChild(opt);
+      });
+    }
+
+    const addBtn = document.createElement("button");
+    addBtn.type = "button";
+    addBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    addBtn.textContent = "+ Hinzufügen";
+    addBtn.addEventListener("click", function () {
+      const artId = select.value;
+      if (!artId) return;
+      const art = (state.allArticles || []).find(function (a) { return a.id === artId; });
+      if (art) {
+        blk.items.push({
+          article_id: art.id,
+          title: art.title || "Ohne Titel",
+          subtitle: art.subtitle || "",
+          date: art.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
+          category: art.category || "",
+          enabled: true,
+        });
+        renderItems();
+        markDirty();
+      }
+    });
+
+    const addManualBtn = document.createElement("button");
+    addManualBtn.type = "button";
+    addManualBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    addManualBtn.title = "Einen freien Publikationseintrag manuell anlegen";
+    addManualBtn.textContent = "+ Manuell";
+    addManualBtn.addEventListener("click", function () {
+      blk.items.push({
+        article_id: "",
+        title: "Neue Publikation",
+        subtitle: "",
+        date: new Date().toISOString().split("T")[0],
+        category: "",
+        enabled: true,
+      });
+      renderItems();
+      markDirty();
+    });
+
+    addSection.appendChild(select);
+    addSection.appendChild(addBtn);
+    addSection.appendChild(addManualBtn);
+
+    listWrap.appendChild(addSection);
+    container.appendChild(listWrap);
+
+    renderItems();
   }
 
   let activePopover = null;

@@ -371,13 +371,13 @@ def create_new_article(
                 "prägnanten Sätzen für die Leserinnen und Leser zusammen."
             ),
             category="Anlagepolitik & Märkte",
-            authors=[AuthorItem(name="Dr. Reto Krähenbühl", role="Chief Investment Officer")],
+            authors=[AuthorItem(name="Titel Vorname Name", role="Funktion / Rolle")],
         ),
         blocks=[
             {
                 "id": f"blk_{uuid.uuid4().hex[:8]}",
                 "type": "heading",
-                "level": 1,
+                "level": 2,
                 "text": "Makroökonomischer Ausblick",
             },
             {
@@ -1066,7 +1066,7 @@ def init_db_and_seed() -> None:
             publication_date="2026-11-05",
             category="Anlagepolitik & Märkte",
             authors=[
-                AuthorItem(name="Dr. Reto Krähenbühl", role="Chief Investment Officer"),
+                AuthorItem(name="Titel Vorname Name", role="Chief Investment Officer"),
                 AuthorItem(name="Sabine Lustenberger, CFA", role="Leiterin Aktienanalyse"),
             ],
         ),

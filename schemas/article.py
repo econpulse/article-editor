@@ -70,7 +70,7 @@ class ArticleMetadata(BaseModel):
 class HeadingBlock(BaseModel):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["heading"] = "heading"
-    level: int = Field(default=1, ge=1, le=3)
+    level: int = Field(default=2, ge=1, le=3)
     text: str = Field(default="")
 
 
@@ -345,6 +345,44 @@ class GlossaryBlock(BaseModel):
         return cleaned
 
 
+class PublicationItem(BaseModel):
+    article_id: str = Field(default="")
+    title: str = Field(default="")
+    subtitle: str = Field(default="")
+    date: str = Field(default="")
+    category: str = Field(default="")
+    enabled: bool = Field(default=True)
+
+
+class PublicationsBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["publications"] = "publications"
+    title: str = Field(default="Weitere Publikationen", description="Titel des Blocks")
+    items: list[dict[str, Any]] = Field(default_factory=list, description="Liste von Publikationseinträgen")
+    layout: Literal["column", "full"] = Field(
+        default="column",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+
+    @field_validator("items", mode="before")
+    @classmethod
+    def validate_publication_items(cls, v: Any) -> list[dict[str, Any]]:
+        if not isinstance(v, (list, tuple)):
+            return []
+        cleaned = []
+        for item in v:
+            if isinstance(item, dict):
+                cleaned.append({
+                    "article_id": str(item.get("article_id", "")),
+                    "title": str(item.get("title", "")),
+                    "subtitle": str(item.get("subtitle", "")),
+                    "date": str(item.get("date", "")),
+                    "category": str(item.get("category", "")),
+                    "enabled": bool(item.get("enabled", True)),
+                })
+        return cleaned
+
+
 ContentBlock = Union[
     HeadingBlock,
     RichTextBlock,
@@ -360,6 +398,7 @@ ContentBlock = Union[
     DividerBlock,
     FootnotesBlock,
     GlossaryBlock,
+    PublicationsBlock,
 ]
 
 
@@ -392,6 +431,8 @@ def parse_block(raw: dict[str, Any]) -> ContentBlock:
         return FootnotesBlock.model_validate(raw)
     if btype == "glossary":
         return GlossaryBlock.model_validate(raw)
+    if btype == "publications":
+        return PublicationsBlock.model_validate(raw)
     return RichTextBlock.model_validate(raw)
 
 

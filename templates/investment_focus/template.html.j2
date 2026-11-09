@@ -194,9 +194,12 @@
     }
 
     h1.blk-h1 {
-      font-size: 1.28rem;
+      font-size: 1.48rem;
       color: var(--lukb-navy);
       margin-top: 2em;
+      border-bottom: 1.5px solid var(--lukb-navy);
+      padding-bottom: 0.35rem;
+      margin-bottom: 0.75rem;
     }
 
     h2.blk-h2 {
@@ -429,12 +432,77 @@
       z-index: 100;
     }
 
+    .blk-publications {
+      border-top: 2px solid var(--lukb-blue);
+      border-bottom: 1px solid var(--lukb-border);
+      padding: 12px 0 10px 0;
+      margin: 1.8em 0 1.4em 0;
+      break-inside: avoid;
+    }
+
+    .publications-title {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+      margin-top: 0;
+      margin-bottom: 10px;
+      font-size: 1.1rem;
+      line-height: 1.25;
+    }
+
+    .publications-list {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .publication-item {
+      padding: 5px 0;
+      border-bottom: 1px dashed var(--lukb-border);
+    }
+
+    .publication-item:last-child {
+      border-bottom: none;
+      padding-bottom: 0;
+    }
+
+    .pub-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .pub-title {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      font-size: 0.88rem;
+      color: var(--lukb-navy);
+    }
+
+    .pub-date {
+      font-size: 0.76rem;
+      color: var(--lukb-muted);
+      white-space: nowrap;
+    }
+
+    .pub-subtitle {
+      font-size: 0.78rem;
+      color: var(--lukb-muted);
+      margin-top: 2px;
+    }
+
     .blk-figure, .blk-table-wrap {
       break-inside: avoid;
       border-top: 2px solid var(--lukb-navy);
       border-bottom: 1px solid var(--lukb-border);
       padding: 12px 0 10px 0;
-      margin: 1.4em 0;
+      margin: 2em 0 1.4em 0;
+    }
+
+    .blk-richtext + .blk-figure,
+    .blk-figure {
+      margin-top: 2em;
     }
 
     .blk-box-title {
@@ -730,6 +798,30 @@
             </div>
           </div>
           {% endif %}
+
+        {% elif blk.type == "publications" %}
+          <div class="blk-publications {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
+            {% if blk.title %}
+              <h2 class="blk-h2 publications-title">{{ blk.title }}</h2>
+            {% endif %}
+            <div class="publications-list">
+              {% for item in blk['items'] %}
+                {% if item.enabled is not defined or item.enabled %}
+                <div class="publication-item">
+                  <div class="pub-header">
+                    <span class="pub-title">{{ item.title }}</span>
+                    {% if item.date %}
+                      <span class="pub-date">{{ item.date }}</span>
+                    {% endif %}
+                  </div>
+                  {% if item.subtitle %}
+                    <div class="pub-subtitle">{{ item.subtitle }}</div>
+                  {% endif %}
+                </div>
+                {% endif %}
+              {% endfor %}
+            </div>
+          </div>
         {% endif %}
       {% endmacro %}
 

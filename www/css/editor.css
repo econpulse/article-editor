@@ -658,6 +658,56 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 .cms-block-card.block-type-divider { border-left-color: #94A3B8; }
 .cms-block-card.block-type-footnotes { border-left-color: #64748B; }
 .cms-block-card.block-type-glossary { border-left-color: #0284C7; }
+.cms-block-card.block-type-publications { border-left-color: var(--lukb-blue); }
+
+/* Publications Editor Box */
+.publications-editor-container {
+  background: var(--lukb-surface);
+  border: 1px solid var(--lukb-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+
+.publications-items-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.publication-editor-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 32px;
+  gap: 8px;
+  align-items: center;
+  background: var(--lukb-surface-alt);
+  border: 1px solid var(--lukb-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.publication-editor-row.disabled-pub {
+  opacity: 0.5;
+  background: #F1F5F9;
+}
+
+.publication-editor-row input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  cursor: pointer;
+  accent-color: var(--lukb-blue);
+}
+
+.pub-content-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.publications-add-section {
+  padding-top: 8px;
+  border-top: 1px dashed var(--lukb-border);
+}
 
 /* Tags Chips Editor */
 .tags-editor-box {

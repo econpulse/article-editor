@@ -122,11 +122,11 @@
 // ============================================================================
 
 #let render-heading(level, content-text) = {
-  let sz = if level == 1 { 12.5pt } else if level == 2 { 10.8pt } else { 9.8pt }
+  let sz = if level == 1 { 14.5pt } else if level == 2 { 10.8pt } else { 9.8pt }
   let col = if level == 1 { lukb-navy } else if level == 2 { lukb-blue } else { lukb-text }
   let lead = if level == 1 { 0.42em } else if level == 2 { 0.38em } else { 0.34em }
   let abv = 2.0em
-  let blw = 0.68em
+  let blw = if level == 1 { 0.85em } else { 0.68em }
   block(
     sticky: true,
     breakable: false,
@@ -136,6 +136,10 @@
     #set text(hyphenate: false)
     #set par(leading: lead, justify: false)
     #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
+    #if level == 1 [
+      #v(3.5pt)
+      #line(length: 100%, stroke: 0.75pt + lukb-navy)
+    ]
   ]
 }
 
@@ -168,7 +172,7 @@
     breakable: false,
     stroke: (top: 1.5pt + lukb-navy, bottom: 0.6pt + lukb-border),
     inset: (top: 7pt, bottom: 6pt),
-    above: 1.1em,
+    above: 2.0em,
     below: 1.1em
   )[
     #if blk.title != "" [
@@ -399,6 +403,43 @@
   ]
 }
 
+#let render-publications-box(title, items) = {
+  let active-items = items.filter(it => it.at("enabled", default: true))
+  if active-items.len() > 0 [
+    #block(
+      width: 100%,
+      breakable: false,
+      stroke: (top: 1pt + lukb-blue, bottom: 0.6pt + lukb-border),
+      inset: (top: 7pt, bottom: 6pt),
+      above: 1.5em,
+      below: 1.2em
+    )[
+      #if title != "" [
+        #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-navy)[#title]
+        #v(4pt)
+      ]
+      #for item in active-items [
+        #let ptitle = item.at("title", default: "")
+        #let psub = item.at("subtitle", default: "")
+        #let pdate = item.at("date", default: "")
+        #block(above: 3.5pt, below: 3.5pt)[
+          #grid(
+            columns: (1fr, auto),
+            gutter: 6pt,
+            text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[#ptitle],
+            if pdate != "" { text(font: font-body, size: 7.2pt, fill: lukb-muted)[#pdate] }
+          )
+          #if psub != "" [
+            #block(above: 1pt, below: 0pt)[
+              #text(font: font-body, weight: "light", size: 7.3pt, fill: lukb-muted)[#psub]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+}
+
 // ============================================================================
 // Dokumenten-Kopf (Seite 1 Banner, Gesamttitel, Lead, Autoren)
 // Auf Seite 1 Ausgleich von 0.75cm, sodass Seite 1 bei 1.25cm beginnt und Folgeseiten bei 2cm
@@ -608,6 +649,16 @@
       place(bottom, scope: "parent", float: true, g-box)
     } else {
       g-box
+    }
+  } else if blk.type == "publications" {
+    let pub-box = render-publications-box(
+      blk.at("title_typst", default: blk.at("title", default: "Weitere Publikationen")),
+      blk.at("items_typst", default: blk.at("items", default: ()))
+    )
+    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
+      place(bottom, scope: "parent", float: true, pub-box)
+    } else {
+      pub-box
     }
   }
 }
