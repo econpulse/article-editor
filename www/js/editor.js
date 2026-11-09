@@ -1400,7 +1400,7 @@
     const h1Rule = document.createElement("div");
     h1Rule.style.height = "2px";
     h1Rule.style.backgroundColor = "#002855";
-    h1Rule.style.marginTop = "4px";
+    h1Rule.style.marginTop = "0px";
     h1Rule.style.width = "100%";
     h1Rule.title = "Horizontale Linie über Spaltenbreite";
 
@@ -1410,16 +1410,22 @@
         input.style.fontSize = "17.5px"; // +2pt grösser
         input.style.color = "#002855";
         input.style.fontWeight = "600";
+        input.style.borderBottomLeftRadius = "0";
+        input.style.borderBottomRightRadius = "0";
         h1Rule.style.display = "block";
       } else if (lvl === 2) {
         input.style.fontSize = "15.5px";
         input.style.color = "#005A9C";
         input.style.fontWeight = "500";
+        input.style.borderBottomLeftRadius = "";
+        input.style.borderBottomRightRadius = "";
         h1Rule.style.display = "none";
       } else {
         input.style.fontSize = "14px";
         input.style.color = "#1A2433";
         input.style.fontWeight = "500";
+        input.style.borderBottomLeftRadius = "";
+        input.style.borderBottomRightRadius = "";
         h1Rule.style.display = "none";
       }
     }

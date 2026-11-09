@@ -230,15 +230,13 @@
     sticky: true,
     breakable: false,
     above: abv,
-    below: blw
+    below: blw,
+    stroke: if level == 1 { (bottom: 0.75pt + lukb-navy) } else { none },
+    inset: (bottom: 0pt)
   )[
     #set text(hyphenate: false)
     #set par(leading: lead, justify: false)
     #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
-    #if level == 1 [
-      #v(3.5pt)
-      #line(length: 100%, stroke: 0.75pt + lukb-navy)
-    ]
   ]
 }
 
