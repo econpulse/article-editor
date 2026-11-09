@@ -17,6 +17,8 @@
     isDirty: false,
     autosaveTimer: null,
     sortableInstance: null,
+    selectedBlockIds: new Set(),
+    lastSelectedBlockId: null,
     previewMode: "pdf", // "pdf" (Typst SVG) | "web" (HTML5)
     selfSessionId: "",
     peers: [], // Aktive Co-Autoren im selben Artikel
@@ -550,12 +552,656 @@
     }
   }
 
+  // ==========================================================================
+  // Block-Katalog, Inline-Inserter & Multi-Select Logik
+  // ==========================================================================
+
+  const BLOCK_TYPE_CATALOG = [
+    {
+      group: "Text & Inhalt",
+      items: [
+        { type: "richtext", label: "Text-Absatz", icon: "📝" },
+        { type: "heading", label: "Überschrift", icon: "🔤" },
+        { type: "callout", label: "Kernaussagen", icon: "💡" },
+        { type: "quote", label: "Zitat / Pull-Quote", icon: "💬" },
+      ],
+    },
+    {
+      group: "Daten & Grafiken",
+      items: [
+        { type: "db_chart", label: "DB-Chart (Zeitreihe)", icon: "📈" },
+        { type: "figure", label: "Grafik-Upload", icon: "🖼" },
+        { type: "table", label: "Tabelle (Excel)", icon: "📊" },
+      ],
+    },
+    {
+      group: "Layout & Struktur",
+      items: [
+        { type: "textbox_pair", label: "Farbliche Textbox", icon: "📦" },
+        { type: "spacer", label: "Abstand (Spacer)", icon: "↕" },
+        { type: "colbreak", label: "Spaltenumbruch", icon: "⇥" },
+        { type: "divider", label: "Trennlinie", icon: "➖" },
+      ],
+    },
+    {
+      group: "Verzeichnisse & Anhänge",
+      items: [
+        { type: "footnotes", label: "Fussnoten & Quellen", icon: "📑" },
+        { type: "glossary", label: "Glossar", icon: "📖" },
+        { type: "publications", label: "Weitere Publikationen", icon: "📰" },
+      ],
+    },
+  ];
+
+  function insertBlockAt(targetIndex, blockType) {
+    if (!state.article) return;
+    if (!state.article.blocks) state.article.blocks = [];
+
+    if (targetIndex < 0) targetIndex = 0;
+    if (targetIndex > state.article.blocks.length) targetIndex = state.article.blocks.length;
+
+    const createdIds = [];
+    if (blockType === "textbox_pair") {
+      const bStart = createDefaultBlock("box_start");
+      const bEnd = createDefaultBlock("box_end");
+      state.article.blocks.splice(targetIndex, 0, bStart, bEnd);
+      createdIds.push(bStart.id, bEnd.id);
+    } else {
+      const newBlk = createDefaultBlock(blockType);
+      state.article.blocks.splice(targetIndex, 0, newBlk);
+      createdIds.push(newBlk.id);
+    }
+
+    renderBlocksCanvas();
+    markDirty();
+
+    if (createdIds.length > 0) {
+      setTimeout(function () {
+        const el = document.querySelector('[data-block-id="' + createdIds[0] + '"]');
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("sortable-ghost");
+          setTimeout(function () {
+            el.classList.remove("sortable-ghost");
+          }, 500);
+        }
+      }, 50);
+    }
+  }
+
+  let activePickerPopover = null;
+
+  function closeBlockPickerPopup() {
+    if (activePickerPopover && activePickerPopover.parentNode) {
+      activePickerPopover.parentNode.removeChild(activePickerPopover);
+    }
+    activePickerPopover = null;
+    document.querySelectorAll(".block-inline-inserter.is-active").forEach(function (el) {
+      el.classList.remove("is-active");
+    });
+  }
+
+  function openBlockPickerPopup(triggerElement, targetIndex) {
+    closeBlockPickerPopup();
+
+    const parentInserter = triggerElement.closest(".block-inline-inserter");
+    if (parentInserter) {
+      parentInserter.classList.add("is-active");
+    }
+
+    const popover = document.createElement("div");
+    popover.className = "block-picker-popover";
+
+    const header = document.createElement("div");
+    header.className = "block-picker-header";
+    header.innerHTML = "<span>Block einfügen (Position " + (targetIndex + 1) + ")</span>";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close-btn";
+    closeBtn.textContent = "✕";
+    closeBtn.title = "Schliessen (Esc)";
+    closeBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      closeBlockPickerPopup();
+    });
+    header.appendChild(closeBtn);
+    popover.appendChild(header);
+
+    BLOCK_TYPE_CATALOG.forEach(function (cat) {
+      const secTitle = document.createElement("div");
+      secTitle.className = "block-picker-section-title";
+      secTitle.textContent = cat.group;
+      popover.appendChild(secTitle);
+
+      const grid = document.createElement("div");
+      grid.className = "block-picker-grid";
+
+      cat.items.forEach(function (item) {
+        const itemBtn = document.createElement("button");
+        itemBtn.type = "button";
+        itemBtn.className = "block-picker-item";
+        itemBtn.innerHTML = '<span class="item-icon">' + item.icon + "</span><span>" + item.label + "</span>";
+        itemBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          closeBlockPickerPopup();
+          insertBlockAt(targetIndex, item.type);
+        });
+        grid.appendChild(itemBtn);
+      });
+
+      popover.appendChild(grid);
+    });
+
+    document.body.appendChild(popover);
+    activePickerPopover = popover;
+
+    const rect = triggerElement.getBoundingClientRect();
+    const popoverWidth = 330;
+    let left = rect.left + rect.width / 2 - popoverWidth / 2;
+    if (left < 10) left = 10;
+    if (left + popoverWidth > window.innerWidth - 10) {
+      left = window.innerWidth - popoverWidth - 10;
+    }
+
+    let top = rect.bottom + 6;
+    if (top + popover.offsetHeight > window.innerHeight - 10) {
+      top = rect.top - popover.offsetHeight - 6;
+    }
+
+    popover.style.left = left + "px";
+    popover.style.top = top + "px";
+
+    function onDocClick(e) {
+      if (popover && !popover.contains(e.target) && !triggerElement.contains(e.target)) {
+        closeBlockPickerPopup();
+        document.removeEventListener("pointerdown", onDocClick);
+      }
+    }
+    setTimeout(function () {
+      document.addEventListener("pointerdown", onDocClick);
+    }, 15);
+  }
+
+  function createInlineInserterElement(targetIndex, isTop) {
+    const wrap = document.createElement("div");
+    wrap.className = "block-inline-inserter " + (isTop ? "top-inserter" : "bottom-inserter");
+    wrap.dataset.targetIndex = targetIndex;
+
+    const line = document.createElement("div");
+    line.className = "inserter-line";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "inserter-btn";
+    btn.innerHTML = "+ Block hier einfügen";
+    btn.title = "Neuen Block an dieser Stelle einfügen";
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      openBlockPickerPopup(btn, targetIndex);
+    });
+
+    wrap.appendChild(line);
+    wrap.appendChild(btn);
+    return wrap;
+  }
+
+  // Multi-Selection State & Helpers
+  function toggleBlockSelection(blockId, isShift, currentIndex) {
+    if (!state.article || !state.article.blocks) return;
+
+    if (isShift && state.lastSelectedBlockId) {
+      const lastIdx = state.article.blocks.findIndex(function (b) {
+        return b.id === state.lastSelectedBlockId;
+      });
+      if (lastIdx !== -1) {
+        const start = Math.min(lastIdx, currentIndex);
+        const end = Math.max(lastIdx, currentIndex);
+        for (let i = start; i <= end; i++) {
+          state.selectedBlockIds.add(state.article.blocks[i].id);
+        }
+      } else {
+        state.selectedBlockIds.add(blockId);
+      }
+    } else {
+      if (state.selectedBlockIds.has(blockId)) {
+        state.selectedBlockIds.delete(blockId);
+      } else {
+        state.selectedBlockIds.add(blockId);
+      }
+      state.lastSelectedBlockId = blockId;
+    }
+
+    updateBlockSelectionVisuals();
+    updateFloatingSelectionBar();
+  }
+
+  function updateBlockSelectionVisuals() {
+    const cards = document.querySelectorAll(".cms-block-card");
+    cards.forEach(function (card) {
+      const bid = card.dataset.blockId;
+      const isSelected = state.selectedBlockIds.has(bid);
+      card.classList.toggle("is-selected", isSelected);
+      card.classList.toggle("sortable-selected", isSelected);
+      const cb = card.querySelector(".block-select-checkbox");
+      if (cb) cb.checked = isSelected;
+    });
+  }
+
+  function clearBlockSelection() {
+    state.selectedBlockIds.clear();
+    state.lastSelectedBlockId = null;
+    updateBlockSelectionVisuals();
+    updateFloatingSelectionBar();
+  }
+
+  function ensureFloatingSelectionBar() {
+    let bar = document.getElementById("cms-floating-selection-bar");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "cms-floating-selection-bar";
+      document.body.appendChild(bar);
+    }
+    return bar;
+  }
+
+  function moveSelectedBlocks(direction) {
+    if (!state.article || !state.article.blocks) return;
+    const blocks = state.article.blocks;
+    const selected = [];
+    let minIdx = blocks.length;
+    let maxIdx = -1;
+
+    blocks.forEach(function (b, idx) {
+      if (state.selectedBlockIds.has(b.id)) {
+        selected.push(b);
+        if (idx < minIdx) minIdx = idx;
+        if (idx > maxIdx) maxIdx = idx;
+      }
+    });
+
+    if (selected.length === 0) return;
+
+    const remaining = blocks.filter(function (b) {
+      return !state.selectedBlockIds.has(b.id);
+    });
+
+    let targetIdx;
+    if (direction === "up") {
+      if (minIdx <= 0) return;
+      targetIdx = minIdx - 1;
+    } else {
+      if (maxIdx >= blocks.length - 1) return;
+      const nextUnselected = blocks[maxIdx + 1];
+      const rIdx = remaining.findIndex(function (b) {
+        return b.id === nextUnselected.id;
+      });
+      targetIdx = rIdx !== -1 ? rIdx + 1 : remaining.length;
+    }
+
+    if (targetIdx < 0) targetIdx = 0;
+    if (targetIdx > remaining.length) targetIdx = remaining.length;
+
+    remaining.splice(targetIdx, 0, ...selected);
+    state.article.blocks = remaining;
+
+    renderBlocksCanvas();
+    markDirty();
+    updateFloatingSelectionBar();
+  }
+
+  function moveSelectedBlocksTo(targetIndex) {
+    if (!state.article || !state.article.blocks) return;
+    const selected = state.article.blocks.filter(function (b) {
+      return state.selectedBlockIds.has(b.id);
+    });
+    const remaining = state.article.blocks.filter(function (b) {
+      return !state.selectedBlockIds.has(b.id);
+    });
+
+    if (targetIndex < 0) targetIndex = 0;
+    if (targetIndex > remaining.length) targetIndex = remaining.length;
+
+    remaining.splice(targetIndex, 0, ...selected);
+    state.article.blocks = remaining;
+
+    renderBlocksCanvas();
+    markDirty();
+    updateFloatingSelectionBar();
+  }
+
+  function duplicateSelectedBlocks() {
+    if (!state.article || !state.article.blocks) return;
+    const newBlocks = [];
+    const newSelectedIds = new Set();
+    state.article.blocks.forEach(function (b) {
+      newBlocks.push(b);
+      if (state.selectedBlockIds.has(b.id)) {
+        const clone = JSON.parse(JSON.stringify(b));
+        clone.id = uid("blk");
+        newBlocks.push(clone);
+        newSelectedIds.add(clone.id);
+      }
+    });
+    state.article.blocks = newBlocks;
+    state.selectedBlockIds = newSelectedIds;
+    renderBlocksCanvas();
+    markDirty();
+    updateFloatingSelectionBar();
+  }
+
+  function deleteSelectedBlocks() {
+    if (!state.article || !state.article.blocks) return;
+    const count = state.selectedBlockIds.size;
+    if (count === 0) return;
+    if (count > 1 && !confirm(count + " ausgewählte Blöcke wirklich löschen?")) {
+      return;
+    }
+    state.article.blocks = state.article.blocks.filter(function (b) {
+      return !state.selectedBlockIds.has(b.id);
+    });
+    state.selectedBlockIds.clear();
+    state.lastSelectedBlockId = null;
+    renderBlocksCanvas();
+    markDirty();
+    updateFloatingSelectionBar();
+  }
+
+  function openMoveToDialog(anchorBtn) {
+    closeBlockPickerPopup();
+
+    const existingDialog = document.getElementById("cms-move-to-dialog");
+    if (existingDialog) {
+      existingDialog.parentNode.removeChild(existingDialog);
+      return;
+    }
+
+    const dialog = document.createElement("div");
+    dialog.id = "cms-move-to-dialog";
+    dialog.className = "block-picker-popover";
+    dialog.style.width = "280px";
+
+    const header = document.createElement("div");
+    header.className = "block-picker-header";
+    header.innerHTML = "<span>Verschieben an Position…</span>";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "close-btn";
+    closeBtn.textContent = "✕";
+    closeBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+    });
+    header.appendChild(closeBtn);
+    dialog.appendChild(header);
+
+    const list = document.createElement("div");
+    list.style.maxHeight = "280px";
+    list.style.overflowY = "auto";
+    list.style.display = "flex";
+    list.style.flexDirection = "column";
+    list.style.gap = "4px";
+
+    const topItem = document.createElement("button");
+    topItem.type = "button";
+    topItem.className = "block-picker-item";
+    topItem.innerHTML = '<span class="item-icon">⤒</span><span>1. Ganz an den Anfang</span>';
+    topItem.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+      moveSelectedBlocksTo(0);
+    });
+    list.appendChild(topItem);
+
+    const unselected = (state.article.blocks || [])
+      .map(function (b, idx) {
+        return { block: b, origIndex: idx };
+      })
+      .filter(function (item) {
+        return !state.selectedBlockIds.has(item.block.id);
+      });
+
+    unselected.forEach(function (item, uIdx) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "block-picker-item";
+      const label = (item.origIndex + 1) + ". " + getBlockTypeLabel(item.block.type);
+      btn.innerHTML = '<span class="item-icon">↳</span><span>Nach: ' + label + "</span>";
+      btn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+        moveSelectedBlocksTo(uIdx + 1);
+      });
+      list.appendChild(btn);
+    });
+
+    const endItem = document.createElement("button");
+    endItem.type = "button";
+    endItem.className = "block-picker-item";
+    endItem.innerHTML = '<span class="item-icon">⤓</span><span>Ganz ans Ende</span>';
+    endItem.addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+      moveSelectedBlocksTo(unselected.length);
+    });
+    list.appendChild(endItem);
+
+    dialog.appendChild(list);
+    document.body.appendChild(dialog);
+
+    const rect = anchorBtn.getBoundingClientRect();
+    dialog.style.left = Math.max(10, rect.left - 40) + "px";
+    dialog.style.top = Math.max(10, rect.top - dialog.offsetHeight - 8) + "px";
+
+    function onDocClick(e) {
+      if (dialog && !dialog.contains(e.target) && !anchorBtn.contains(e.target)) {
+        if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+        document.removeEventListener("pointerdown", onDocClick);
+      }
+    }
+    setTimeout(function () {
+      document.addEventListener("pointerdown", onDocClick);
+    }, 15);
+  }
+
+  function updateFloatingSelectionBar() {
+    const bar = ensureFloatingSelectionBar();
+    const count = state.selectedBlockIds.size;
+    if (count === 0) {
+      bar.classList.remove("is-visible");
+      bar.innerHTML = "";
+      return;
+    }
+
+    bar.classList.add("is-visible");
+    bar.innerHTML = "";
+
+    const badge = document.createElement("span");
+    badge.className = "floating-bar-badge";
+    badge.textContent = count + (count === 1 ? " Block ausgewählt" : " Blöcke ausgewählt");
+    bar.appendChild(badge);
+
+    const upBtn = document.createElement("button");
+    upBtn.type = "button";
+    upBtn.className = "floating-bar-btn";
+    upBtn.title = "Ausgewählte Blöcke gemeinsam nach oben verschieben";
+    upBtn.innerHTML = "↑ Nach oben";
+    upBtn.addEventListener("click", function () {
+      moveSelectedBlocks("up");
+    });
+    bar.appendChild(upBtn);
+
+    const downBtn = document.createElement("button");
+    downBtn.type = "button";
+    downBtn.className = "floating-bar-btn";
+    downBtn.title = "Ausgewählte Blöcke gemeinsam nach unten verschieben";
+    downBtn.innerHTML = "↓ Nach unten";
+    downBtn.addEventListener("click", function () {
+      moveSelectedBlocks("down");
+    });
+    bar.appendChild(downBtn);
+
+    const d1 = document.createElement("div");
+    d1.className = "floating-bar-divider";
+    bar.appendChild(d1);
+
+    const moveToBtn = document.createElement("button");
+    moveToBtn.type = "button";
+    moveToBtn.className = "floating-bar-btn";
+    moveToBtn.title = "Ausgewählte Blöcke an eine bestimmte Position verschieben";
+    moveToBtn.innerHTML = "➔ Verschieben nach…";
+    moveToBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      openMoveToDialog(moveToBtn);
+    });
+    bar.appendChild(moveToBtn);
+
+    const dupBtn = document.createElement("button");
+    dupBtn.type = "button";
+    dupBtn.className = "floating-bar-btn";
+    dupBtn.title = "Ausgewählte Blöcke duplizieren";
+    dupBtn.innerHTML = "⧉ Duplizieren";
+    dupBtn.addEventListener("click", function () {
+      duplicateSelectedBlocks();
+    });
+    bar.appendChild(dupBtn);
+
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "floating-bar-btn danger";
+    delBtn.title = "Ausgewählte Blöcke löschen";
+    delBtn.innerHTML = "🗑 Löschen";
+    delBtn.addEventListener("click", function () {
+      deleteSelectedBlocks();
+    });
+    bar.appendChild(delBtn);
+
+    const d2 = document.createElement("div");
+    d2.className = "floating-bar-divider";
+    bar.appendChild(d2);
+
+    const clearBtn = document.createElement("button");
+    clearBtn.type = "button";
+    clearBtn.className = "floating-bar-btn";
+    clearBtn.title = "Auswahl aufheben (Esc)";
+    clearBtn.innerHTML = "✕";
+    clearBtn.addEventListener("click", function () {
+      clearBlockSelection();
+    });
+    bar.appendChild(clearBtn);
+  }
+
+  // ==========================================================================
+  // Autoscroll-Engine für Drag-and-Drop
+  // ==========================================================================
+
+  let autoScrollRaf = null;
+  let autoScrollVelocity = 0;
+  let autoScrollActive = false;
+  let activeAutoScroller = null;
+
+  function startEditorAutoScroll(container) {
+    if (!container) return;
+    autoScrollActive = true;
+    autoScrollVelocity = 0;
+
+    function onPointerMove(e) {
+      if (!autoScrollActive) return;
+      const rect = container.getBoundingClientRect();
+      const threshold = 110;
+      const maxSpeed = 30;
+
+      if (e.clientY < rect.top + threshold && e.clientY > rect.top - 60) {
+        const intensity = Math.min(1, Math.max(0.15, (rect.top + threshold - e.clientY) / threshold));
+        autoScrollVelocity = -Math.round(intensity * maxSpeed);
+      } else if (e.clientY > rect.bottom - threshold && e.clientY < rect.bottom + 60) {
+        const intensity = Math.min(1, Math.max(0.15, (e.clientY - (rect.bottom - threshold)) / threshold));
+        autoScrollVelocity = Math.round(intensity * maxSpeed);
+      } else {
+        autoScrollVelocity = 0;
+      }
+
+      if (autoScrollVelocity !== 0 && !autoScrollRaf) {
+        loopScroll();
+      }
+    }
+
+    function loopScroll() {
+      if (!autoScrollActive || autoScrollVelocity === 0) {
+        autoScrollRaf = null;
+        return;
+      }
+      container.scrollTop += autoScrollVelocity;
+      autoScrollRaf = requestAnimationFrame(loopScroll);
+    }
+
+    function onPointerUp() {
+      stopEditorAutoScroll();
+    }
+
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerup", onPointerUp, { once: true });
+    window.addEventListener("dragend", onPointerUp, { once: true });
+
+    activeAutoScroller = {
+      cleanup: function () {
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        window.removeEventListener("dragend", onPointerUp);
+      },
+    };
+  }
+
+  function stopEditorAutoScroll() {
+    autoScrollActive = false;
+    autoScrollVelocity = 0;
+    if (autoScrollRaf) {
+      cancelAnimationFrame(autoScrollRaf);
+      autoScrollRaf = null;
+    }
+    if (activeAutoScroller) {
+      activeAutoScroller.cleanup();
+      activeAutoScroller = null;
+    }
+  }
+
+  // ==========================================================================
+  // Block-Canvas Rendering & SortableJS
+  // ==========================================================================
+
   function renderBlocksCanvas() {
     const canvas = document.getElementById("lukb-blocks-canvas");
     if (!canvas || !state.article) return;
 
     canvas.innerHTML = "";
     const blocks = state.article.blocks || [];
+
+    const currentBlockIds = new Set(blocks.map(function (b) { return b.id; }));
+    Array.from(state.selectedBlockIds).forEach(function (id) {
+      if (!currentBlockIds.has(id)) state.selectedBlockIds.delete(id);
+    });
+
+    if (blocks.length === 0) {
+      const emptyState = document.createElement("div");
+      emptyState.style.padding = "40px 20px";
+      emptyState.style.textAlign = "center";
+      emptyState.style.border = "2px dashed var(--lukb-border)";
+      emptyState.style.borderRadius = "8px";
+      emptyState.style.background = "#FAFCFE";
+      emptyState.innerHTML = '<p style="color: var(--lukb-navy); font-weight: 600; margin-bottom: 12px;">Noch keine Inhaltsblöcke vorhanden</p>';
+      const addFirstBtn = document.createElement("button");
+      addFirstBtn.type = "button";
+      addFirstBtn.className = "btn-lukb btn-lukb-primary btn-lukb-sm";
+      addFirstBtn.textContent = "+ Ersten Block einfügen";
+      addFirstBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        openBlockPickerPopup(addFirstBtn, 0);
+      });
+      emptyState.appendChild(addFirstBtn);
+      canvas.appendChild(emptyState);
+      updateFloatingSelectionBar();
+      return;
+    }
 
     let insideBox = false;
     blocks.forEach(function (blk, index) {
@@ -570,6 +1216,7 @@
     });
 
     initSortable(canvas);
+    updateFloatingSelectionBar();
   }
 
   function initSortable(canvas) {
@@ -579,37 +1226,84 @@
     }
     if (typeof window.Sortable === "undefined") return;
 
+    const editorPane = document.querySelector(".cms-editor-pane") || canvas.parentElement;
+
     state.sortableInstance = window.Sortable.create(canvas, {
       handle: ".block-drag-handle",
+      draggable: ".cms-block-card",
       animation: 180,
       ghostClass: "sortable-ghost",
       dragClass: "sortable-drag",
-      onEnd: function (evt) {
-        if (evt.oldIndex === evt.newIndex) return;
-        const moved = state.article.blocks.splice(evt.oldIndex, 1)[0];
-        state.article.blocks.splice(evt.newIndex, 0, moved);
+      selectedClass: "sortable-selected",
+      multiDrag: true,
+      scroll: editorPane,
+      scrollSensitivity: 120,
+      scrollSpeed: 24,
+      bubbleScroll: true,
+      onStart: function () {
+        closeBlockPickerPopup();
+        startEditorAutoScroll(editorPane);
+      },
+      onEnd: function () {
+        stopEditorAutoScroll();
+
+        const cardElements = Array.from(canvas.querySelectorAll(":scope > .cms-block-card"));
+        const newOrderIds = cardElements.map(function (el) { return el.dataset.blockId; });
+        const blockMap = new Map();
+        (state.article.blocks || []).forEach(function (b) { blockMap.set(b.id, b); });
+
+        state.article.blocks = newOrderIds.map(function (id) { return blockMap.get(id); }).filter(Boolean);
+
         renderBlocksCanvas();
         markDirty();
+        updateFloatingSelectionBar();
       },
     });
   }
 
   function buildBlockCardElement(blk, index, insideBox) {
     const isMarker = blk.type === "box_start" || blk.type === "box_end";
+    const isSelected = state.selectedBlockIds.has(blk.id);
     const card = document.createElement("div");
     card.className =
       "cms-block-card block-type-" +
       blk.type +
       (insideBox && !isMarker ? " block-inside-textbox" : "") +
-      (isMarker ? " block-textbox-marker" : "");
+      (isMarker ? " block-textbox-marker" : "") +
+      (isSelected ? " is-selected sortable-selected" : "");
     card.dataset.blockId = blk.id;
 
-    // Header Bar
+    card.addEventListener("click", function (e) {
+      if (e.ctrlKey || e.metaKey) {
+        const tag = e.target.tagName.toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "button" || tag === "select" || e.target.isContentEditable) {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        toggleBlockSelection(blk.id, e.shiftKey, index);
+      }
+    });
+
+    if (index === 0) {
+      card.appendChild(createInlineInserterElement(0, true));
+    }
+
     const header = document.createElement("div");
     header.className = "block-header-bar";
 
     const headerLeft = document.createElement("div");
     headerLeft.className = "block-header-left";
+
+    const selectCb = document.createElement("input");
+    selectCb.type = "checkbox";
+    selectCb.className = "block-select-checkbox";
+    selectCb.title = "Block markieren für Sammelaktionen (oder Ctrl+Klick)";
+    selectCb.checked = isSelected;
+    selectCb.addEventListener("click", function (e) {
+      e.stopPropagation();
+      toggleBlockSelection(blk.id, e.shiftKey, index);
+    });
 
     const dragHandle = document.createElement("span");
     dragHandle.className = "block-drag-handle";
@@ -620,6 +1314,7 @@
     typePill.className = "block-type-pill";
     typePill.textContent = (index + 1) + ". " + getBlockTypeLabel(blk.type);
 
+    headerLeft.appendChild(selectCb);
     headerLeft.appendChild(dragHandle);
     headerLeft.appendChild(typePill);
 
@@ -661,6 +1356,18 @@
       markDirty();
     });
 
+    const insertBelowBtn = document.createElement("button");
+    insertBelowBtn.type = "button";
+    insertBelowBtn.className = "btn-icon-only";
+    insertBelowBtn.title = "Neuen Block darunter einfügen (+)";
+    insertBelowBtn.textContent = "+";
+    insertBelowBtn.style.fontWeight = "bold";
+    insertBelowBtn.style.color = "var(--lukb-navy)";
+    insertBelowBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      openBlockPickerPopup(insertBelowBtn, index + 1);
+    });
+
     const dupBtn = document.createElement("button");
     dupBtn.type = "button";
     dupBtn.className = "btn-icon-only";
@@ -680,6 +1387,7 @@
     delBtn.title = "Block löschen";
     delBtn.textContent = "✕";
     delBtn.addEventListener("click", function () {
+      state.selectedBlockIds.delete(blk.id);
       state.article.blocks.splice(index, 1);
       renderBlocksCanvas();
       markDirty();
@@ -687,6 +1395,7 @@
 
     headerActions.appendChild(upBtn);
     headerActions.appendChild(downBtn);
+    headerActions.appendChild(insertBelowBtn);
     headerActions.appendChild(dupBtn);
     headerActions.appendChild(delBtn);
 
@@ -695,6 +1404,7 @@
     card.appendChild(header);
 
     if (isMarker) {
+      card.appendChild(createInlineInserterElement(index + 1, false));
       return card;
     }
 
@@ -731,6 +1441,7 @@
     }
 
     card.appendChild(body);
+    card.appendChild(createInlineInserterElement(index + 1, false));
     return card;
   }
 
@@ -3686,23 +4397,19 @@
       btn.addEventListener("click", function () {
         if (!state.article) return;
         const btype = btn.getAttribute("data-add-block-type");
-        if (btype === "textbox_pair") {
-          state.article.blocks.push(createDefaultBlock("box_start"));
-          state.article.blocks.push(createDefaultBlock("box_end"));
-        } else {
-          const newBlk = createDefaultBlock(btype);
-          state.article.blocks.push(newBlk);
-        }
-        renderBlocksCanvas();
-        markDirty();
+        const blocks = state.article.blocks || [];
 
-        // Scrolle sanft zum neuen Block
-        const pane = document.querySelector(".cms-editor-pane");
-        if (pane) {
-          setTimeout(function () {
-            pane.scrollTo({ top: pane.scrollHeight, behavior: "smooth" });
-          }, 60);
+        // Falls ein Block markiert ist, füge direkt darunter ein; sonst ans Ende
+        let targetIdx = blocks.length;
+        if (state.lastSelectedBlockId) {
+          const idx = blocks.findIndex(function (b) {
+            return b.id === state.lastSelectedBlockId;
+          });
+          if (idx !== -1) {
+            targetIdx = idx + 1;
+          }
         }
+        insertBlockAt(targetIdx, btype);
       });
     });
 
@@ -3718,6 +4425,16 @@
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         flushAutosave(true, "Gespeichert per Tastenkürzel (Ctrl+S)");
+      }
+      if (e.key === "Escape") {
+        closeBlockPickerPopup();
+        const moveDialog = document.getElementById("cms-move-to-dialog");
+        if (moveDialog && moveDialog.parentNode) {
+          moveDialog.parentNode.removeChild(moveDialog);
+        }
+        if (state.selectedBlockIds && state.selectedBlockIds.size > 0) {
+          clearBlockSelection();
+        }
       }
     });
 
@@ -4542,6 +5259,9 @@
           state.assetCache[k] = msg.assets[k];
         });
       }
+      state.selectedBlockIds.clear();
+      state.lastSelectedBlockId = null;
+      if (typeof closeBlockPickerPopup === "function") closeBlockPickerPopup();
       renderMetadataForm();
       renderBlocksCanvas();
       applyPeerFocusDecorations();
