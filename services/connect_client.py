@@ -77,13 +77,41 @@ def create_content_item(
         headers=headers,
         method="POST",
     )
-    with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+            raise ssl.SSLCertVerificationError(
+                f"SSL-Zertifikatsprüfung fehlgeschlagen ({exc}). "
+                "In Firmennetzen (Zscaler/interne CA) bitte CONNECT_VERIFY_SSL=false in .env setzen oder '--insecure' verwenden."
+            ) from exc
+        raise
 
 
 def _make_ssl_context() -> ssl.SSLContext:
+    """
+    Erstellt den SSL-Kontext für HTTPS-Anfragen an Posit Connect.
+    Unterstützt interne Firmennetzwerke (Zscaler/Root-CAs) sowie CONNECT_VERIFY_SSL=false.
+    """
+    import config
+
+    verify = getattr(config, "CONNECT_VERIFY_SSL", True)
+    if not verify:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        return ctx
+
+    ca_bundle = getattr(config, "CONNECT_CA_BUNDLE", "")
+    if ca_bundle and Path(ca_bundle).exists():
+        return ssl.create_default_context(cafile=ca_bundle)
+
     ctx = ssl.create_default_context()
-    # In Firmennetzen mit SSL-Inspection/Interception toleranter Fallback
+    try:
+        ctx.load_default_certs()
+    except Exception:
+        pass
     return ctx
 
 
@@ -134,6 +162,16 @@ def deploy_bundle_to_connect(bundle_path: Path) -> dict[str, Any]:
             "deployed": False,
             "error": f"Upload fehlgeschlagen (HTTP {exc.code}): {err_msg}",
         }
+    except urllib.error.URLError as exc:
+        if "CERTIFICATE_VERIFY_FAILED" in str(exc):
+            err_msg = (
+                f"SSL-Zertifikatsfehler beim Zugriff auf Posit Connect ({exc}). "
+                "In Firmennetzen (Zscaler/interne CA) bitte CONNECT_VERIFY_SSL=false in .env setzen oder '--insecure' verwenden."
+            )
+        else:
+            err_msg = str(exc)
+        logger.error(f"Verbindungsfehler beim Connect Bundle Upload: {err_msg}")
+        return {"success": False, "deployed": False, "error": err_msg}
     except Exception as exc:
         logger.error(f"Verbindungsfehler beim Connect Bundle Upload: {exc}")
         return {"success": False, "deployed": False, "error": str(exc)}

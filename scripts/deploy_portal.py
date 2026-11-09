@@ -10,6 +10,7 @@ Verwendung im Positron Terminal:
 
 from __future__ import annotations
 
+import argparse
 import os
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ sys.path.insert(0, str(BASE_DIR))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+import config
 from config import (
     CONNECT_API_KEY,
     CONNECT_PORTAL_GUID,
@@ -35,6 +37,18 @@ from services.portal_publisher import create_connect_bundle, publish_article
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="LUKB Investment Office Portal Deployment für Posit Connect")
+    parser.add_argument(
+        "--insecure",
+        "-k",
+        action="store_true",
+        help="SSL-Zertifikatsprüfung überspringen (hilfreich in Bank-/Firmennetzwerken mit interner CA / Zscaler)",
+    )
+    args = parser.parse_args()
+
+    if args.insecure:
+        config.CONNECT_VERIFY_SSL = False
+
     print("=" * 70)
     print("LUKB Investment Office — Statisches Portal Deployment für Posit Connect")
     print("=" * 70)
@@ -68,6 +82,7 @@ def main() -> None:
     print(f"    Server:    {server or '(nicht konfiguriert)'}")
     print(f"    API-Key:   {'*' * 8 + api_key[-4:] if len(api_key) > 4 else '(nicht konfiguriert)'}")
     print(f"    Item-GUID: {guid or '(noch nicht angelegt — wird bei Bedarf erstellt)'}")
+    print(f"    SSL-Prüfung: {'Deaktiviert (--insecure)' if not config.CONNECT_VERIFY_SSL else 'Aktiviert (CONNECT_VERIFY_SSL=true)'}")
 
     if not server or not api_key:
         print("\n⚠️  HINWEIS: Keine vollständigen Connect-Zugangsdaten konfiguriert.")

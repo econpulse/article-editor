@@ -93,6 +93,8 @@ CONNECT_SERVER_URL = os.getenv("CONNECT_SERVER", os.getenv("CONNECT_SERVER_URL",
 CONNECT_API_KEY = os.getenv("CONNECT_API_KEY", "").strip()
 CONNECT_PORTAL_GUID = os.getenv("CONNECT_PORTAL_GUID", os.getenv("CONNECT_PORTAL_CONTENT_GUID", "")).strip()
 CONNECT_PORTAL_URL = os.getenv("CONNECT_PORTAL_URL", "").strip()
+CONNECT_VERIFY_SSL = os.getenv("CONNECT_VERIFY_SSL", "true").strip().lower() not in ("false", "0", "no", "off")
+CONNECT_CA_BUNDLE = os.getenv("CONNECT_CA_BUNDLE", os.getenv("REQUESTS_CA_BUNDLE", os.getenv("SSL_CERT_FILE", ""))).strip()
 
 # ============================================================================
 # LUKB Corporate Design & Typografie
