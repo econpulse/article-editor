@@ -294,16 +294,22 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
 
         elif btype == "publications":
             bcopy["title_typst"] = escape_typst_text(blk.get("title", "Weitere Publikationen"))
-            bcopy["items_typst"] = [
-                {
-                    "title": escape_typst_text(it.get("title", "")),
+            items_typst = []
+            for it in blk.get("items", []):
+                raw_d = it.get("date", "")
+                fmt_d = format_publication_date(raw_d)
+                raw_t = it.get("title", "").strip()
+                clean_t = raw_t.strip('"').strip('«').strip('»')
+                items_typst.append({
+                    "title": escape_typst_text(clean_t),
                     "subtitle": escape_typst_text(it.get("subtitle", "")),
-                    "date": escape_typst_text(it.get("date", "")),
+                    "date": escape_typst_text(fmt_d or raw_d),
+                    "formatted_date": escape_typst_text(fmt_d or raw_d),
                     "category": escape_typst_text(it.get("category", "")),
+                    "url": str(it.get("url", "")).strip(),
                     "enabled": bool(it.get("enabled", True)),
-                }
-                for it in blk.get("items", [])
-            ]
+                })
+            bcopy["items_typst"] = items_typst
 
         enriched_blocks.append(bcopy)
 
@@ -404,6 +410,13 @@ def render_web_html(doc: ArticleDocument) -> str:
             blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
         elif blk.get("type") == "glossary":
             blk["all_items"] = _resolve_glossary_items(blk, payload.get("blocks", []))
+        elif blk.get("type") == "publications":
+            for it in blk.get("items", []):
+                raw_d = it.get("date", "")
+                it["formatted_date"] = format_publication_date(raw_d) or raw_d
+                raw_t = it.get("title", "").strip()
+                it["clean_title"] = raw_t.strip('"').strip('«').strip('»')
+                it["url"] = str(it.get("url", "")).strip()
 
     payload["blocks"] = _group_blocks_into_render_items(payload.get("blocks", []))
 
@@ -972,22 +985,20 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 pi = container.add_paragraph()
                 pi.paragraph_format.space_before = Pt(1)
                 pi.paragraph_format.space_after = Pt(2)
-                r_title = pi.add_run("• " + item.get("title", ""))
-                r_title.bold = True
-                r_title.font.size = Pt(8.5)
-                r_title.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
-                if item.get("date"):
-                    r_date = pi.add_run(f" ({item.get('date')})")
-                    r_date.font.size = Pt(8)
-                    r_date.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
-                if item.get("subtitle"):
-                    ps = container.add_paragraph()
-                    ps.paragraph_format.left_indent = Inches(0.2)
-                    ps.paragraph_format.space_before = Pt(0)
-                    ps.paragraph_format.space_after = Pt(2)
-                    rs = ps.add_run(item.get("subtitle"))
-                    rs.font.size = Pt(8)
-                    rs.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
+                raw_title = item.get("title", "").strip()
+                clean_title = raw_title.strip('"').strip('«').strip('»')
+                raw_d = item.get("date", "")
+                fmt_d = format_publication_date(raw_d) or raw_d
+                text_content = f'"{clean_title}"'
+                if fmt_d:
+                    text_content += f" vom {fmt_d}"
+                url = str(item.get("url", "")).strip()
+                if url:
+                    text_content += " ↗"
+                r_item = pi.add_run(text_content)
+                r_item.bold = False
+                r_item.font.size = Pt(8.5)
+                r_item.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
 
         elif btype == "textbox_group":
             tbl = container.add_table(rows=1, cols=1)

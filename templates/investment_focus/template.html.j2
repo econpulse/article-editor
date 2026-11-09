@@ -454,43 +454,48 @@
     .publications-list {
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 6px;
     }
 
     .publication-item {
-      padding: 8px 0;
-      border-bottom: 1px dashed var(--lukb-border);
-    }
-
-    .publication-item:last-child {
-      border-bottom: none;
-      padding-bottom: 0;
-    }
-
-    .pub-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      gap: 8px;
-    }
-
-    .pub-title {
-      font-family: var(--font-heading);
-      font-weight: 500;
+      padding: 3px 0;
       font-size: 0.88rem;
+      line-height: 1.4;
       color: var(--lukb-navy);
     }
 
-    .pub-date {
-      font-size: 0.76rem;
-      color: var(--lukb-muted);
-      white-space: nowrap;
+    .pub-item-link {
+      color: var(--lukb-navy);
+      text-decoration: none !important;
+      transition: color 0.15s ease;
     }
 
-    .pub-subtitle {
-      font-size: 0.78rem;
-      color: var(--lukb-muted);
-      margin-top: 2px;
+    .pub-item-link:hover,
+    .pub-item-link:focus,
+    .pub-item-link:visited {
+      text-decoration: none !important;
+      color: var(--lukb-blue);
+    }
+
+    .pub-link-icon {
+      display: inline-block;
+      margin-left: 4px;
+      color: var(--lukb-blue);
+      vertical-align: middle;
+      position: relative;
+      top: -1px;
+    }
+
+    .pub-title-quote {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: inherit;
+    }
+
+    .pub-date-text {
+      font-family: var(--font-body);
+      font-weight: 300;
+      color: inherit;
     }
 
     .blk-figure, .blk-table-wrap {
@@ -809,14 +814,23 @@
               {% for item in blk['items'] %}
                 {% if item.enabled is not defined or item.enabled %}
                 <div class="publication-item">
-                  <div class="pub-header">
-                    <span class="pub-title">{{ item.title }}</span>
-                    {% if item.date %}
-                      <span class="pub-date">{{ item.date }}</span>
-                    {% endif %}
-                  </div>
-                  {% if item.subtitle %}
-                    <div class="pub-subtitle">{{ item.subtitle }}</div>
+                  {% set item_url = (item.url or '')|trim %}
+                  {% set p_date = item.formatted_date or item.date %}
+                  {% set p_title = (item.clean_title or item.title or '')|trim %}
+                  {% if p_title.startswith('"') and p_title.endswith('"') and p_title|length >= 2 %}
+                    {% set p_title = p_title[1:-1] %}
+                  {% elif p_title.startswith('«') and p_title.endswith('»') and p_title|length >= 2 %}
+                    {% set p_title = p_title[1:-1] %}
+                  {% endif %}
+                  {% if item_url %}
+                    <a href="{{ item_url }}" target="_blank" rel="noopener noreferrer" class="pub-item-link" title="{{ p_title }}">
+                      <span class="pub-title-quote">"{{ p_title }}"</span>{% if p_date %} vom <span class="pub-date-text">{{ p_date }}</span>{% endif %}
+                      <svg class="pub-link-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
+                    </a>
+                  {% else %}
+                    <span class="pub-item-text">
+                      <span class="pub-title-quote">"{{ p_title }}"</span>{% if p_date %} vom <span class="pub-date-text">{{ p_date }}</span>{% endif %}
+                    </span>
                   {% endif %}
                 </div>
                 {% endif %}

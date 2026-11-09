@@ -757,6 +757,86 @@ def test_rbac_and_soft_delete():
     assert any(a["id"] == loaded.id for a in active_list_after)
 
 
+def test_publications_block_layout_and_url():
+    """
+    Testet den Block 'Weitere Publikationen':
+    - Layout: '"Titel" vom 9. November 2026' bzw. '"Titel" vom 19. November 2026'
+    - Kein separates Feld für den Publikationstyp im Layout
+    - Optionale URL öffnet im neuen Tab (target="_blank", rel="noopener noreferrer")
+    - Bei URL: kleines Symbol eingeblendet, kein Link-Underline
+    - PDF-Kompilierung (Typst) & Web-HTML & Word-Export
+    """
+    from schemas.article import ArticleDocument, PublicationsBlock, PublicationItem
+
+    # 1. Pydantic Schema Validierung
+    block = PublicationsBlock(
+        title="Weitere Publikationen",
+        items=[
+            {
+                "title": "Schweizer Dividendentitel vor starker Berichtssaison",
+                "subtitle": "Anlagepolitik & Märkte",
+                "date": "2026-11-19",
+                "url": "https://www.lukb.ch/publikationen/dividendentitel-2026",
+                "enabled": True,
+            },
+            {
+                "title": "Zinsentscheid der Schweizerischen Nationalbank",
+                "subtitle": "Makroökonomie",
+                "date": "09.11.2026",
+                "url": "",
+                "enabled": True,
+            },
+        ],
+    )
+    assert len(block.items) == 2
+    assert block.items[0]["url"] == "https://www.lukb.ch/publikationen/dividendentitel-2026"
+    assert block.items[1]["url"] == ""
+
+    # 2. Web HTML Rendering
+    doc = create_new_article(template_id="investment_focus", user="Test Analyst")
+    doc.metadata.title = "Test Artikel für Weitere Publikationen"
+    doc.blocks.append(block.model_dump())
+
+    html_out = render_web_html(doc)
+
+    # Prüfe: Format '"Titel" vom 19. November 2026'
+    assert '"Schweizer Dividendentitel vor starker Berichtssaison"' in html_out
+    assert "vom" in html_out and "19. November 2026" in html_out
+    # Prüfe: Format 'vom 9. November 2026' (keine führende Null beim Tag)
+    assert '"Zinsentscheid der Schweizerischen Nationalbank"' in html_out
+    assert "9. November 2026" in html_out
+
+    # Prüfe: Kein separates Feld für Publikationstyp (weder Untertitel noch Rubrik im Layout)
+    assert "Anlagepolitik & Märkte" not in html_out
+    assert "Makroökonomie" not in html_out
+    assert "pub-subtitle" not in html_out
+
+    # Prüfe: URL mit target="_blank", rel="noopener noreferrer", no underline & Symbol
+    assert 'href="https://www.lukb.ch/publikationen/dividendentitel-2026"' in html_out
+    assert 'target="_blank"' in html_out
+    assert 'rel="noopener noreferrer"' in html_out
+    assert "text-decoration: none" in html_out
+    assert "pub-link-icon" in html_out
+
+    # 3. Typst PDF & SVG Preview Rendering
+    pdf_bytes = render_pdf_bytes(doc)
+    assert len(pdf_bytes) > 5000, "PDF muss erfolgreich erzeugt worden sein"
+
+    svg_pages = render_preview_svg_pages(doc)
+    assert len(svg_pages) >= 1
+
+    # 4. Market Flash Template Rendering
+    doc.template_id = "market_flash"
+    pdf_flash = render_pdf_bytes(doc)
+    assert len(pdf_flash) > 5000
+
+    # 5. Word DOCX Export Rendering
+    docx_bytes = render_docx_bytes(doc)
+    assert len(docx_bytes) > 2000
+
+    delete_article(doc.id)
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -768,6 +848,7 @@ if __name__ == "__main__":
     test_smart_cms_features_3a_and_3b()
     test_publication_date_and_page_numbering()
     test_rbac_and_soft_delete()
+    test_publications_block_layout_and_url()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()

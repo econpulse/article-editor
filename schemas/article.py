@@ -351,6 +351,7 @@ class PublicationItem(BaseModel):
     subtitle: str = Field(default="")
     date: str = Field(default="")
     category: str = Field(default="")
+    url: str = Field(default="", description="Optionale URL / Querverweis auf das Dokument")
     enabled: bool = Field(default=True)
 
 
@@ -378,6 +379,7 @@ class PublicationsBlock(BaseModel):
                     "subtitle": str(item.get("subtitle", "")),
                     "date": str(item.get("date", "")),
                     "category": str(item.get("category", "")),
+                    "url": str(item.get("url", "")).strip(),
                     "enabled": bool(item.get("enabled", True)),
                 })
         return cleaned

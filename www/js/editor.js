@@ -494,6 +494,7 @@
           subtitle: a.subtitle || "",
           date: a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
           category: a.category || "",
+          url: a.url || "",
           enabled: true,
         };
       });
@@ -1538,6 +1539,7 @@
           subtitle: a.subtitle || "",
           date: a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
           category: a.category || "",
+          url: a.url || "",
           enabled: true,
         };
       });
@@ -1606,8 +1608,9 @@
 
         const metaRow = document.createElement("div");
         metaRow.style.display = "grid";
-        metaRow.style.gridTemplateColumns = "120px 1fr";
+        metaRow.style.gridTemplateColumns = "130px 1fr auto";
         metaRow.style.gap = "8px";
+        metaRow.style.alignItems = "center";
         metaRow.style.marginTop = "4px";
 
         const dateInput = document.createElement("input");
@@ -1616,26 +1619,46 @@
         dateInput.style.fontSize = "11.5px";
         dateInput.style.padding = "3px 6px";
         dateInput.placeholder = "Datum (JJJJ-MM-TT)";
+        dateInput.title = "Publikationsdatum (Format: 9. November 2026)";
         dateInput.value = item.date || "";
         dateInput.addEventListener("input", function () {
           item.date = dateInput.value;
           markDirty();
         });
 
-        const subInput = document.createElement("input");
-        subInput.type = "text";
-        subInput.className = "cms-input";
-        subInput.style.fontSize = "11.5px";
-        subInput.style.padding = "3px 6px";
-        subInput.placeholder = "Untertitel / Rubrik (optional)";
-        subInput.value = item.subtitle || "";
-        subInput.addEventListener("input", function () {
-          item.subtitle = subInput.value;
+        const urlInput = document.createElement("input");
+        urlInput.type = "url";
+        urlInput.className = "cms-input";
+        urlInput.style.fontSize = "11.5px";
+        urlInput.style.padding = "3px 6px";
+        urlInput.placeholder = "URL / Querverweis zum Dokument (optional)";
+        urlInput.title = "Optionale URL: Öffnet in neuem Tab und zeigt im Layout ein kleines Symbol an";
+        urlInput.value = item.url || "";
+        urlInput.addEventListener("input", function () {
+          item.url = urlInput.value.trim();
+          testLinkBtn.style.display = item.url ? "inline-flex" : "none";
+          if (item.url) testLinkBtn.href = item.url;
           markDirty();
         });
 
+        const testLinkBtn = document.createElement("a");
+        testLinkBtn.href = item.url || "#";
+        testLinkBtn.target = "_blank";
+        testLinkBtn.rel = "noopener noreferrer";
+        testLinkBtn.className = "btn-icon-only";
+        testLinkBtn.title = "URL in neuem Tab öffnen";
+        testLinkBtn.style.textDecoration = "none";
+        testLinkBtn.style.fontSize = "13px";
+        testLinkBtn.style.fontWeight = "bold";
+        testLinkBtn.style.color = "var(--lukb-blue)";
+        testLinkBtn.style.display = item.url ? "inline-flex" : "none";
+        testLinkBtn.style.alignItems = "center";
+        testLinkBtn.style.justifyContent = "center";
+        testLinkBtn.innerHTML = "↗";
+
         metaRow.appendChild(dateInput);
-        metaRow.appendChild(subInput);
+        metaRow.appendChild(urlInput);
+        metaRow.appendChild(testLinkBtn);
 
         content.appendChild(titleInput);
         content.appendChild(metaRow);
@@ -1723,8 +1746,9 @@
           article_id: art.id,
           title: art.title || "Ohne Titel",
           subtitle: art.subtitle || "",
-          date: art.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
+          date: art.publication_date || (art.updated_at ? art.updated_at.split("T")[0] : ""),
           category: art.category || "",
+          url: art.url || "",
           enabled: true,
         });
         renderItems();
@@ -1744,6 +1768,7 @@
         subtitle: "",
         date: new Date().toISOString().split("T")[0],
         category: "",
+        url: "",
         enabled: true,
       });
       renderItems();

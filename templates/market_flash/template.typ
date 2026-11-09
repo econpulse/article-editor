@@ -533,29 +533,31 @@
         ]
       ]
       #stack(
-        spacing: 9pt,
+        spacing: 5pt,
         ..active-items.map(item => {
-          let ptitle = item.at("title", default: "")
-          let psub = item.at("subtitle", default: "")
-          let pdate = item.at("date", default: "")
-          stack(
-            spacing: 2.5pt,
-            grid(
-              columns: (1fr, auto),
-              gutter: 8pt,
-              block[
-                #set par(justify: false, leading: 0.35em)
-                #text(font: font-heading, weight: "medium", size: 8.5pt, fill: lukb-navy)[#ptitle]
-              ],
-              if pdate != "" { text(font: font-body, size: 7.5pt, fill: lukb-muted)[#pdate] }
-            ),
-            if psub != "" {
-              block[
-                #set par(justify: false, leading: 0.3em)
-                #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#psub]
-              ]
+          let raw-title = item.at("title", default: "").trim()
+          let clean-title = raw-title
+          if clean-title.starts-with("\"") and clean-title.ends-with("\"") and clean-title.len() >= 2 {
+            clean-title = clean-title.slice(1, clean-title.len() - 1)
+          }
+          if clean-title.starts-with("«") and clean-title.ends-with("»") and clean-title.len() >= 2 {
+            clean-title = clean-title.slice(1, clean-title.len() - 1)
+          }
+          let pdate = item.at("formatted_date", default: item.at("date", default: ""))
+          let purl = str(item.at("url", default: "")).trim()
+
+          let line-text = [
+            #text(font: font-heading, weight: "medium", size: 8.5pt, fill: lukb-navy)[\"#clean-title\"]#if pdate != "" [ vom #text(font: font-body, weight: "light", size: 8.5pt, fill: lukb-navy)[#pdate]]#if purl != "" [ #box(baseline: -0.05em)[#text(size: 0.8em, fill: lukb-blue)[#sym.arrow.tr]]]
+          ]
+
+          block[
+            #set par(justify: false, leading: 0.35em)
+            #if purl != "" {
+              link(purl)[#line-text]
+            } else {
+              line-text
             }
-          )
+          ]
         })
       )
     ]
