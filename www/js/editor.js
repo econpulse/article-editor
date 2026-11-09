@@ -1400,7 +1400,7 @@
     const h1Rule = document.createElement("div");
     h1Rule.style.height = "2px";
     h1Rule.style.backgroundColor = "#002855";
-    h1Rule.style.marginTop = "6px";
+    h1Rule.style.marginTop = "3px";
     h1Rule.style.marginBottom = "6px";
     h1Rule.style.width = "100%";
     h1Rule.title = "Horizontale Linie über Spaltenbreite";

@@ -126,7 +126,7 @@
   let col = if level == 1 { lukb-navy } else if level == 2 { lukb-blue } else { lukb-text }
   let lead = if level == 1 { 0.42em } else if level == 2 { 0.38em } else { 0.34em }
   let abv = 2.0em
-  let blw = if level == 1 { 0.55em } else { 0.68em }
+  let blw = if level == 1 { 0.3em } else { 0.68em }
   block(
     width: 100%,
     sticky: true,
@@ -135,13 +135,16 @@
     below: blw
   )[
     #set text(hyphenate: false)
-    #set par(leading: lead, justify: false)
+    #set par(leading: lead, justify: false, spacing: 0pt)
     #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
     #if level == 1 [
-      #v(5.5pt)
+      #v(3.5pt)
       #line(length: 100%, stroke: 0.75pt + lukb-navy)
     ]
   ]
+  if level == 1 {
+    v(-1.35em)
+  }
 }
 
 #let render-callout(title, markup-str) = {
