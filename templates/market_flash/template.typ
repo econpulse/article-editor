@@ -225,24 +225,37 @@
   let col = if level == 1 { lukb-navy } else if level == 2 { lukb-blue } else { lukb-text }
   let lead = if level == 1 { 0.42em } else if level == 2 { 0.38em } else { 0.34em }
   let abv = 2.0em
-  let blw = if level == 1 { 0.3em } else { 0.72em }
-  block(
-    width: 100%,
-    sticky: true,
-    breakable: false,
-    above: abv,
-    below: blw
-  )[
-    #set text(hyphenate: false)
-    #set par(leading: lead, justify: false, spacing: 0pt)
-    #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
-    #if level == 1 [
-      #v(3.5pt)
-      #line(length: 100%, stroke: 0.75pt + lukb-navy)
-    ]
-  ]
+  let blw = if level == 1 { 6.5pt } else { 0.72em }
   if level == 1 {
-    v(-1.35em)
+    block(
+      width: 100%,
+      sticky: true,
+      breakable: false,
+      above: abv,
+      below: blw
+    )[
+      #stack(
+        spacing: 4.5pt,
+        block(width: 100%)[
+          #set text(hyphenate: false)
+          #set par(leading: lead, justify: false)
+          #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
+        ],
+        line(length: 100%, stroke: 0.75pt + lukb-navy)
+      )
+    ]
+  } else {
+    block(
+      width: 100%,
+      sticky: true,
+      breakable: false,
+      above: abv,
+      below: blw
+    )[
+      #set text(hyphenate: false)
+      #set par(leading: lead, justify: false)
+      #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
+    ]
   }
 }
 
@@ -509,33 +522,42 @@
     #block(
       width: 100%,
       breakable: false,
-      stroke: (top: 1pt + lukb-blue, bottom: 0.6pt + lukb-border),
-      inset: (top: 7pt, bottom: 6pt),
-      above: 1.5em,
-      below: 1.2em
+      stroke: (top: 1.2pt + lukb-navy, bottom: 0.6pt + lukb-border),
+      inset: (top: 7pt, bottom: 7pt),
+      above: 2.0em,
+      below: 1.5em
     )[
       #if title != "" [
-        #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-navy)[#title]
-        #v(4pt)
-      ]
-      #for item in active-items [
-        #let ptitle = item.at("title", default: "")
-        #let psub = item.at("subtitle", default: "")
-        #let pdate = item.at("date", default: "")
-        #block(above: 7pt, below: 7pt)[
-          #grid(
-            columns: (1fr, auto),
-            gutter: 8pt,
-            text(font: font-heading, weight: "medium", size: 8.5pt, fill: lukb-navy)[#ptitle],
-            if pdate != "" { text(font: font-body, size: 7.5pt, fill: lukb-muted)[#pdate] }
-          )
-          #if psub != "" [
-            #block(above: 2pt, below: 0pt)[
-              #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#psub]
-            ]
-          ]
+        #block(above: 0pt, below: 8pt)[
+          #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-navy)[#title]
         ]
       ]
+      #stack(
+        spacing: 9pt,
+        ..active-items.map(item => {
+          let ptitle = item.at("title", default: "")
+          let psub = item.at("subtitle", default: "")
+          let pdate = item.at("date", default: "")
+          stack(
+            spacing: 2.5pt,
+            grid(
+              columns: (1fr, auto),
+              gutter: 8pt,
+              block[
+                #set par(justify: false, leading: 0.35em)
+                #text(font: font-heading, weight: "medium", size: 8.5pt, fill: lukb-navy)[#ptitle]
+              ],
+              if pdate != "" { text(font: font-body, size: 7.5pt, fill: lukb-muted)[#pdate] }
+            ),
+            if psub != "" {
+              block[
+                #set par(justify: false, leading: 0.3em)
+                #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#psub]
+              ]
+            }
+          )
+        })
+      )
     ]
   ]
 }
