@@ -113,6 +113,46 @@ CONNECT_VERIFY_SSL = _clean_env_val(os.getenv("CONNECT_VERIFY_SSL", "true")).low
 CONNECT_CA_BUNDLE = _clean_env_val(os.getenv("CONNECT_CA_BUNDLE", os.getenv("REQUESTS_CA_BUNDLE", os.getenv("SSL_CERT_FILE", ""))))
 
 # ============================================================================
+# Benutzerrollen & Berechtigungssteuerung
+# ============================================================================
+PORTAL_PUBLISHERS = [
+    u.strip().lower()
+    for u in _clean_env_val(os.getenv("PORTAL_PUBLISHERS", "")).split(",")
+    if u.strip()
+]
+PORTAL_ADMINS = [
+    u.strip().lower()
+    for u in _clean_env_val(os.getenv("PORTAL_ADMINS", "")).split(",")
+    if u.strip()
+]
+
+
+def get_user_role(username: str) -> str:
+    """
+    Ermittelt die Rolle des Benutzers: 'admin', 'publisher' oder 'author'.
+    Falls weder PORTAL_ADMINS noch PORTAL_PUBLISHERS gesetzt sind (z.B. lokale Entwicklung),
+    haben alle Benutzer volle Rechte ('admin').
+    """
+    u = (username or "").strip().lower()
+    if not PORTAL_ADMINS and not PORTAL_PUBLISHERS:
+        return "admin"
+    if u in PORTAL_ADMINS:
+        return "admin"
+    if u in PORTAL_PUBLISHERS:
+        return "publisher"
+    return "author"
+
+
+def can_publish(username: str) -> bool:
+    """Prüft, ob der Benutzer Publikationen freigeben oder vom Portal zurückziehen darf."""
+    return get_user_role(username) in ("admin", "publisher")
+
+
+def can_delete(username: str) -> bool:
+    """Prüft, ob der Benutzer Publikationen löschen / archivieren darf."""
+    return get_user_role(username) in ("admin", "publisher")
+
+# ============================================================================
 # LUKB Corporate Design & Typografie
 # ============================================================================
 LUKB_FONT_LIGHT = os.getenv("LUKB_FONT_LIGHT", "Yoga Sans for LUKB Light")

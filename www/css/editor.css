@@ -472,6 +472,12 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   color: #166534;
 }
 
+.status-archived {
+  background: #F1F5F9;
+  color: #64748B;
+  border: 1px dashed #CBD5E1;
+}
+
 .article-card-tpl {
   font-size: 11px;
   color: var(--lukb-muted);

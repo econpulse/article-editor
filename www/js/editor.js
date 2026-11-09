@@ -3086,6 +3086,7 @@
     draft: "Entwurf",
     review: "In Review",
     published: "Publiziert",
+    archived: "Archiviert",
   };
 
   const TPL_LABELS = {
@@ -3232,10 +3233,13 @@
     }
 
     const activeWorkItems = articles.filter(function (a) {
-      return a.status !== "published";
+      return a.status === "draft" || a.status === "review";
     });
     const publishedItems = articles.filter(function (a) {
       return a.status === "published";
+    });
+    const archivedItems = articles.filter(function (a) {
+      return a.status === "archived";
     });
 
     // 1. Sektion: In Bearbeitung (Entwurf & In Review) — immer oben angepinnt
@@ -3261,7 +3265,7 @@
       listContainer.appendChild(workSec);
     }
 
-    // 2. Sektion: Publiziert / Archiv — gruppiert nach Monat & Jahr (einklappbar)
+    // 2. Sektion: Publiziert (Live im Portal) — gruppiert nach Monat & Jahr (einklappbar)
     if (publishedItems.length > 0) {
       const pubSec = document.createElement("div");
       pubSec.className = "sidebar-group-section";
@@ -3269,7 +3273,7 @@
       const hdr = document.createElement("div");
       hdr.className = "sidebar-group-header";
       const hdrTitle = document.createElement("span");
-      hdrTitle.textContent = "Publiziert / Archiv";
+      hdrTitle.textContent = "Publiziert (Live im Portal)";
       const hdrCount = document.createElement("span");
       hdrCount.className = "sidebar-group-count";
       hdrCount.textContent = String(publishedItems.length);
@@ -3336,6 +3340,30 @@
       });
 
       listContainer.appendChild(pubSec);
+    }
+
+    // 3. Sektion: Papierkorb / Archiv (Soft-Delete)
+    if (archivedItems.length > 0) {
+      const archSec = document.createElement("div");
+      archSec.className = "sidebar-group-section";
+
+      const hdr = document.createElement("div");
+      hdr.className = "sidebar-group-header";
+      hdr.style.color = "#7f8c8d";
+      const hdrTitle = document.createElement("span");
+      hdrTitle.textContent = "📦 Papierkorb / Archiv";
+      const hdrCount = document.createElement("span");
+      hdrCount.className = "sidebar-group-count";
+      hdrCount.textContent = String(archivedItems.length);
+      hdr.appendChild(hdrTitle);
+      hdr.appendChild(hdrCount);
+      archSec.appendChild(hdr);
+
+      archivedItems.forEach(function (item) {
+        archSec.appendChild(buildSidebarArticleCard(item, activeId, false));
+      });
+
+      listContainer.appendChild(archSec);
     }
   }
 

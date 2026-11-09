@@ -676,6 +676,87 @@ def test_publication_date_and_page_numbering():
     assert "SNB Leitzinsentscheid" in html_flash
 
 
+def test_rbac_and_soft_delete():
+    """
+    Testet das Rollenmodell (Admin, Publisher, Author), die Schutzregel gegen
+    das Löschen publizierter Dokumente sowie Soft-Delete und Wiederherstellung.
+    """
+    import config
+    from database.repository import (
+        create_new_article,
+        delete_article,
+        get_article,
+        list_articles,
+        restore_article,
+        save_article,
+    )
+
+    # 1. Rollenprüfung
+    orig_admins = config.PORTAL_ADMINS
+    orig_pubs = config.PORTAL_PUBLISHERS
+    try:
+        config.PORTAL_ADMINS = ["admin_user"]
+        config.PORTAL_PUBLISHERS = ["senior_editor"]
+
+        assert config.get_user_role("admin_user") == "admin"
+        assert config.can_publish("admin_user") is True
+        assert config.can_delete("admin_user") is True
+
+        assert config.get_user_role("senior_editor") == "publisher"
+        assert config.can_publish("senior_editor") is True
+        assert config.can_delete("senior_editor") is True
+
+        assert config.get_user_role("intern_analyst") == "author"
+        assert config.can_publish("intern_analyst") is False
+        assert config.can_delete("intern_analyst") is False
+
+        # Fallback wenn keine Rollen definiert sind:
+        config.PORTAL_ADMINS = []
+        config.PORTAL_PUBLISHERS = []
+        assert config.can_publish("any_user") is True
+        assert config.can_delete("any_user") is True
+    finally:
+        config.PORTAL_ADMINS = orig_admins
+        config.PORTAL_PUBLISHERS = orig_pubs
+
+    # 2. Schutzregel: Publizierte Artikel dürfen NICHT gelöscht werden
+    doc = create_new_article(user="Test Author")
+    doc.status = "published"
+    save_article(doc, user="Test Author")
+
+    assert delete_article(doc.id) is False, "Publizierter Artikel darf nicht gelöscht werden"
+    loaded = get_article(doc.id)
+    assert loaded is not None
+    assert loaded.status == "published"
+
+    # 3. Soft-Delete (Archivierung)
+    loaded.status = "draft"
+    save_article(loaded, user="Test Author")
+    assert delete_article(loaded.id) is True
+
+    # Muss jetzt status 'archived' haben
+    archived_doc = get_article(loaded.id)
+    assert archived_doc is not None
+    assert archived_doc.status == "archived"
+
+    # Aus normaler list_articles() ausgeblendet
+    active_list = list_articles(status_filter="all")
+    assert not any(a["id"] == loaded.id for a in active_list)
+
+    # In Papierkorb-Filter enthalten
+    archived_list = list_articles(status_filter="archived")
+    assert any(a["id"] == loaded.id for a in archived_list)
+
+    # 4. Wiederherstellen (Restore)
+    assert restore_article(loaded.id, user="Admin") is True
+    restored_doc = get_article(loaded.id)
+    assert restored_doc is not None
+    assert restored_doc.status == "draft"
+
+    active_list_after = list_articles(status_filter="all")
+    assert any(a["id"] == loaded.id for a in active_list_after)
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -686,6 +767,7 @@ if __name__ == "__main__":
     test_layout_elements_spacer_and_colbreak()
     test_smart_cms_features_3a_and_3b()
     test_publication_date_and_page_numbering()
+    test_rbac_and_soft_delete()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()

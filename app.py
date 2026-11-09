@@ -12,7 +12,13 @@ import re
 from typing import Any
 from shiny import App, Inputs, Outputs, Session, reactive, render, ui
 
-from config import DATABASE_BACKEND_LABEL, WWW_DIR
+from config import (
+    DATABASE_BACKEND_LABEL,
+    WWW_DIR,
+    can_delete,
+    can_publish,
+    get_user_role,
+)
 from database.repository import (
     create_new_article,
     delete_article,
@@ -23,6 +29,7 @@ from database.repository import (
     list_articles,
     list_available_tickers,
     publish_article_to_portal,
+    restore_article,
     save_article,
     save_asset,
     search_tickers,
@@ -168,14 +175,21 @@ app_ui = ui.page_fluid(
                         "🌐 Auf Portal publizieren",
                         type="button",
                         class_="lukb-dropdown-item",
-                        title="Diesen Artikel auf das statische Portal veröffentlichen oder aktualisieren",
+                        title="Diesen Artikel auf das statische Portal veröffentlichen oder aktualisieren (Senior Editor / Admin)",
                         onclick="Shiny.setInputValue('lukb_publish_portal', Math.random(), {priority: 'event'});",
+                    ),
+                    ui.tags.button(
+                        "📤 Zur Prüfung einreichen",
+                        type="button",
+                        class_="lukb-dropdown-item",
+                        title="Status auf 'In Review' setzen (zur Freigabe durch Senior Editor)",
+                        onclick="Shiny.setInputValue('lukb_submit_review', Math.random(), {priority: 'event'});",
                     ),
                     ui.tags.button(
                         "❌ Vom Portal zurückziehen",
                         type="button",
                         class_="lukb-dropdown-item text-danger",
-                        title="Artikel vom statischen Portal entfernen (Status wird wieder Entwurf)",
+                        title="Artikel vom statischen Portal entfernen (Sicherheitsabfrage)",
                         onclick="Shiny.setInputValue('lukb_unpublish_portal', Math.random(), {priority: 'event'});",
                     ),
                     ui.tags.div(class_="lukb-dropdown-divider"),
@@ -284,11 +298,12 @@ app_ui = ui.page_fluid(
                         oninput="Shiny.setInputValue('sidebar_search_query', this.value, {priority: 'event'})",
                     ),
                     ui.tags.select(
-                        ui.tags.option("Alle Status (Gruppiert)", value="all"),
+                        ui.tags.option("Alle aktiven Publikationen", value="all"),
                         ui.tags.option("Nur In Bearbeitung (Entwurf & Review)", value="active_work"),
                         ui.tags.option("Status: Entwurf", value="draft"),
                         ui.tags.option("Status: In Review", value="review"),
-                        ui.tags.option("Status: Publiziert (Archiv)", value="published"),
+                        ui.tags.option("Status: Publiziert (Live)", value="published"),
+                        ui.tags.option("📦 Papierkorb / Archiv", value="archived"),
                         id="sidebar_status_filter",
                         class_="cms-select",
                         onchange="Shiny.setInputValue('sidebar_status_val', this.value, {priority: 'event'})",
@@ -310,8 +325,16 @@ app_ui = ui.page_fluid(
                     "Löschen",
                     class_="btn-lukb btn-lukb-danger-ghost btn-lukb-sm",
                     style="flex:1;",
+                    title="Verschiebt den aktuellen Entwurf in den Papierkorb (Soft-Delete)",
                 ),
-                style="padding:10px 12px;border-top:1px solid #D6DEE8;display:flex;gap:8px;background:#F4F7FA;",
+                ui.input_action_button(
+                    "btn_restore_article",
+                    "Wiederherstellen",
+                    class_="btn-lukb btn-lukb-secondary btn-lukb-sm",
+                    style="flex:1;",
+                    title="Stellt einen archivierten Artikel wieder in den Entwurf-Status her",
+                ),
+                style="padding:10px 12px;border-top:1px solid #D6DEE8;display:flex;gap:6px;background:#F4F7FA;",
             ),
             id="lukb-sidebar",
             class_="cms-sidebar",
@@ -1139,13 +1162,47 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             await _load_and_broadcast_article(dup_doc.id)
             ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
 
-    # Artikel löschen
+    # Artikel löschen (mit Rollenprüfung, Publiziert-Schutz & Sicherheits-Modal)
     @reactive.effect
     @reactive.event(input.btn_delete_article)
     async def _on_delete_article() -> None:
         aid = current_article_id.get()
-        if not aid:
+        doc = current_doc.get()
+        if not aid or not doc:
             return
+
+        user = _current_user()
+        if not can_delete(user):
+            ui.notification_show(
+                f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen löschen / archivieren.",
+                type="warning",
+                duration=5,
+            )
+            return
+
+        # Schutz: Publizierte Publikationen dürfen NICHT gelöscht werden
+        if doc.status == "published":
+            ui.modal_show(
+                ui.modal(
+                    ui.div(
+                        ui.p(
+                            f"Die Publikation «{doc.metadata.title}» ist aktuell im statischen Portal online geschaltet.",
+                            style="font-weight:600;color:#c0392b;font-size:14.5px;margin-bottom:8px;",
+                        ),
+                        ui.p(
+                            "Online geschaltete Dokumente können nicht gelöscht werden, um tote Links und verwaiste PDFs im Intranet zu vermeiden. "
+                            "Bitte ziehen Sie die Publikation zuerst über das Menü «🌐 Portal ▾ -> Vom Portal zurückziehen» zurück.",
+                            style="color:#5A687C;font-size:13px;line-height:1.5;margin-bottom:0;",
+                        ),
+                    ),
+                    title="Löschen nicht möglich (Publiziert)",
+                    footer=ui.modal_button("Verstanden", class_="btn-lukb btn-lukb-primary"),
+                    size="m",
+                    easy_close=True,
+                )
+            )
+            return
+
         all_items = list_articles()
         if len(all_items) <= 1:
             ui.notification_show(
@@ -1154,11 +1211,74 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 duration=4,
             )
             return
-        delete_article(aid)
+
+        # Sicherheits-Bestätigungsdialog für Soft-Delete
+        ui.modal_show(
+            ui.modal(
+                ui.div(
+                    ui.p(
+                        f"Möchten Sie die Publikation «{doc.metadata.title}» wirklich löschen?",
+                        style="font-size:14.5px;font-weight:600;color:#002855;margin-bottom:10px;",
+                    ),
+                    ui.p(
+                        "Der Artikel wird sicher in das Archiv verschoben (Soft-Delete) und aus der aktiven Übersicht ausgeblendet. "
+                        "Er kann jederzeit von einem Administrator wiederhergestellt werden.",
+                        style="font-size:13px;color:#5A687C;margin-bottom:0;line-height:1.5;",
+                    ),
+                ),
+                title="Publikation archivieren (Soft-Delete)",
+                footer=ui.div(
+                    ui.modal_button("Abbrechen", class_="btn-lukb btn-lukb-ghost"),
+                    ui.input_action_button(
+                        "btn_confirm_delete_article",
+                        "In Archiv verschieben",
+                        class_="btn-lukb btn-lukb-danger",
+                    ),
+                    style="display:flex;gap:10px;justify-content:flex-end;width:100%;",
+                ),
+                size="m",
+                easy_close=True,
+            )
+        )
+
+    # Bestätigung des Soft-Deletes ausführen
+    @reactive.effect
+    @reactive.event(input.btn_confirm_delete_article)
+    async def _on_confirm_delete_article() -> None:
+        ui.modal_remove()
+        aid = current_article_id.get()
+        if not aid:
+            return
+        delete_article(aid, user=_current_user())
         remaining = list_articles()
         next_id = remaining[0]["id"] if remaining else ""
-        await _load_and_broadcast_article(next_id)
-        ui.notification_show("Publikation wurde gelöscht.", type="message", duration=3)
+        if next_id:
+            await _load_and_broadcast_article(next_id)
+        else:
+            await _send_article_list("")
+        ui.notification_show("Publikation wurde in das Archiv verschoben (Soft-Delete).", type="message", duration=4)
+
+    # Artikel aus dem Archiv wiederherstellen (Restore)
+    @reactive.effect
+    @reactive.event(input.btn_restore_article)
+    async def _on_restore_article() -> None:
+        aid = current_article_id.get()
+        if not aid:
+            return
+        user = _current_user()
+        if not can_delete(user):
+            ui.notification_show(
+                f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen wiederherstellen.",
+                type="warning",
+                duration=5,
+            )
+            return
+        ok = restore_article(aid, user=user)
+        if ok:
+            await _load_and_broadcast_article(aid)
+            ui.notification_show("Publikation wurde aus dem Archiv wiederhergestellt (Status: Entwurf).", type="message", duration=4)
+        else:
+            ui.notification_show("Dieser Artikel ist nicht archiviert.", type="info", duration=3)
 
     # Aktionen direkt aus dem Publikations-Dialog (Modal: Neu, Duplizieren, Löschen)
     @reactive.effect
@@ -1179,6 +1299,14 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 await _load_and_broadcast_article(dup_doc.id)
                 ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
         elif action == "delete" and target_id:
+            user = _current_user()
+            if not can_delete(user):
+                ui.notification_show("Nur Administratoren oder Senior Editoren dürfen Publikationen löschen.", type="warning", duration=5)
+                return
+            target_doc = get_article(target_id)
+            if target_doc and target_doc.status == "published":
+                ui.notification_show("Publizierte Artikel können nicht gelöscht werden. Bitte zuerst zurückziehen.", type="warning", duration=5)
+                return
             all_items = list_articles()
             if len(all_items) <= 1:
                 ui.notification_show(
@@ -1187,14 +1315,14 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                     duration=4,
                 )
                 return
-            delete_article(target_id)
+            delete_article(target_id, user=user)
             if current_article_id.get() == target_id:
                 remaining = list_articles()
                 next_id = remaining[0]["id"] if remaining else ""
                 await _load_and_broadcast_article(next_id)
             else:
                 await _send_article_list(current_article_id.get())
-            ui.notification_show("Publikation wurde gelöscht.", type="message", duration=3)
+            ui.notification_show("Publikation wurde in das Archiv verschoben (Soft-Delete).", type="message", duration=3)
 
     # Manueller Preview-Refresh
     @reactive.effect
@@ -1205,7 +1333,34 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             await _send_preview(doc)
 
     # ------------------------------------------------------------------------
-    # Statisches Content-Portal: Publizieren, Aktualisieren & Zurückziehen
+    # Freigabe-Workflow: Zur Prüfung einreichen (Autor -> Review)
+    # ------------------------------------------------------------------------
+    @reactive.effect
+    @reactive.event(input.lukb_submit_review)
+    async def _on_submit_review() -> None:
+        doc = current_doc.get()
+        if not doc:
+            return
+        if doc.status == "published":
+            ui.notification_show("Publikation ist bereits im Portal veröffentlicht.", type="info", duration=4)
+            return
+        doc.status = "review"
+        current_doc.set(doc)
+        save_article(
+            doc,
+            user=_current_user(),
+            create_revision=True,
+            revision_note="Zur Prüfung / Freigabe eingereicht (Status: review)",
+        )
+        await _send_article_list(doc.id)
+        ui.notification_show(
+            "✅ Publikation zur Freigabe eingereicht (Status: In Review). Ein Senior Editor kann den Artikel nun prüfen und publizieren.",
+            type="message",
+            duration=6,
+        )
+
+    # ------------------------------------------------------------------------
+    # Statisches Content-Portal: Publizieren & Zurückziehen (mit Rollenprüfung & Modal)
     # ------------------------------------------------------------------------
     @reactive.effect
     @reactive.event(input.lukb_publish_portal)
@@ -1213,8 +1368,16 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         doc = current_doc.get()
         if not doc:
             return
+        user = _current_user()
+        if not can_publish(user):
+            ui.notification_show(
+                f"Keine Berechtigung: Benutzer '{user}' darf nicht publizieren. Bitte reichen Sie den Artikel 'Zur Prüfung' ein.",
+                type="warning",
+                duration=6,
+            )
+            return
         try:
-            res = publish_article_to_portal(doc.id, user=_current_user())
+            res = publish_article_to_portal(doc.id, user=user)
             if res.get("success"):
                 doc.status = "published"
                 current_doc.set(doc)
@@ -1244,9 +1407,58 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         except Exception as exc:
             ui.notification_show(f"Fehler beim Publizieren: {exc}", type="error", duration=6)
 
+    # Sicherheitsabfrage für "Vom Portal zurückziehen"
     @reactive.effect
     @reactive.event(input.lukb_unpublish_portal)
     async def _on_unpublish_portal() -> None:
+        doc = current_doc.get()
+        if not doc:
+            return
+        user = _current_user()
+        if not can_publish(user):
+            ui.notification_show(
+                f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen vom Portal zurückziehen.",
+                type="warning",
+                duration=6,
+            )
+            return
+        if doc.status != "published":
+            ui.notification_show("Dieser Artikel ist aktuell nicht im Portal publiziert.", type="info", duration=4)
+            return
+
+        ui.modal_show(
+            ui.modal(
+                ui.div(
+                    ui.p(
+                        f"Möchten Sie die Publikation «{doc.metadata.title}» wirklich vom statischen Intranet-Portal entfernen?",
+                        style="font-size:14.5px;font-weight:600;color:#002855;margin-bottom:10px;",
+                    ),
+                    ui.p(
+                        "Das Dokument und das zugehörige PDF sind danach für Mitarbeitende im Intranet nicht mehr abrufbar. "
+                        "Der Arbeitsstatus im CMS wird wieder auf 'Entwurf' zurückgesetzt. Ihre Texte und Daten bleiben dabei vollständig erhalten.",
+                        style="font-size:13px;color:#5A687C;margin-bottom:0;line-height:1.5;",
+                    ),
+                ),
+                title="Publikation vom Portal zurückziehen",
+                footer=ui.div(
+                    ui.modal_button("Abbrechen", class_="btn-lukb btn-lukb-ghost"),
+                    ui.input_action_button(
+                        "btn_confirm_unpublish",
+                        "Vom Portal zurückziehen",
+                        class_="btn-lukb btn-lukb-danger",
+                    ),
+                    style="display:flex;gap:10px;justify-content:flex-end;width:100%;",
+                ),
+                size="m",
+                easy_close=True,
+            )
+        )
+
+    # Bestätigung des Zurückziehens ausführen
+    @reactive.effect
+    @reactive.event(input.btn_confirm_unpublish)
+    async def _on_confirm_unpublish() -> None:
+        ui.modal_remove()
         doc = current_doc.get()
         if not doc:
             return
@@ -1271,9 +1483,9 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                     )
                 else:
                     ui.notification_show(
-                        "Artikel vom Portal zurückgezogen (Status auf 'Entwurf' gesetzt). Connect nicht gekoppelt.",
+                        "Artikel vom Portal zurückgezogen (Status auf 'Entwurf' gesetzt).",
                         type="message",
-                        duration=6,
+                        duration=5,
                     )
             else:
                 ui.notification_show(f"Fehler: {res.get('error')}", type="warning", duration=5)

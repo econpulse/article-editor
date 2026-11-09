@@ -6,12 +6,15 @@ und Datenbank-Asset-Speicherung (MSSQL / SQLAlchemy).
 from __future__ import annotations
 
 import json
+import logging
 import math
 import time
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any
 from sqlalchemy import desc, func, or_, select
+
+logger = logging.getLogger(__name__)
 
 from database.connection import Base, engine, get_db_session
 from database.models import ArticleModel, ArticleRevisionModel, AssetModel, TimeSeriesModel
@@ -57,18 +60,20 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
     return ArticleDocument(
         id=row.id,
         template_id=row.template_id or "investment_focus",
-        status=row.status if row.status in ("draft", "review", "published") else "draft",
+        status=row.status if row.status in ("draft", "review", "published", "archived") else "draft",
         metadata=metadata,
         blocks=blocks_raw,
     )
 
 
-def list_articles(search_query: str = "", status_filter: str = "all") -> list[dict[str, Any]]:
+def list_articles(
+    search_query: str = "",
+    status_filter: str = "all",
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
     """
     Liefert eine kompakte Übersicht aller Artikel in der Datenbank (sortiert nach Änderungsdatum).
-    Optimierte Projektionsabfrage: Lädt nur die leichten Metadaten-Spalten (ohne `blocks_json`,
-    `lead` oder `disclaimer`), um auch bei 50+ oder 500+ Artikeln minimalen MSSQL-Netzwerk-Traffic
-    zu garantieren.
+    Standardmässig werden archivierte Artikel (Soft-Delete) ausgeblendet.
     """
     with get_db_session() as session:
         stmt = select(
@@ -84,11 +89,17 @@ def list_articles(search_query: str = "", status_filter: str = "all") -> list[di
             ArticleModel.created_at,
             ArticleModel.updated_by,
         ).order_by(desc(ArticleModel.updated_at))
-        if status_filter and status_filter != "all":
-            if status_filter == "active_work":
-                stmt = stmt.where(ArticleModel.status.in_(["draft", "review"]))
-            else:
-                stmt = stmt.where(ArticleModel.status == status_filter)
+        if status_filter == "all":
+            if not include_archived:
+                stmt = stmt.where(ArticleModel.status != "archived")
+        elif status_filter == "all_with_archived":
+            pass  # alle Status inkl. archiviert
+        elif status_filter == "archived":
+            stmt = stmt.where(ArticleModel.status == "archived")
+        elif status_filter == "active_work":
+            stmt = stmt.where(ArticleModel.status.in_(["draft", "review"]))
+        elif status_filter:
+            stmt = stmt.where(ArticleModel.status == status_filter)
         if search_query and search_query.strip():
             q = f"%{search_query.strip()}%"
             stmt = stmt.where(
@@ -395,20 +406,65 @@ def duplicate_article(article_id: str, user: str = "Investment Office") -> Artic
     return orig
 
 
-def delete_article(article_id: str) -> bool:
-    """Löscht einen Artikel aus der Datenbank und entfernt ihn ggf. vom statischen Portal."""
-    try:
-        from services.portal_publisher import unpublish_article
-        unpublish_article(article_id)
-    except Exception:
-        pass
+def delete_article(
+    article_id: str,
+    user: str = "Investment Office",
+    force: bool = False,
+) -> bool:
+    """
+    Löscht einen Artikel bzw. archiviert ihn sicher im Papierkorb (Soft-Delete).
+    Schutzregel: Ein Artikel, der im Portal 'published' ist, darf NICHT gelöscht werden.
+    Er muss zuerst explizit vom Portal zurückgezogen werden.
+    """
+    doc = get_article(article_id)
+    if not doc:
+        return False
 
-    with get_db_session() as session:
-        row = session.get(ArticleModel, article_id)
-        if not row:
-            return False
-        session.delete(row)
-        return True
+    # Schutz vor Löschung publizierter Dokumente
+    if doc.status == "published":
+        logger.warning(
+            f"Löschversuch für publizierten Artikel {article_id} abgelehnt. Artikel muss zuerst zurückgezogen werden."
+        )
+        return False
+
+    if force:
+        try:
+            from services.portal_publisher import unpublish_article
+            unpublish_article(article_id)
+        except Exception:
+            pass
+
+        with get_db_session() as session:
+            row = session.get(ArticleModel, article_id)
+            if not row:
+                return False
+            session.delete(row)
+            return True
+
+    # Standard: Soft-Delete (Status auf 'archived' setzen, Revision ablegen)
+    doc.status = "archived"
+    save_article(
+        doc,
+        user=user,
+        create_revision=True,
+        revision_note="Publikation archiviert (Soft-Delete / Papierkorb)",
+    )
+    return True
+
+
+def restore_article(article_id: str, user: str = "Investment Office") -> bool:
+    """Stellt einen archivierten Artikel wieder in den Arbeitsstatus 'draft' her."""
+    doc = get_article(article_id)
+    if not doc or doc.status != "archived":
+        return False
+    doc.status = "draft"
+    save_article(
+        doc,
+        user=user,
+        create_revision=True,
+        revision_note="Publikation aus Archiv wiederhergestellt",
+    )
+    return True
 
 
 def publish_article_to_portal(article_id: str, user: str = "Investment Office") -> dict[str, Any]:
