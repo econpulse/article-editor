@@ -1720,6 +1720,25 @@
     container.appendChild(rt.wrapper);
   }
 
+  function closeFigureContextMenu() {
+    const existing = document.getElementById("active-figure-context-menu");
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+  }
+
+  // Kontextmenü schliessen bei Klick ausserhalb oder Esc
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest("#active-figure-context-menu")) {
+      closeFigureContextMenu();
+    }
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      closeFigureContextMenu();
+    }
+  });
+
   function buildFigureBlockBody(container, blk) {
     // Zeile 1: Grafik-Titel & Layout-Breite
     const topGrid = document.createElement("div");
@@ -1791,9 +1810,13 @@
     subWrap.appendChild(subInp);
     container.appendChild(subWrap);
 
-    // Zeile 3: Drag-and-Drop Grafik-Upload & Vorschau
+    // Zeile 3: Drag-and-Drop, Zwischenablage & Kontextmenü Grafik-Upload
     const dropzone = document.createElement("div");
     dropzone.className = "figure-upload-zone";
+    dropzone.tabIndex = 0;
+    dropzone.setAttribute("role", "button");
+    dropzone.setAttribute("aria-label", "Grafik hochladen oder aus Zwischenablage einfügen");
+    dropzone.title = "Klicken, Grafikdatei hierher ziehen oder Strg+V zum Einfügen aus der Zwischenablage (Rechtsklick für Menü)";
 
     const fileInput = document.createElement("input");
     fileInput.type = "file";
@@ -1813,18 +1836,85 @@
         const caption = document.createElement("div");
         caption.style.fontSize = "12px";
         caption.style.color = "#5A687C";
-        caption.textContent = "Klicken oder neue Grafikdatei (SVG / PNG / JPG) hierher ziehen, um Grafik zu ersetzen";
+        caption.innerHTML = "Klicken, neue Datei hierher ziehen oder <strong>Strg+V</strong> drücken, um Grafik zu ersetzen " +
+          "<span style='color:#009FE3;'>(Rechtsklick für Menü)</span>";
         dropzone.appendChild(caption);
+
+        const actionRow = document.createElement("div");
+        actionRow.className = "figure-upload-actions";
+
+        const pasteBtn = document.createElement("button");
+        pasteBtn.type = "button";
+        pasteBtn.className = "figure-action-btn btn-paste";
+        pasteBtn.innerHTML = "<span>📋</span> <span>Aus Zwischenablage</span>";
+        pasteBtn.title = "Grafik aus Zwischenablage einfügen (Strg+V)";
+        pasteBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          pasteFromClipboard();
+        });
+
+        const replaceBtn = document.createElement("button");
+        replaceBtn.type = "button";
+        replaceBtn.className = "figure-action-btn";
+        replaceBtn.innerHTML = "<span>📁</span> <span>Datei ersetzen</span>";
+        replaceBtn.title = "Neue Datei vom Computer auswählen";
+        replaceBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          fileInput.click();
+        });
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "figure-action-btn btn-delete";
+        removeBtn.innerHTML = "<span>🗑️</span> <span>Entfernen</span>";
+        removeBtn.title = "Grafik entfernen";
+        removeBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          blk.asset_id = "";
+          renderDropzoneInner();
+          markDirty();
+        });
+
+        actionRow.appendChild(pasteBtn);
+        actionRow.appendChild(replaceBtn);
+        actionRow.appendChild(removeBtn);
+        dropzone.appendChild(actionRow);
       } else {
         const msg = document.createElement("div");
         msg.innerHTML =
-          "<strong style='color:#002855;'>Grafikdatei hierher ziehen (Drag & Drop)</strong> oder klicken zum Auswählen<br/>" +
-          "<span style='font-size:12px;color:#5A687C;'>Unterstützt Vektorgrafiken (SVG) sowie hochauflösende PNG / JPG (wird sicher in der MSSQL-DB gespeichert)</span>";
+          "<div style='font-size:24px;margin-bottom:6px;'>📊</div>" +
+          "<strong style='color:#002855;font-size:13.5px;'>Grafikdatei hierher ziehen</strong> oder mit <kbd style='background:#E2E8F0;padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px;color:#002855;'>Strg + V</kbd> einfügen<br/>" +
+          "<span style='font-size:12px;color:#5A687C;margin-top:4px;display:inline-block;'>Unterstützt Screenshots, Vektorgrafiken (SVG) sowie PNG / JPG &bull; <em>Rechtsklick für Menü</em></span>";
         dropzone.appendChild(msg);
+
+        const actionRow = document.createElement("div");
+        actionRow.className = "figure-upload-actions";
+
+        const pasteBtn = document.createElement("button");
+        pasteBtn.type = "button";
+        pasteBtn.className = "figure-action-btn btn-paste";
+        pasteBtn.innerHTML = "<span>📋</span> <span>Aus Zwischenablage einfügen</span>";
+        pasteBtn.title = "Grafik aus Zwischenablage einfügen (Strg+V)";
+        pasteBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          pasteFromClipboard();
+        });
+
+        const chooseBtn = document.createElement("button");
+        chooseBtn.type = "button";
+        chooseBtn.className = "figure-action-btn";
+        chooseBtn.innerHTML = "<span>📁</span> <span>Datei auswählen</span>";
+        chooseBtn.title = "Datei vom Computer auswählen";
+        chooseBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          fileInput.click();
+        });
+
+        actionRow.appendChild(pasteBtn);
+        actionRow.appendChild(chooseBtn);
+        dropzone.appendChild(actionRow);
       }
     };
-
-    renderDropzoneInner();
 
     const handleFileUpload = (file) => {
       if (!file) return;
@@ -1838,14 +1928,19 @@
         blk.asset_id = newAssetId;
         renderDropzoneInner();
 
+        const isSvg = (file.type && file.type === "image/svg+xml") || (file.name && file.name.endsWith(".svg"));
+        const defaultExt = isSvg ? ".svg" : (file.type === "image/jpeg" ? ".jpg" : ".png");
+        const fileName = file.name || ("grafik_" + Date.now() + defaultExt);
+        const mimeType = file.type || (isSvg ? "image/svg+xml" : "image/png");
+
         if (window.Shiny && window.Shiny.setInputValue) {
           window.Shiny.setInputValue(
             "lukb_upload_asset",
             {
               asset_id: newAssetId,
               article_id: state.article.id,
-              filename: file.name,
-              mime_type: file.type || (file.name.endsWith(".svg") ? "image/svg+xml" : "image/png"),
+              filename: fileName,
+              mime_type: mimeType,
               base64_data: base64Data,
               ts: Date.now(),
             },
@@ -1857,14 +1952,172 @@
       reader.readAsDataURL(file);
     };
 
-    dropzone.addEventListener("click", function () {
+    const pasteFromClipboard = async () => {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        try {
+          const items = await navigator.clipboard.read();
+          for (const item of items) {
+            const imgType = item.types.find(function (t) { return t.startsWith("image/"); });
+            if (imgType) {
+              const blob = await item.getType(imgType);
+              handleFileUpload(blob);
+              return true;
+            }
+          }
+          if (navigator.clipboard.readText) {
+            const txt = await navigator.clipboard.readText();
+            const trimmed = (txt || "").trim();
+            if (trimmed.startsWith("<svg") && trimmed.includes("</svg>")) {
+              const blob = new Blob([trimmed], { type: "image/svg+xml" });
+              handleFileUpload(blob);
+              return true;
+            }
+          }
+          alert("Keine Bilddaten oder SVG-Grafik in der Zwischenablage gefunden.");
+          return false;
+        } catch (err) {
+          console.warn("navigator.clipboard.read fehlgeschlagen oder Berechtigung abgelehnt:", err);
+        }
+      }
+      alert("Direktes Lesen der Zwischenablage erfordert Browser-Freigabe oder Tastenkürzel.\nBitte klicken Sie auf die Box und drücken Sie Strg+V (Cmd+V).");
+      dropzone.focus();
+      return false;
+    };
+
+    const handlePasteEvent = function (e) {
+      if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
+        const hasImage = e.clipboardData && e.clipboardData.items && Array.from(e.clipboardData.items).some(function (item) {
+          return item.type.indexOf("image") !== -1;
+        });
+        const hasText = e.clipboardData && e.clipboardData.getData("text/plain");
+        if (hasText && !hasImage) return;
+      }
+
+      const cd = e.clipboardData || window.clipboardData;
+      if (!cd) return;
+
+      if (cd.items && cd.items.length > 0) {
+        for (let i = 0; i < cd.items.length; i++) {
+          const item = cd.items[i];
+          if (item.type.indexOf("image") !== -1) {
+            e.preventDefault();
+            e.stopPropagation();
+            const blob = item.getAsFile();
+            if (blob) {
+              handleFileUpload(blob);
+              return;
+            }
+          }
+        }
+      }
+
+      if (cd.files && cd.files.length > 0) {
+        for (let i = 0; i < cd.files.length; i++) {
+          const f = cd.files[i];
+          if (f.type.startsWith("image/") || /\.(svg|png|jpe?g)$/i.test(f.name)) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleFileUpload(f);
+            return;
+          }
+        }
+      }
+
+      const textData = cd.getData("text/plain");
+      if (textData) {
+        const trimmed = textData.trim();
+        if (trimmed.startsWith("<svg") && trimmed.includes("</svg>")) {
+          e.preventDefault();
+          e.stopPropagation();
+          const blob = new Blob([trimmed], { type: "image/svg+xml" });
+          handleFileUpload(blob);
+          return;
+        }
+      }
+    };
+
+    dropzone.addEventListener("paste", handlePasteEvent);
+    container.addEventListener("paste", handlePasteEvent);
+
+    const openContextMenu = function (clientX, clientY) {
+      closeFigureContextMenu();
+      const menu = document.createElement("div");
+      menu.className = "figure-context-menu";
+      menu.id = "active-figure-context-menu";
+
+      const pasteItem = document.createElement("div");
+      pasteItem.className = "figure-context-menu-item";
+      pasteItem.innerHTML = '<span>📋</span> <span>Aus Zwischenablage einfügen</span> <span class="figure-context-menu-shortcut">Strg+V</span>';
+      pasteItem.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        closeFigureContextMenu();
+        pasteFromClipboard();
+      });
+      menu.appendChild(pasteItem);
+
+      const uploadItem = document.createElement("div");
+      uploadItem.className = "figure-context-menu-item";
+      uploadItem.innerHTML = '<span>📁</span> <span>Grafikdatei auswählen...</span>';
+      uploadItem.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        closeFigureContextMenu();
+        fileInput.click();
+      });
+      menu.appendChild(uploadItem);
+
+      if (blk.asset_id) {
+        const divider = document.createElement("div");
+        divider.className = "figure-context-menu-divider";
+        menu.appendChild(divider);
+
+        const removeItem = document.createElement("div");
+        removeItem.className = "figure-context-menu-item danger";
+        removeItem.innerHTML = '<span>🗑️</span> <span>Grafik entfernen</span>';
+        removeItem.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          closeFigureContextMenu();
+          blk.asset_id = "";
+          renderDropzoneInner();
+          markDirty();
+        });
+        menu.appendChild(removeItem);
+      }
+
+      document.body.appendChild(menu);
+
+      const rect = menu.getBoundingClientRect();
+      let left = clientX;
+      let top = clientY;
+      if (left + rect.width > window.innerWidth - 10) {
+        left = window.innerWidth - rect.width - 10;
+      }
+      if (top + rect.height > window.innerHeight - 10) {
+        top = window.innerHeight - rect.height - 10;
+      }
+      menu.style.left = Math.max(10, left) + "px";
+      menu.style.top = Math.max(10, top) + "px";
+    };
+
+    dropzone.addEventListener("contextmenu", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      openContextMenu(e.clientX, e.clientY);
+    });
+
+    dropzone.addEventListener("click", function (e) {
+      if (e.target.closest("button") || e.target.closest(".figure-action-btn")) {
+        return;
+      }
+      dropzone.focus();
       fileInput.click();
     });
+
     fileInput.addEventListener("change", function () {
       if (fileInput.files && fileInput.files[0]) {
         handleFileUpload(fileInput.files[0]);
       }
     });
+
     dropzone.addEventListener("dragover", function (e) {
       e.preventDefault();
       dropzone.classList.add("drag-over");
@@ -1879,6 +2132,8 @@
         handleFileUpload(e.dataTransfer.files[0]);
       }
     });
+
+    renderDropzoneInner();
 
     container.appendChild(dropzone);
     container.appendChild(fileInput);

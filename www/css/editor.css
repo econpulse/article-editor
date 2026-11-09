@@ -1107,11 +1107,19 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   cursor: pointer;
   transition: all 0.15s ease;
   margin: 10px 0;
+  outline: none;
 }
 
 .figure-upload-zone:hover, .figure-upload-zone.drag-over {
   border-color: var(--lukb-cyan);
   background: #F0F9FF;
+}
+
+.figure-upload-zone:focus,
+.figure-upload-zone:focus-visible {
+  border-color: var(--lukb-cyan);
+  background: #F0F9FF;
+  box-shadow: 0 0 0 3px rgba(0, 159, 227, 0.25);
 }
 
 .figure-preview-thumb {
@@ -1123,6 +1131,126 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   padding: 6px;
   border-radius: var(--radius-sm);
   margin-bottom: 8px;
+}
+
+.figure-upload-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.figure-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--lukb-border);
+  background: #FFFFFF;
+  color: var(--lukb-navy);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 40, 85, 0.05);
+}
+
+.figure-action-btn:hover {
+  background: #F4F7FA;
+  border-color: var(--lukb-cyan);
+  color: var(--lukb-blue);
+}
+
+.figure-action-btn.btn-paste {
+  background: #E8F4FD;
+  border-color: #BDE0FE;
+  color: var(--lukb-navy);
+}
+
+.figure-action-btn.btn-paste:hover {
+  background: #D5ECFC;
+  border-color: var(--lukb-cyan);
+}
+
+.figure-action-btn.btn-delete {
+  color: var(--lukb-danger);
+  border-color: #FECACA;
+  background: #FEF2F2;
+}
+
+.figure-action-btn.btn-delete:hover {
+  background: #FEE2E2;
+  border-color: var(--lukb-danger);
+}
+
+/* Floating Context Menu for Figures */
+.figure-context-menu {
+  position: fixed;
+  z-index: 10000;
+  background: #FFFFFF;
+  border: 1px solid var(--lukb-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-elevated);
+  padding: 6px 0;
+  min-width: 250px;
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--lukb-text);
+  animation: figureMenuFadeIn 0.12s ease-out;
+}
+
+@keyframes figureMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.figure-context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+  user-select: none;
+}
+
+.figure-context-menu-item:hover {
+  background: #F0F5FA;
+  color: var(--lukb-navy);
+}
+
+.figure-context-menu-item.danger {
+  color: var(--lukb-danger);
+}
+
+.figure-context-menu-item.danger:hover {
+  background: #FEF2F2;
+  color: #991B1B;
+}
+
+.figure-context-menu-divider {
+  height: 1px;
+  background: var(--lukb-border);
+  margin: 5px 0;
+}
+
+.figure-context-menu-shortcut {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--lukb-muted);
+  font-family: monospace;
+  background: #EEF2F7;
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 /* DB-Chart (Zeitreihe aus ts_db) Block Editor */
