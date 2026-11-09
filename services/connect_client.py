@@ -45,6 +45,42 @@ def get_portal_target_url() -> str:
     return "portal/"
 
 
+def create_content_item(
+    name: str = "investment-office-portal",
+    title: str = "LUKB Investment Office Portal",
+    access_type: str = "all",
+) -> dict[str, Any]:
+    """
+    Erstellt ein neues statisches Content-Item auf Posit Connect (app_mode='static')
+    und schaltet es für 'access_type' frei ('all' = login-frei zugänglich).
+    """
+    if not (CONNECT_SERVER_URL and CONNECT_API_KEY):
+        raise ValueError("CONNECT_SERVER_URL und CONNECT_API_KEY müssen in der Konfiguration gesetzt sein.")
+
+    base_api = f"{CONNECT_SERVER_URL}/__api__/v1"
+    headers = {
+        "Authorization": f"Key {CONNECT_API_KEY}",
+        "Content-Type": "application/json",
+        "User-Agent": "LUKB-Article-Editor-CMS/1.0",
+    }
+    ctx = _make_ssl_context()
+    payload = json.dumps({
+        "name": name,
+        "title": title,
+        "app_mode": "static",
+        "access_type": access_type,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        f"{base_api}/content",
+        data=payload,
+        headers=headers,
+        method="POST",
+    )
+    with urllib.request.urlopen(req, context=ctx, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
 def _make_ssl_context() -> ssl.SSLContext:
     ctx = ssl.create_default_context()
     # In Firmennetzen mit SSL-Inspection/Interception toleranter Fallback

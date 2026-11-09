@@ -79,20 +79,47 @@ def _ensure_portal_assets(dist_dir: Path) -> None:
         shutil.copy2(LUKB_LOGO_SRC, assets_dist / "LUKB-Logo.svg")
 
 
+def _write_connect_manifest(dist_dir: Path) -> None:
+    """Schreibt das offizielle Posit Connect manifest.json für statischen Content."""
+    connect_manifest = {
+        "version": 1,
+        "locale": "de_CH",
+        "metadata": {
+            "appmode": "static",
+            "primary_html": "index.html",
+        },
+    }
+    (dist_dir / "manifest.json").write_text(json.dumps(connect_manifest, indent=2), encoding="utf-8")
+
+
 def _read_manifest(dist_dir: Path) -> dict[str, Any]:
-    manifest_path = dist_dir / "manifest.json"
-    if manifest_path.exists():
+    # Primär: portal-manifest.json
+    p_manifest = dist_dir / "portal-manifest.json"
+    if p_manifest.exists():
         try:
-            return json.loads(manifest_path.read_text(encoding="utf-8"))
+            return json.loads(p_manifest.read_text(encoding="utf-8"))
         except Exception as exc:
-            logger.warning(f"Konnte manifest.json nicht lesen ({exc}), erstelle neues Manifest.")
+            logger.warning(f"Konnte portal-manifest.json nicht lesen ({exc}), erstelle neues Manifest.")
+
+    # Abwärtskompatibilität: altes manifest.json mit "articles" Schlüssel
+    legacy_manifest = dist_dir / "manifest.json"
+    if legacy_manifest.exists():
+        try:
+            data = json.loads(legacy_manifest.read_text(encoding="utf-8"))
+            if "articles" in data:
+                return data
+        except Exception:
+            pass
+
     return {"articles": {}, "last_updated": datetime.now(timezone.utc).isoformat()}
 
 
 def _write_manifest(dist_dir: Path, manifest: dict[str, Any]) -> None:
     manifest["last_updated"] = datetime.now(timezone.utc).isoformat()
-    manifest_path = dist_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    (dist_dir / "portal-manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    _write_connect_manifest(dist_dir)
 
 
 def _render_portal_index(dist_dir: Path, manifest: dict[str, Any]) -> None:
