@@ -342,14 +342,15 @@
   let rows = blk.rows
 
   let aligns = cols.map(c => {
-    if c.align == "right" { right + horizon }
-    else if c.align == "center" { center + horizon }
-    else { left + horizon }
+    if c.align == "right" { right + top }
+    else if c.align == "center" { center + top }
+    else { left + top }
   })
 
-  let col-widths = cols.enumerate().map(((idx, c)) => {
-    let raw-w = float(c.at("width", default: if idx == 0 { 1.4 } else { 1.0 }))
-    let safe-w = if raw-w > 0 { raw-w } else { 1.0 }
+  let fallback-w = if cols.len() > 0 { 100.0 / cols.len() } else { 100.0 }
+  let col-widths = cols.map(c => {
+    let raw-w = float(c.at("width", default: fallback-w))
+    let safe-w = if raw-w > 0 { raw-w } else { fallback-w }
     safe-w * 1fr
   })
 

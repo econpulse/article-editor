@@ -1860,6 +1860,7 @@ table.cms-grid-editor td {
   border-right: 1px solid var(--lukb-border);
   padding: 0;
   background: #FFFFFF;
+  vertical-align: top;
 }
 
 .grid-header-controls {
@@ -1923,6 +1924,24 @@ table.cms-grid-editor td {
   white-space: nowrap;
 }
 
+.table-width-sum-badge {
+  font-size: 11px;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #DCFCE7;
+  color: #166534;
+  border: 1px solid #BBF7D0;
+  white-space: nowrap;
+}
+
+.table-width-sum-badge.is-mismatch {
+  background: #FEF3C7;
+  color: #92400E;
+  border-color: #FDE68A;
+}
+
 .grid-cell-input {
   width: 100%;
   border: none;
@@ -1930,9 +1949,17 @@ table.cms-grid-editor td {
   font-family: var(--font-body);
   font-weight: 300;
   font-size: 13px;
+  line-height: 1.4;
   color: var(--lukb-text);
   background: transparent;
   outline: none;
+  display: block;
+  resize: none;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  min-height: 32px;
 }
 
 .grid-cell-input:focus {

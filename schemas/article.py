@@ -203,24 +203,35 @@ class DbChartBlock(BaseModel):
         return []
 
 
+def _equal_percentage_widths(n: int) -> list[float]:
+    if n <= 0:
+        return []
+    base = math.floor(1000.0 / n) / 10.0
+    extra_tenths = int(round((100.0 - base * n) * 10.0))
+    return [
+        round(base + (0.1 if idx < extra_tenths else 0.0), 1)
+        for idx in range(n)
+    ]
+
+
 class TableColumn(BaseModel):
     field: str
     title: str
     align: Literal["left", "center", "right"] = "left"
-    width: float = Field(default=1.0, ge=0.1, le=1000.0, description="Relative Spaltenbreite")
+    width: float = Field(default=100.0, ge=0.1, le=100.0, description="Relative Spaltenbreite in Prozent")
 
     @field_validator("width", mode="before")
     @classmethod
     def validate_width(cls, v: Any) -> float:
         if v is None or v == "":
-            return 1.0
+            return 100.0
         try:
             val = float(v)
         except (TypeError, ValueError):
-            return 1.0
+            return 100.0
         if math.isnan(val) or math.isinf(val) or val <= 0:
-            return 1.0
-        return max(0.1, min(1000.0, round(val, 2)))
+            return 100.0
+        return max(0.1, min(100.0, round(val, 1)))
 
 
 class TableBlock(BaseModel):
@@ -233,9 +244,9 @@ class TableBlock(BaseModel):
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
     columns: list[TableColumn] = Field(
         default_factory=lambda: [
-            TableColumn(field="col_1", title="Anlageklasse", align="left", width=1.4),
-            TableColumn(field="col_2", title="Aktuell", align="right", width=1.0),
-            TableColumn(field="col_3", title="Veränderung", align="right", width=1.0),
+            TableColumn(field="col_1", title="Anlageklasse", align="left", width=33.4),
+            TableColumn(field="col_2", title="Aktuell", align="right", width=33.3),
+            TableColumn(field="col_3", title="Veränderung", align="right", width=33.3),
         ]
     )
     rows: list[dict[str, str]] = Field(
@@ -248,24 +259,59 @@ class TableBlock(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def preserve_legacy_first_col_width(cls, data: Any) -> Any:
+    def normalize_table_column_widths(cls, data: Any) -> Any:
         if not isinstance(data, dict):
             return data
         raw_cols = data.get("columns")
-        if isinstance(raw_cols, (list, tuple)) and len(raw_cols) > 1:
-            has_any_width = any(isinstance(c, dict) and c.get("width") is not None for c in raw_cols)
-            if not has_any_width:
-                out = dict(data)
-                new_cols = []
-                for idx, c in enumerate(raw_cols):
-                    if isinstance(c, dict):
-                        c_copy = dict(c)
-                        c_copy["width"] = 1.4 if idx == 0 else 1.0
-                        new_cols.append(c_copy)
+        if not isinstance(raw_cols, (list, tuple)) or len(raw_cols) == 0:
+            return data
+
+        cols_list = list(raw_cols)
+        has_any_width = any(isinstance(c, dict) and c.get("width") is not None for c in cols_list)
+        if not has_any_width:
+            eq_widths = _equal_percentage_widths(len(cols_list))
+            out = dict(data)
+            new_cols = []
+            for idx, c in enumerate(cols_list):
+                if isinstance(c, dict):
+                    c_copy = dict(c)
+                    c_copy["width"] = eq_widths[idx]
+                    new_cols.append(c_copy)
+                else:
+                    new_cols.append(c)
+            out["columns"] = new_cols
+            return out
+
+        # Falls ältere Daten noch kleine Gewichtungsfaktoren (z.B. 1.4, 1.0, 1.0) haben -> auf 100% normalisieren
+        numeric_widths: list[float] = []
+        for c in cols_list:
+            if isinstance(c, dict) and c.get("width") is not None:
+                try:
+                    w = float(c["width"])
+                    numeric_widths.append(w if w > 0 else 1.0)
+                except (TypeError, ValueError):
+                    numeric_widths.append(1.0)
+            else:
+                numeric_widths.append(1.0)
+        total_w = sum(numeric_widths)
+        if len(cols_list) > 1 and 0 < total_w < 20.0:
+            out = dict(data)
+            new_cols = []
+            running_sum = 0.0
+            for idx, c in enumerate(cols_list):
+                if isinstance(c, dict):
+                    c_copy = dict(c)
+                    if idx < len(cols_list) - 1:
+                        pct = round((numeric_widths[idx] / total_w) * 100.0, 1)
+                        running_sum = round(running_sum + pct, 1)
                     else:
-                        new_cols.append(c)
-                out["columns"] = new_cols
-                return out
+                        pct = round(max(0.1, 100.0 - running_sum), 1)
+                    c_copy["width"] = pct
+                    new_cols.append(c_copy)
+                else:
+                    new_cols.append(c)
+            out["columns"] = new_cols
+            return out
         return data
 
     @field_validator("columns", "rows", mode="before")

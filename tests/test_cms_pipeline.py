@@ -850,20 +850,41 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
 
     init_db_and_seed()
 
-    # 1. Tabellen mit relativer Spaltenbreite
+    # 1. Tabellen mit prozentualen Spaltenbreiten (Summe = 100%) & vertikaler Ausrichtung 'top'
+    default_tbl = TableBlock()
+    assert [c.width for c in default_tbl.columns] == [33.4, 33.3, 33.3]
+    assert abs(sum(c.width for c in default_tbl.columns) - 100.0) < 0.01
+
+    no_width_tbl = TableBlock(
+        columns=[
+            {"field": "a", "title": "A", "align": "left"},
+            {"field": "b", "title": "B", "align": "right"},
+        ]
+    )
+    assert [c.width for c in no_width_tbl.columns] == [50.0, 50.0]
+
+    legacy_tbl = TableBlock(
+        columns=[
+            {"field": "a", "title": "A", "align": "left", "width": 1.4},
+            {"field": "b", "title": "B", "align": "right", "width": 1.0},
+            {"field": "c", "title": "C", "align": "right", "width": 1.0},
+        ]
+    )
+    assert abs(sum(c.width for c in legacy_tbl.columns) - 100.0) < 0.01
+
     tbl_blk = TableBlock(
         title="Relative Spaltenbreiten Test",
         columns=[
-            {"field": "name", "title": "Bezeichnung", "align": "left", "width": 3.0},
-            {"field": "val", "title": "Wert", "align": "right", "width": 1.0},
+            {"field": "name", "title": "Bezeichnung", "align": "left", "width": 75.0},
+            {"field": "val", "title": "Wert", "align": "right", "width": 25.0},
         ],
         rows=[
-            {"name": "Aktien Schweiz", "val": "25.0 %"},
+            {"name": "Aktien Schweiz mit längerem Beschreibungstext für Umbruchtest", "val": "25.0 %"},
             {"name": "Obligationen CHF", "val": "35.0 %"},
         ],
     )
-    assert tbl_blk.columns[0].width == 3.0
-    assert tbl_blk.columns[1].width == 1.0
+    assert tbl_blk.columns[0].width == 75.0
+    assert tbl_blk.columns[1].width == 25.0
 
     # 2. DB-Chart Palettensteuerung (nur LUKB Standard & Blau-Abstufung) & Default-Typ 'line'
     default_chart = DbChartBlock(title="Default Chart")
@@ -906,16 +927,22 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     )
 
     html_out = render_web_html(doc)
-    # Tabelle: 3.0 / (3.0 + 1.0) = 75.00%, 1.0 / 4.0 = 25.00%
+    # Tabelle: 75.00% und 25.00%, vertikale Ausrichtung top
     assert "width: 75.00%;" in html_out
     assert "width: 25.00%;" in html_out
+    assert "vertical-align: top;" in html_out
     # Link im Textabsatz: target="_blank", no underline CSS, arrow icon CSS
     assert 'href="https://www.lukb.ch/marktbericht"' in html_out
     assert 'target="_blank"' in html_out
     assert ".blk-richtext a" in html_out
     assert "text-decoration: none !important;" in html_out
 
-    # Typst PDF & SVG (beide Templates)
+    # Typst PDF & SVG (beide Templates) & 'top' Zellenausrichtung in render-table-box
+    typ_focus_tbl = (ROOT / "templates" / "investment_focus" / "template.typ").read_text(encoding="utf-8").split("#let render-table-box")[1].split("#let render-quote-box")[0]
+    typ_flash_tbl = (ROOT / "templates" / "market_flash" / "template.typ").read_text(encoding="utf-8").split("#let render-table-box")[1].split("#let render-quote-box")[0]
+    assert "left + top" in typ_focus_tbl and "left + horizon" not in typ_focus_tbl
+    assert "left + top" in typ_flash_tbl and "left + horizon" not in typ_flash_tbl
+
     pdf_focus = render_pdf_bytes(doc)
     assert pdf_focus.startswith(b"%PDF-")
     svgs = render_preview_svg_pages(doc)
@@ -929,12 +956,14 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     docx_bytes = render_docx_bytes(doc)
     assert docx_bytes.startswith(b"PK\x03\x04")
 
-    # 4 & 5. CSS 1/3 Breite & Auto-Typst-Toggle in UI
+    # 4 & 5. CSS 1/3 Breite, Auto-Typst-Toggle, Editor-Zellumbruch & Top-Alignment
     css_text = (ROOT / "www" / "css" / "editor.css").read_text(encoding="utf-8")
     assert "33.333%" in css_text
     assert ".richtext-editable a" in css_text
     assert ".db-chart-palette-bar" in css_text
     assert ".grid-col-width-input" in css_text
+    assert "white-space: pre-wrap;" in css_text
+    assert "vertical-align: top;" in css_text
 
     app_text = (ROOT / "app.py").read_text(encoding="utf-8")
     assert "toggle-auto-preview" in app_text

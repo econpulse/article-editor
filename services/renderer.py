@@ -23,7 +23,7 @@ from typing import Any
 import docx
 import jinja2
 import typst
-from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
@@ -845,14 +845,15 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 t.alignment = WD_TABLE_ALIGNMENT.CENTER
                 t.autofit = False
 
+                fallback_w = 100.0 / max(1, len(cols))
                 weights: list[float] = []
-                for c_idx, col in enumerate(cols):
+                for col in cols:
                     try:
-                        w = float(col.get("width") or (1.4 if c_idx == 0 else 1.0))
+                        w = float(col.get("width") or fallback_w)
                     except (TypeError, ValueError):
-                        w = 1.0
-                    weights.append(w if w > 0 else 1.0)
-                total_weight = sum(weights) or 1.0
+                        w = fallback_w
+                    weights.append(w if w > 0 else fallback_w)
+                total_weight = sum(weights) or 100.0
                 total_table_inches = 6.5
 
                 hdr_cells = t.rows[0].cells
@@ -861,6 +862,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                     t.columns[c_idx].width = col_w
                     cell = hdr_cells[c_idx]
                     cell.width = col_w
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
                     _set_docx_cell_background(cell, "002855")
                     _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
                     p = cell.paragraphs[0]
@@ -878,6 +880,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         col_w = Inches(total_table_inches * (weights[c_idx] / total_weight))
                         cell = row_cells[c_idx]
                         cell.width = col_w
+                        cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
                         _set_docx_cell_background(cell, bg_hex)
                         _set_docx_cell_margins(cell, top=90, bottom=90, left=150, right=150)
                         p = cell.paragraphs[0]

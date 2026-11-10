@@ -602,6 +602,7 @@
     table.lukb-data-table td {
       overflow-wrap: break-word;
       word-wrap: break-word;
+      vertical-align: top;
     }
 
     table.lukb-data-table thead th {
@@ -770,15 +771,17 @@
               <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
             {% endif %}
             {% set col_ns = namespace(total=0.0) %}
+            {% set col_count = blk.columns|length if blk.columns|length > 0 else 1 %}
+            {% set fallback_w = 100.0 / col_count %}
             {% for col in blk.columns %}
-              {% set cw = (col.width if col.width is defined and col.width else (1.4 if loop.first else 1.0)) | float %}
-              {% set col_ns.total = col_ns.total + (cw if cw > 0 else 1.0) %}
+              {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}
+              {% set col_ns.total = col_ns.total + (cw if cw > 0 else fallback_w) %}
             {% endfor %}
             <table class="lukb-data-table">
               <colgroup>
                 {% for col in blk.columns %}
-                  {% set cw = (col.width if col.width is defined and col.width else (1.4 if loop.first else 1.0)) | float %}
-                  {% set pct = ((cw if cw > 0 else 1.0) / (col_ns.total if col_ns.total > 0 else 1.0)) * 100.0 %}
+                  {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}
+                  {% set pct = ((cw if cw > 0 else fallback_w) / (col_ns.total if col_ns.total > 0 else 100.0)) * 100.0 %}
                   <col style="width: {{ '%.2f'|format(pct) }}%;" />
                 {% endfor %}
               </colgroup>

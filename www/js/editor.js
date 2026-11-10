@@ -408,9 +408,9 @@
         layout: "column",
         highlight_last_row: false,
         columns: [
-          { field: "col_1", title: "Kennzahl / Sektor", align: "left", width: 1.4 },
-          { field: "col_2", title: "Aktuell", align: "right", width: 1.0 },
-          { field: "col_3", title: "Prognose 12M", align: "right", width: 1.0 },
+          { field: "col_1", title: "Kennzahl / Sektor", align: "left", width: 33.4 },
+          { field: "col_2", title: "Aktuell", align: "right", width: 33.3 },
+          { field: "col_3", title: "Prognose 12M", align: "right", width: 33.3 },
         ],
         rows: [
           { col_1: "Position A", col_2: "10.0 %", col_3: "11.5 %" },
@@ -4637,6 +4637,16 @@
     addColBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
     addColBtn.textContent = "+ Spalte";
 
+    const eqWidthBtn = document.createElement("button");
+    eqWidthBtn.type = "button";
+    eqWidthBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    eqWidthBtn.textContent = "⚖ Gleich verteilen";
+    eqWidthBtn.title = "Alle Spaltenbreiten gleichmässig auf 100 % aufteilen";
+
+    const widthSumBadge = document.createElement("span");
+    widthSumBadge.className = "table-width-sum-badge";
+    widthSumBadge.title = "Summe der Spaltenbreiten (sollte 100 % ergeben)";
+
     const totalToggleWrap = document.createElement("label");
     totalToggleWrap.style.display = "inline-flex";
     totalToggleWrap.style.alignItems = "center";
@@ -4657,6 +4667,8 @@
 
     btnGroup.appendChild(addRowBtn);
     btnGroup.appendChild(addColBtn);
+    btnGroup.appendChild(eqWidthBtn);
+    btnGroup.appendChild(widthSumBadge);
     btnGroup.appendChild(totalToggleWrap);
 
     const excelHint = document.createElement("span");
@@ -4672,41 +4684,82 @@
     const gridScroll = document.createElement("div");
     gridScroll.className = "table-editor-scroll";
 
+    function distributeEqualColumnWidths(columns) {
+      if (!Array.isArray(columns) || columns.length === 0) return;
+      const n = columns.length;
+      const base = Math.floor(1000 / n) / 10;
+      const extraTenths = Math.round((100 - base * n) * 10);
+      columns.forEach(function (c, idx) {
+        c.width = Math.round((base + (idx < extraTenths ? 0.1 : 0)) * 10) / 10;
+      });
+    }
+
+    function ensurePercentageWidths(columns) {
+      if (!Array.isArray(columns) || columns.length === 0) return;
+      const missing = columns.some(function (c) {
+        return c.width == null || isNaN(parseFloat(c.width)) || parseFloat(c.width) <= 0;
+      });
+      if (missing) {
+        distributeEqualColumnWidths(columns);
+        return;
+      }
+      const total = columns.reduce(function (acc, c) {
+        return acc + parseFloat(c.width);
+      }, 0);
+      if (columns.length > 1 && total > 0 && total < 20) {
+        let running = 0;
+        columns.forEach(function (c, idx) {
+          if (idx < columns.length - 1) {
+            const pct = Math.round((parseFloat(c.width) / total) * 1000) / 10;
+            running = Math.round((running + pct) * 10) / 10;
+            c.width = pct;
+          } else {
+            c.width = Math.round(Math.max(0.1, 100 - running) * 10) / 10;
+          }
+        });
+      }
+    }
+
+    function autoResizeCellTextarea(ta) {
+      if (!ta) return;
+      ta.style.height = "auto";
+      ta.style.height = Math.max(32, ta.scrollHeight) + "px";
+    }
+
+    function autoResizeAllGridCells() {
+      gridScroll.querySelectorAll("textarea.grid-cell-input").forEach(function (ta) {
+        autoResizeCellTextarea(ta);
+      });
+    }
+
     const renderGrid = () => {
       gridScroll.innerHTML = "";
       const tbl = document.createElement("table");
       tbl.className = "cms-grid-editor";
 
       if (!Array.isArray(blk.columns) || blk.columns.length === 0) {
-        blk.columns = [{ field: "col_1", title: "Spalte 1", align: "left", width: 1.4 }];
+        blk.columns = [{ field: "col_1", title: "Spalte 1", align: "left", width: 100 }];
       }
       if (!Array.isArray(blk.rows)) {
         blk.rows = [];
+      }
+      ensurePercentageWidths(blk.columns);
+
+      function updateWidthSumBadge() {
+        const sum = blk.columns.reduce(function (acc, c) {
+          const w = parseFloat(c.width);
+          return acc + (!isNaN(w) && w > 0 ? w : 0);
+        }, 0);
+        const rounded = Math.round(sum * 10) / 10;
+        widthSumBadge.textContent = "Σ " + rounded + "%";
+        widthSumBadge.classList.toggle("is-mismatch", Math.abs(rounded - 100) > 0.2);
       }
 
       // THEAD
       const thead = document.createElement("thead");
       const htr = document.createElement("tr");
-      const pctBadges = [];
-
-      function updateColumnWidthPercentages() {
-        const total = blk.columns.reduce(function (acc, c, idx) {
-          const w = parseFloat(c.width != null ? c.width : (idx === 0 ? 1.4 : 1.0));
-          return acc + (w > 0 ? w : 1.0);
-        }, 0) || 1.0;
-        blk.columns.forEach(function (c, idx) {
-          const w = parseFloat(c.width != null ? c.width : (idx === 0 ? 1.4 : 1.0));
-          const pct = Math.round(((w > 0 ? w : 1.0) / total) * 100);
-          if (pctBadges[idx]) {
-            pctBadges[idx].textContent = pct + "%";
-          }
-        });
-      }
 
       blk.columns.forEach(function (col, cIdx) {
-        if (col.width == null || isNaN(parseFloat(col.width)) || parseFloat(col.width) <= 0) {
-          col.width = cIdx === 0 && blk.columns.length > 1 ? 1.4 : 1.0;
-        }
         const th = document.createElement("th");
         const ctrl = document.createElement("div");
         ctrl.className = "grid-header-controls";
@@ -4746,6 +4799,7 @@
             blk.rows.forEach(function (r) {
               delete r[removedField];
             });
+            distributeEqualColumnWidths(blk.columns);
             renderGrid();
             markDirty();
           });
@@ -4754,7 +4808,7 @@
 
         const widthRow = document.createElement("div");
         widthRow.className = "grid-header-width-row";
-        widthRow.title = "Relative Spaltenbreite (z.B. 1, 1.5, 2 oder Prozentanteile)";
+        widthRow.title = "Spaltenbreite in Prozent (Summe = 100 %)";
 
         const widthLbl = document.createElement("span");
         widthLbl.textContent = "Breite:";
@@ -4763,27 +4817,27 @@
         widthInp.type = "number";
         widthInp.className = "grid-col-width-input";
         widthInp.min = "0.1";
-        widthInp.max = "1000";
+        widthInp.max = "100";
         widthInp.step = "0.1";
         widthInp.value = col.width;
         widthInp.addEventListener("input", function () {
           const parsed = parseFloat(widthInp.value);
           if (!isNaN(parsed) && parsed > 0) {
-            col.width = Math.max(0.1, Math.min(1000, Math.round(parsed * 100) / 100));
-            updateColumnWidthPercentages();
+            col.width = Math.max(0.1, Math.min(100, Math.round(parsed * 10) / 10));
+            updateWidthSumBadge();
             markDirty();
           }
         });
         widthInp.addEventListener("blur", function () {
           const parsed = parseFloat(widthInp.value);
           if (isNaN(parsed) || parsed <= 0) {
-            widthInp.value = col.width || 1.0;
+            widthInp.value = col.width;
           }
         });
 
         const pctSpan = document.createElement("span");
         pctSpan.className = "grid-col-width-pct";
-        pctBadges[cIdx] = pctSpan;
+        pctSpan.textContent = "%";
 
         widthRow.appendChild(widthLbl);
         widthRow.appendChild(widthInp);
@@ -4794,7 +4848,7 @@
         htr.appendChild(th);
       });
 
-      updateColumnWidthPercentages();
+      updateWidthSumBadge();
 
       const actionTh = document.createElement("th");
       actionTh.style.width = "38px";
@@ -4810,14 +4864,15 @@
 
         blk.columns.forEach(function (col, cIdx) {
           const td = document.createElement("td");
-          const cellInp = document.createElement("input");
-          cellInp.type = "text";
+          const cellInp = document.createElement("textarea");
+          cellInp.rows = 1;
           cellInp.className = "grid-cell-input";
           cellInp.style.textAlign = col.align || "left";
           cellInp.value = rowObj[col.field] != null ? rowObj[col.field] : "";
 
           cellInp.addEventListener("input", function () {
             rowObj[col.field] = cellInp.value;
+            autoResizeCellTextarea(cellInp);
             markDirty();
           });
 
@@ -4825,9 +4880,13 @@
           cellInp.addEventListener("paste", function (e) {
             const clipText = (e.clipboardData || window.clipboardData).getData("text/plain");
             if (!clipText || (clipText.indexOf("\t") === -1 && clipText.indexOf("\n") === -1)) {
+              setTimeout(function () {
+                autoResizeCellTextarea(cellInp);
+              }, 0);
               return; // Normales Einfügen in einzelne Zelle
             }
             e.preventDefault();
+            const prevColCount = blk.columns.length;
             const pastedRows = clipText
               .replace(/\r\n/g, "\n")
               .replace(/\r/g, "\n")
@@ -4850,7 +4909,7 @@
                     field: newField,
                     title: "Spalte " + (blk.columns.length + 1),
                     align: "right",
-                    width: 1.0,
+                    width: 100,
                   });
                 }
                 const targetField = blk.columns[targetColIdx].field;
@@ -4858,6 +4917,9 @@
               });
             });
 
+            if (blk.columns.length !== prevColCount) {
+              distributeEqualColumnWidths(blk.columns);
+            }
             renderGrid();
             markDirty();
           });
@@ -4868,6 +4930,8 @@
 
         const delTd = document.createElement("td");
         delTd.style.textAlign = "center";
+        delTd.style.verticalAlign = "top";
+        delTd.style.paddingTop = "3px";
         const delRowBtn = document.createElement("button");
         delRowBtn.type = "button";
         delRowBtn.className = "btn-icon-only danger";
@@ -4886,7 +4950,14 @@
 
       tbl.appendChild(tbody);
       gridScroll.appendChild(tbl);
+      requestAnimationFrame(autoResizeAllGridCells);
     };
+
+    eqWidthBtn.addEventListener("click", function () {
+      distributeEqualColumnWidths(blk.columns);
+      renderGrid();
+      markDirty();
+    });
 
     addRowBtn.addEventListener("click", function () {
       const newRow = {};
@@ -4904,8 +4975,9 @@
         field: newField,
         title: "Spalte " + (blk.columns.length + 1),
         align: "right",
-        width: 1.0,
+        width: 100,
       });
+      distributeEqualColumnWidths(blk.columns);
       blk.rows.forEach(function (r) {
         r[newField] = "";
       });
