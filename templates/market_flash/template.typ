@@ -354,32 +354,44 @@
     safe-w * 1fr
   })
 
+  let can-break = not (blk.layout == "full" and not blk.at("_inline_full", default: false))
+
   let tbl-box = block(
     width: 100%,
-    breakable: false,
-    stroke: (top: 1.5pt + lukb-navy, bottom: 0.6pt + lukb-border),
-    inset: (top: 7pt, bottom: 6pt),
+    breakable: can-break,
     above: 1.1em,
     below: 1.1em
   )[
-    #if blk.title != "" [
-      #block(above: 0pt, below: if blk.subtitle != "" { 5.5pt } else { 6pt })[
-        #set par(leading: 0.28em, justify: false)
-        #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
+    #block(
+      width: 100%,
+      sticky: true,
+      breakable: false,
+      stroke: (top: 1.5pt + lukb-navy),
+      inset: (top: 7pt),
+      above: 0pt,
+      below: if blk.title != "" or blk.subtitle != "" { 6pt } else { 2pt }
+    )[
+      #if blk.title != "" [
+        #block(above: 0pt, below: if blk.subtitle != "" { 5.5pt } else { 0pt })[
+          #set par(leading: 0.28em, justify: false)
+          #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#blk.title]
+        ]
+      ]
+      #if blk.subtitle != "" [
+        #block(above: 0pt, below: 0pt)[
+          #set par(leading: 0.28em, justify: false)
+          #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
+        ]
       ]
     ]
-    #if blk.subtitle != "" [
-      #block(above: 0pt, below: 6pt)[
-        #set par(leading: 0.28em, justify: false)
-        #text(font: font-body, weight: "light", size: 8.3pt, fill: lukb-muted)[#blk.subtitle]
-      ]
-    ]
+
+    #set table.cell(breakable: false)
     #table(
       columns: col-widths,
       align: aligns,
       stroke: (x, y) => (
         top: if y == 0 { 0.8pt + lukb-navy } else if y == 1 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border },
-        bottom: if y == rows.len() { 0.8pt + lukb-navy } else { 0pt }
+        bottom: if y == rows.len() { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
       ),
       fill: (x, y) => {
         if y == 0 { lukb-navy }
@@ -388,7 +400,10 @@
         else { white }
       },
       inset: (x: 6pt, y: 5pt),
-      ..cols.map(c => text(font: font-heading, weight: "medium", size: 8.2pt, fill: white)[#c.title]),
+      table.header(
+        repeat: true,
+        ..cols.map(c => text(font: font-heading, weight: "medium", size: 8.2pt, fill: white)[#c.title]),
+      ),
       ..for (r-idx, row-dict) in rows.enumerate() {
         let is-total = blk.highlight_last_row and (r-idx == rows.len() - 1)
         cols.map(c => {
@@ -401,9 +416,18 @@
         })
       }
     )
-    #if blk.source != "" [
-      #v(4pt)
-      #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#blk.source]
+
+    #block(
+      width: 100%,
+      breakable: false,
+      stroke: (bottom: 0.6pt + lukb-border),
+      inset: (top: if blk.source != "" { 4pt } else { 0pt }, bottom: 6pt),
+      above: 0pt,
+      below: 0pt
+    )[
+      #if blk.source != "" [
+        #text(font: font-body, weight: "light", size: 7.5pt, fill: lukb-muted)[#blk.source]
+      ]
     ]
   ]
 
@@ -762,11 +786,12 @@
         )
       } else {
         // Fallback für mehrseitige Texte oder wenn nur ein einzelner Block vorliegt:
+        let has-table = items.any(it => it.type == "table")
         let total-h = measure(block(width: col-w, for it in items [ #render-single-block(it, in-box: false) ])).height
         let ideal-half = total-h / 2 + 16pt
         let target-h = calc.max(ideal-half, best-max-h + 6pt)
 
-        if avail-h > 100pt and target-h <= (avail-h - 6pt) {
+        if not has-table and avail-h > 100pt and target-h <= (avail-h - 6pt) {
           block(
             width: 100%,
             height: target-h,

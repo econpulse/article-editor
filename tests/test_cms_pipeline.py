@@ -970,6 +970,53 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     assert "lukb_auto_preview_toggle" in app_text
 
 
+def test_typst_long_table_breaking_with_repeated_header():
+    """
+    Prüft, dass lange Tabellen in Typst sauber zwischen Zeilen auf die nächste Spalte
+    bzw. Folgeseite umbrechen und die Kopfzeile (table.header repeat: true) wiederholt wird.
+    """
+    from schemas.article import ArticleDocument, TableBlock
+
+    long_rows = [
+        {
+            "seg": f"Position {i:02d} — Ausführliche Beschreibung des Anlagesegments mit Mehrzeiler-Umbruch",
+            "val": f"{i * 0.5:.1f} %",
+        }
+        for i in range(1, 56)
+    ]
+
+    for tpl_id in ("investment_focus", "market_flash"):
+        for layout_mode in ("column", "full"):
+            tbl = TableBlock(
+                title=f"Lange Tabelle ({tpl_id}, {layout_mode})",
+                subtitle="Automatischer Spalten-/Seitenumbruch zwischen Zeilen",
+                source="Quelle: LUKB Investment Office",
+                layout=layout_mode,
+                highlight_last_row=True,
+                columns=[
+                    {"field": "seg", "title": "AnlagekategorieHeader", "align": "left", "width": 70.0},
+                    {"field": "val", "title": "Allokation", "align": "right", "width": 30.0},
+                ],
+                rows=long_rows,
+            )
+            doc = ArticleDocument(
+                id=f"art-long-tbl-{tpl_id}-{layout_mode}",
+                template_id=tpl_id,
+                blocks=[tbl.model_dump()],
+            )
+            pdf_bytes = render_pdf_bytes(doc)
+            assert pdf_bytes.startswith(b"%PDF-")
+
+            svgs = render_preview_svg_pages(doc)
+            assert len(svgs) >= 2, f"Lange Tabelle muss bei {tpl_id}/{layout_mode} über mindestens 2 Seiten umbrechen"
+            # Kopfzeile muss auf Folgeseiten / -spalten wiederholt worden sein (im SVG als Text bzw. Glyphen-Elemente)
+            # Prüfe zusätzlich im Template, dass table.header(repeat: true) und table.cell(breakable: false) genutzt werden:
+            tpl_src = (ROOT / "templates" / tpl_id / "template.typ").read_text(encoding="utf-8")
+            assert "table.header(" in tpl_src
+            assert "repeat: true" in tpl_src
+            assert "set table.cell(breakable: false)" in tpl_src
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -983,6 +1030,7 @@ if __name__ == "__main__":
     test_rbac_and_soft_delete()
     test_publications_block_layout_and_url()
     test_table_column_widths_db_chart_palette_and_paragraph_links()
+    test_typst_long_table_breaking_with_repeated_header()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()
