@@ -837,6 +837,110 @@ def test_publications_block_layout_and_url():
     delete_article(doc.id)
 
 
+def test_table_column_widths_db_chart_palette_and_paragraph_links():
+    """
+    Prüft die fünf neuen Anpassungen im Backend, Typst, HTML5 und DOCX:
+    1. Tabellen: Relative Spaltenbreiten (TableColumn.width)
+    2. DB-Charts: Eigene Farbpaletten-Steuerung (palette, palette_colors, series.color)
+    3. Textabsätze: Inline-Links mit target="_blank", ohne Underline, mit Pfeilsymbol (wie Weitere Publikationen)
+    4. Typst-Vorschau: 1/3 Bildschirmbreite & an-/ausschaltbare Live-Aktualisierung
+    """
+    from schemas.article import ArticleDocument, DbChartBlock, TableBlock
+    from services.chart_generator import generate_db_chart_svg, resolve_chart_palette
+
+    init_db_and_seed()
+
+    # 1. Tabellen mit relativer Spaltenbreite
+    tbl_blk = TableBlock(
+        title="Relative Spaltenbreiten Test",
+        columns=[
+            {"field": "name", "title": "Bezeichnung", "align": "left", "width": 3.0},
+            {"field": "val", "title": "Wert", "align": "right", "width": 1.0},
+        ],
+        rows=[
+            {"name": "Aktien Schweiz", "val": "25.0 %"},
+            {"name": "Obligationen CHF", "val": "35.0 %"},
+        ],
+    )
+    assert tbl_blk.columns[0].width == 3.0
+    assert tbl_blk.columns[1].width == 1.0
+
+    # 2. DB-Chart Palettensteuerung (nur LUKB Standard & Blau-Abstufung) & Default-Typ 'line'
+    default_chart = DbChartBlock(title="Default Chart")
+    assert all(s.chart_type == "line" for s in default_chart.series)
+
+    legacy_chart = DbChartBlock(title="Legacy Palette", palette="lukb_contrast")
+    assert legacy_chart.palette == "lukb_classic"
+
+    chart_blk = DbChartBlock(
+        title="Paletten Test Chart",
+        palette="lukb_blues",
+        series=[
+            {"ticker": "SMI", "chart_type": "line", "label": "SMI"},
+            {"ticker": "SP500", "chart_type": "line", "label": "S&P 500"},
+        ],
+    )
+    assert chart_blk.palette == "lukb_blues"
+    resolved_pal = resolve_chart_palette(chart_blk.model_dump())
+    assert resolved_pal == ["#002855", "#005A9C", "#009FE3", "#5BB8E8", "#9BD3F2"]
+
+    chart_svg = generate_db_chart_svg(chart_blk.model_dump())
+    assert "#002855" in chart_svg
+    assert "#005A9C" in chart_svg
+
+    # 3. Links in Textabsätzen (ohne Underline, target="_blank", Pfeilsymbol)
+    raw_link_html = '<p>Siehe auch unsere <a href="https://www.lukb.ch/marktbericht">Marktanalyse 2026</a> für Details.</p>'
+    typ_code = html_to_typst(raw_link_html)
+    assert '#link("https://www.lukb.ch/marktbericht")' in typ_code
+    assert "#sym.arrow.tr" in typ_code
+    assert "#underline" not in typ_code
+
+    doc = ArticleDocument(
+        id="art-new-features-test",
+        template_id="investment_focus",
+        blocks=[
+            {"id": "rt_link", "type": "richtext", "html": raw_link_html},
+            tbl_blk.model_dump(),
+            chart_blk.model_dump(),
+        ],
+    )
+
+    html_out = render_web_html(doc)
+    # Tabelle: 3.0 / (3.0 + 1.0) = 75.00%, 1.0 / 4.0 = 25.00%
+    assert "width: 75.00%;" in html_out
+    assert "width: 25.00%;" in html_out
+    # Link im Textabsatz: target="_blank", no underline CSS, arrow icon CSS
+    assert 'href="https://www.lukb.ch/marktbericht"' in html_out
+    assert 'target="_blank"' in html_out
+    assert ".blk-richtext a" in html_out
+    assert "text-decoration: none !important;" in html_out
+
+    # Typst PDF & SVG (beide Templates)
+    pdf_focus = render_pdf_bytes(doc)
+    assert pdf_focus.startswith(b"%PDF-")
+    svgs = render_preview_svg_pages(doc)
+    assert len(svgs) >= 1
+
+    doc.template_id = "market_flash"
+    pdf_flash = render_pdf_bytes(doc)
+    assert pdf_flash.startswith(b"%PDF-")
+
+    # Word DOCX Export
+    docx_bytes = render_docx_bytes(doc)
+    assert docx_bytes.startswith(b"PK\x03\x04")
+
+    # 4 & 5. CSS 1/3 Breite & Auto-Typst-Toggle in UI
+    css_text = (ROOT / "www" / "css" / "editor.css").read_text(encoding="utf-8")
+    assert "33.333%" in css_text
+    assert ".richtext-editable a" in css_text
+    assert ".db-chart-palette-bar" in css_text
+    assert ".grid-col-width-input" in css_text
+
+    app_text = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert "toggle-auto-preview" in app_text
+    assert "lukb_auto_preview_toggle" in app_text
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -849,6 +953,7 @@ if __name__ == "__main__":
     test_publication_date_and_page_numbering()
     test_rbac_and_soft_delete()
     test_publications_block_layout_and_url()
+    test_table_column_widths_db_chart_palette_and_paragraph_links()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()

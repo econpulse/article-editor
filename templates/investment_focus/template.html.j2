@@ -226,6 +226,40 @@
       widows: 2;
     }
 
+    .blk-richtext a,
+    .blk-callout a {
+      color: var(--lukb-navy);
+      text-decoration: none !important;
+      transition: color 0.15s ease;
+    }
+
+    .blk-richtext a:hover,
+    .blk-richtext a:focus,
+    .blk-richtext a:visited,
+    .blk-callout a:hover,
+    .blk-callout a:focus,
+    .blk-callout a:visited {
+      text-decoration: none !important;
+    }
+
+    .blk-richtext a:hover,
+    .blk-callout a:hover {
+      color: var(--lukb-blue);
+    }
+
+    .blk-richtext a::after,
+    .blk-callout a::after {
+      content: "";
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      margin-left: 3px;
+      vertical-align: middle;
+      position: relative;
+      top: -1px;
+      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23005A9C' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3Cpolyline points='15 3 21 3 21 9'/%3E%3Cline x1='10' y1='14' x2='21' y2='3'/%3E%3C/svg%3E") no-repeat center / contain;
+    }
+
     .blk-richtext-textbox {
       background: #EBF3FA;
       border: 1px solid var(--lukb-navy);
@@ -559,8 +593,15 @@
 
     table.lukb-data-table {
       width: 100%;
+      table-layout: fixed;
       border-collapse: collapse;
       font-size: 0.86rem;
+    }
+
+    table.lukb-data-table th,
+    table.lukb-data-table td {
+      overflow-wrap: break-word;
+      word-wrap: break-word;
     }
 
     table.lukb-data-table thead th {
@@ -728,7 +769,19 @@
             {% if blk.subtitle %}
               <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
             {% endif %}
+            {% set col_ns = namespace(total=0.0) %}
+            {% for col in blk.columns %}
+              {% set cw = (col.width if col.width is defined and col.width else (1.4 if loop.first else 1.0)) | float %}
+              {% set col_ns.total = col_ns.total + (cw if cw > 0 else 1.0) %}
+            {% endfor %}
             <table class="lukb-data-table">
+              <colgroup>
+                {% for col in blk.columns %}
+                  {% set cw = (col.width if col.width is defined and col.width else (1.4 if loop.first else 1.0)) | float %}
+                  {% set pct = ((cw if cw > 0 else 1.0) / (col_ns.total if col_ns.total > 0 else 1.0)) * 100.0 %}
+                  <col style="width: {{ '%.2f'|format(pct) }}%;" />
+                {% endfor %}
+              </colgroup>
               <thead>
                 <tr>
                   {% for col in blk.columns %}

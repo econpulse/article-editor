@@ -20,6 +20,9 @@
     selectedBlockIds: new Set(),
     lastSelectedBlockId: null,
     previewMode: "pdf", // "pdf" (Typst SVG) | "web" (HTML5)
+    autoPreview: true, // Kontinuierliche Aktualisierung der Typst-Vorschau
+    previewPending: false,
+    lastKnownPageCount: 0,
     selfSessionId: "",
     peers: [], // Aktive Co-Autoren im selben Artikel
     currentFocusedTarget: "",
@@ -179,6 +182,7 @@
           base_article: state.baseArticle,
           create_revision: !!createRevision,
           revision_note: revisionNote || "",
+          auto_preview: state.autoPreview,
           ts: Date.now(),
         },
         { priority: "event" }
@@ -385,10 +389,11 @@
         chart_height_mm: 36,
         start_date: "2022-01-01",
         rebasing: "none",
+        palette: "lukb_classic",
         series: [
-          { ticker: "SNB_RATE", chart_type: "step", label: "" },
-          { ticker: "ECB_RATE", chart_type: "step", label: "" },
-          { ticker: "FED_RATE", chart_type: "step", label: "" },
+          { ticker: "SNB_RATE", chart_type: "line", chart_types: ["line"], label: "" },
+          { ticker: "ECB_RATE", chart_type: "line", chart_types: ["line"], label: "" },
+          { ticker: "FED_RATE", chart_type: "line", chart_types: ["line"], label: "" },
         ],
         asset_id: "",
       };
@@ -403,9 +408,9 @@
         layout: "column",
         highlight_last_row: false,
         columns: [
-          { field: "col_1", title: "Kennzahl / Sektor", align: "left" },
-          { field: "col_2", title: "Aktuell", align: "right" },
-          { field: "col_3", title: "Prognose 12M", align: "right" },
+          { field: "col_1", title: "Kennzahl / Sektor", align: "left", width: 1.4 },
+          { field: "col_2", title: "Aktuell", align: "right", width: 1.0 },
+          { field: "col_3", title: "Prognose 12M", align: "right", width: 1.0 },
         ],
         rows: [
           { col_1: "Position A", col_2: "10.0 %", col_3: "11.5 %" },
@@ -2601,6 +2606,183 @@
     popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left + window.scrollX)) + "px";
   }
 
+  function openLinkPopover(targetOrContext, editable, onChange) {
+    closeActivePopover();
+
+    const isExistingAnchor =
+      targetOrContext &&
+      targetOrContext.nodeType === 1 &&
+      targetOrContext.tagName === "A";
+    const anchorEl = isExistingAnchor ? targetOrContext : null;
+    const savedRange = !isExistingAnchor ? targetOrContext : null;
+
+    const popover = document.createElement("div");
+    popover.className = "lukb-term-popover";
+
+    const header = document.createElement("div");
+    header.className = "lukb-popover-header";
+    header.innerHTML = isExistingAnchor
+      ? "<span>🔗 Link bearbeiten</span>"
+      : "<span>🔗 Link einfügen</span>";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn-icon-only";
+    closeBtn.textContent = "✕";
+    closeBtn.style.padding = "0 4px";
+    closeBtn.addEventListener("click", closeActivePopover);
+    header.appendChild(closeBtn);
+    popover.appendChild(header);
+
+    const textLbl = document.createElement("label");
+    textLbl.className = "field-label";
+    textLbl.style.fontSize = "11px";
+    textLbl.style.marginBottom = "3px";
+    textLbl.textContent = "Angezeigter Link-Text:";
+    popover.appendChild(textLbl);
+
+    const textInp = document.createElement("input");
+    textInp.type = "text";
+    textInp.className = "cms-input font-medium";
+    textInp.style.marginBottom = "8px";
+    textInp.placeholder = "z.B. Publikation öffnen";
+    textInp.value = anchorEl
+      ? anchorEl.textContent.trim()
+      : (savedRange ? savedRange.toString().trim() : "");
+    popover.appendChild(textInp);
+
+    const urlLbl = document.createElement("label");
+    urlLbl.className = "field-label";
+    urlLbl.style.fontSize = "11px";
+    urlLbl.style.marginBottom = "3px";
+    urlLbl.textContent = "Ziel-URL (öffnet im neuen Tab):";
+    popover.appendChild(urlLbl);
+
+    const urlInp = document.createElement("input");
+    urlInp.type = "url";
+    urlInp.className = "cms-input";
+    urlInp.placeholder = "https://www.lukb.ch/...";
+    urlInp.value = anchorEl ? (anchorEl.getAttribute("href") || "") : "";
+    popover.appendChild(urlInp);
+
+    const actions = document.createElement("div");
+    actions.className = "lukb-popover-actions";
+
+    if (anchorEl) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn-lukb btn-lukb-outline-light btn-lukb-sm";
+      removeBtn.style.color = "#DC2626";
+      removeBtn.style.borderColor = "#FCA5A5";
+      removeBtn.textContent = "✕ Link entfernen";
+      removeBtn.title = "Entfernt den Link und behält den Text";
+      removeBtn.addEventListener("click", function () {
+        const textNode = document.createTextNode(anchorEl.textContent);
+        anchorEl.parentNode.replaceChild(textNode, anchorEl);
+        closeActivePopover();
+        onChange(editable.innerHTML);
+        markDirty();
+      });
+      actions.appendChild(removeBtn);
+    } else {
+      const spacer = document.createElement("span");
+      actions.appendChild(spacer);
+    }
+
+    const applyLink = function () {
+      let href = (urlInp.value || "").trim();
+      if (!href) {
+        urlInp.focus();
+        return;
+      }
+      if (!/^(https?:\/\/|mailto:)/i.test(href)) {
+        href = "https://" + href;
+      }
+      const linkText = (textInp.value || "").trim() || href;
+
+      if (anchorEl) {
+        anchorEl.setAttribute("href", href);
+        anchorEl.setAttribute("target", "_blank");
+        anchorEl.setAttribute("rel", "noopener noreferrer");
+        anchorEl.textContent = linkText;
+      } else {
+        const a = document.createElement("a");
+        a.setAttribute("href", href);
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+        a.textContent = linkText;
+
+        if (savedRange) {
+          savedRange.deleteContents();
+          savedRange.insertNode(a);
+          const spaceNode = document.createTextNode("\u00A0");
+          if (a.parentNode) {
+            a.parentNode.insertBefore(spaceNode, a.nextSibling);
+          }
+        } else {
+          editable.appendChild(a);
+        }
+      }
+      closeActivePopover();
+      onChange(editable.innerHTML);
+      markDirty();
+    };
+
+    urlInp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applyLink();
+      } else if (ev.key === "Escape") {
+        closeActivePopover();
+      }
+    });
+
+    textInp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        urlInp.focus();
+      } else if (ev.key === "Escape") {
+        closeActivePopover();
+      }
+    });
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn-lukb btn-lukb-primary btn-lukb-sm";
+    saveBtn.textContent = "Übernehmen";
+    saveBtn.addEventListener("click", applyLink);
+
+    actions.appendChild(saveBtn);
+    popover.appendChild(actions);
+
+    document.body.appendChild(popover);
+    activePopover = popover;
+    popover.addEventListener("mousedown", function (ev) {
+      ev.stopPropagation();
+    });
+
+    let rect = null;
+    if (anchorEl) {
+      rect = anchorEl.getBoundingClientRect();
+    } else if (savedRange && savedRange.getBoundingClientRect) {
+      const r = savedRange.getBoundingClientRect();
+      rect = r && (r.width > 0 || r.height > 0) ? r : editable.getBoundingClientRect();
+    } else {
+      rect = editable.getBoundingClientRect();
+    }
+    const clampedTop = Math.max(10, Math.min(window.innerHeight - 230, rect.bottom + 6));
+    popover.style.position = "fixed";
+    popover.style.top = clampedTop + "px";
+    popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left)) + "px";
+
+    setTimeout(function () {
+      if (textInp.value.trim()) {
+        urlInp.focus();
+      } else {
+        textInp.focus();
+      }
+    }, 10);
+  }
+
   function openFootnotePopover(targetEl, editable, onChange) {
     closeActivePopover();
 
@@ -2671,6 +2853,183 @@
     const rect = targetEl.getBoundingClientRect();
     popover.style.top = (rect.bottom + window.scrollY + 6) + "px";
     popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left + window.scrollX)) + "px";
+  }
+
+  function openLinkPopover(targetOrContext, editable, onChange) {
+    closeActivePopover();
+
+    const isExistingAnchor =
+      targetOrContext &&
+      targetOrContext.nodeType === 1 &&
+      targetOrContext.tagName === "A";
+    const anchorEl = isExistingAnchor ? targetOrContext : null;
+    const savedRange = !isExistingAnchor ? targetOrContext : null;
+
+    const popover = document.createElement("div");
+    popover.className = "lukb-term-popover";
+
+    const header = document.createElement("div");
+    header.className = "lukb-popover-header";
+    header.innerHTML = isExistingAnchor
+      ? "<span>🔗 Link bearbeiten</span>"
+      : "<span>🔗 Link einfügen</span>";
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "btn-icon-only";
+    closeBtn.textContent = "✕";
+    closeBtn.style.padding = "0 4px";
+    closeBtn.addEventListener("click", closeActivePopover);
+    header.appendChild(closeBtn);
+    popover.appendChild(header);
+
+    const textLbl = document.createElement("label");
+    textLbl.className = "field-label";
+    textLbl.style.fontSize = "11px";
+    textLbl.style.marginBottom = "3px";
+    textLbl.textContent = "Angezeigter Link-Text:";
+    popover.appendChild(textLbl);
+
+    const textInp = document.createElement("input");
+    textInp.type = "text";
+    textInp.className = "cms-input font-medium";
+    textInp.style.marginBottom = "8px";
+    textInp.placeholder = "z.B. Publikation öffnen";
+    textInp.value = anchorEl
+      ? anchorEl.textContent.trim()
+      : (savedRange ? savedRange.toString().trim() : "");
+    popover.appendChild(textInp);
+
+    const urlLbl = document.createElement("label");
+    urlLbl.className = "field-label";
+    urlLbl.style.fontSize = "11px";
+    urlLbl.style.marginBottom = "3px";
+    urlLbl.textContent = "Ziel-URL (öffnet im neuen Tab):";
+    popover.appendChild(urlLbl);
+
+    const urlInp = document.createElement("input");
+    urlInp.type = "url";
+    urlInp.className = "cms-input";
+    urlInp.placeholder = "https://www.lukb.ch/...";
+    urlInp.value = anchorEl ? (anchorEl.getAttribute("href") || "") : "";
+    popover.appendChild(urlInp);
+
+    const actions = document.createElement("div");
+    actions.className = "lukb-popover-actions";
+
+    if (anchorEl) {
+      const removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn-lukb btn-lukb-outline-light btn-lukb-sm";
+      removeBtn.style.color = "#DC2626";
+      removeBtn.style.borderColor = "#FCA5A5";
+      removeBtn.textContent = "✕ Link entfernen";
+      removeBtn.title = "Entfernt den Link und behält den Text";
+      removeBtn.addEventListener("click", function () {
+        const textNode = document.createTextNode(anchorEl.textContent);
+        anchorEl.parentNode.replaceChild(textNode, anchorEl);
+        closeActivePopover();
+        onChange(editable.innerHTML);
+        markDirty();
+      });
+      actions.appendChild(removeBtn);
+    } else {
+      const spacer = document.createElement("span");
+      actions.appendChild(spacer);
+    }
+
+    const applyLink = function () {
+      let href = (urlInp.value || "").trim();
+      if (!href) {
+        urlInp.focus();
+        return;
+      }
+      if (!/^(https?:\/\/|mailto:)/i.test(href)) {
+        href = "https://" + href;
+      }
+      const linkText = (textInp.value || "").trim() || href;
+
+      if (anchorEl) {
+        anchorEl.setAttribute("href", href);
+        anchorEl.setAttribute("target", "_blank");
+        anchorEl.setAttribute("rel", "noopener noreferrer");
+        anchorEl.textContent = linkText;
+      } else {
+        const a = document.createElement("a");
+        a.setAttribute("href", href);
+        a.setAttribute("target", "_blank");
+        a.setAttribute("rel", "noopener noreferrer");
+        a.textContent = linkText;
+
+        if (savedRange) {
+          savedRange.deleteContents();
+          savedRange.insertNode(a);
+          const spaceNode = document.createTextNode("\u00A0");
+          if (a.parentNode) {
+            a.parentNode.insertBefore(spaceNode, a.nextSibling);
+          }
+        } else {
+          editable.appendChild(a);
+        }
+      }
+      closeActivePopover();
+      onChange(editable.innerHTML);
+      markDirty();
+    };
+
+    urlInp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        applyLink();
+      } else if (ev.key === "Escape") {
+        closeActivePopover();
+      }
+    });
+
+    textInp.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        urlInp.focus();
+      } else if (ev.key === "Escape") {
+        closeActivePopover();
+      }
+    });
+
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "btn-lukb btn-lukb-primary btn-lukb-sm";
+    saveBtn.textContent = "Übernehmen";
+    saveBtn.addEventListener("click", applyLink);
+
+    actions.appendChild(saveBtn);
+    popover.appendChild(actions);
+
+    document.body.appendChild(popover);
+    activePopover = popover;
+    popover.addEventListener("mousedown", function (ev) {
+      ev.stopPropagation();
+    });
+
+    let rect = null;
+    if (anchorEl) {
+      rect = anchorEl.getBoundingClientRect();
+    } else if (savedRange && savedRange.getBoundingClientRect) {
+      const r = savedRange.getBoundingClientRect();
+      rect = r && (r.width > 0 || r.height > 0) ? r : editable.getBoundingClientRect();
+    } else {
+      rect = editable.getBoundingClientRect();
+    }
+    const clampedTop = Math.max(10, Math.min(window.innerHeight - 230, rect.bottom + 6));
+    popover.style.position = "fixed";
+    popover.style.top = clampedTop + "px";
+    popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left)) + "px";
+
+    setTimeout(function () {
+      if (textInp.value.trim()) {
+        urlInp.focus();
+      } else {
+        textInp.focus();
+      }
+    }, 10);
   }
 
   function createRichTextWidget(initialHtml, onChange, extraRightEl) {
@@ -2763,6 +3122,45 @@
     });
     btnGroup.appendChild(fnBtn);
 
+    // Externer Link Button (target="_blank", ohne Unterstreichung, mit Pfeilsymbol)
+    const linkBtn = document.createElement("button");
+    linkBtn.type = "button";
+    linkBtn.className = "rt-btn";
+    linkBtn.textContent = "🔗 Link";
+    linkBtn.title = "Link einfügen oder bearbeiten (öffnet im neuen Tab mit Pfeilsymbol, ohne Unterstreichung)";
+    linkBtn.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      const sel = window.getSelection();
+      let range = null;
+      let existingAnchor = null;
+      if (sel && sel.rangeCount > 0) {
+        const candidate = sel.getRangeAt(0);
+        if (editable.contains(candidate.commonAncestorContainer)) {
+          range = candidate.cloneRange();
+          const containerEl =
+            candidate.commonAncestorContainer.nodeType === 1
+              ? candidate.commonAncestorContainer
+              : candidate.commonAncestorContainer.parentElement;
+          if (containerEl) {
+            existingAnchor = containerEl.closest("a");
+          }
+        }
+      }
+      if (existingAnchor && editable.contains(existingAnchor)) {
+        openLinkPopover(existingAnchor, editable, onChange);
+      } else {
+        if (!range) {
+          range = document.createRange();
+          const lastP = editable.querySelector("p:last-of-type");
+          range.selectNodeContents(lastP || editable);
+          range.collapse(false);
+        }
+        openLinkPopover(range, editable, onChange);
+      }
+    });
+    btnGroup.appendChild(linkBtn);
+
     toolbar.appendChild(btnGroup);
     if (extraRightEl) {
       toolbar.appendChild(extraRightEl);
@@ -2774,6 +3172,13 @@
     });
 
     editable.addEventListener("click", function (e) {
+      const linkEl = e.target.closest("a");
+      if (linkEl && editable.contains(linkEl)) {
+        e.preventDefault();
+        e.stopPropagation();
+        openLinkPopover(linkEl, editable, onChange);
+        return;
+      }
       const termEl = e.target.closest(".glossary-term");
       if (termEl) {
         e.preventDefault();
@@ -3276,6 +3681,19 @@
 
   const LUKB_SERIES_COLORS = ["#002855", "#009FE3", "#C59B27", "#005A9C", "#6482A6"];
 
+  const DB_CHART_PALETTES = [
+    {
+      id: "lukb_classic",
+      label: "LUKB Standard",
+      colors: ["#002855", "#009FE3", "#C59B27", "#005A9C", "#6482A6"],
+    },
+    {
+      id: "lukb_blues",
+      label: "Blau-Abstufung",
+      colors: ["#002855", "#005A9C", "#009FE3", "#5BB8E8", "#9BD3F2"],
+    },
+  ];
+
   function indexTickerItems(items) {
     if (!Array.isArray(items)) return;
     items.forEach(function (t) {
@@ -3715,6 +4133,71 @@
     configGrid.appendChild(rebaseWrap);
     container.appendChild(configGrid);
 
+    // Zeile 3b: Farbpaletten-Steuerung (LUKB Standard vs. Blau-Abstufung)
+    if (blk.palette !== "lukb_classic" && blk.palette !== "lukb_blues") {
+      blk.palette = "lukb_classic";
+    }
+    delete blk.palette_colors;
+
+    const paletteBar = document.createElement("div");
+    paletteBar.className = "db-chart-palette-bar";
+
+    const paletteTop = document.createElement("div");
+    paletteTop.className = "db-chart-palette-top";
+
+    const paletteLbl = document.createElement("span");
+    paletteLbl.className = "field-label";
+    paletteLbl.style.margin = "0";
+    paletteLbl.textContent = "Farbpalette:";
+
+    const palettePresetsWrap = document.createElement("div");
+    palettePresetsWrap.className = "db-palette-presets";
+
+    function getActivePaletteColors() {
+      const presetObj =
+        DB_CHART_PALETTES.find(function (p) { return p.id === blk.palette; }) ||
+        DB_CHART_PALETTES[0];
+      return presetObj.colors;
+    }
+
+    function renderPaletteControls() {
+      palettePresetsWrap.innerHTML = "";
+      DB_CHART_PALETTES.forEach(function (preset) {
+        const pBtn = document.createElement("button");
+        pBtn.type = "button";
+        pBtn.className = "db-palette-preset-btn" + (blk.palette === preset.id ? " active" : "");
+        pBtn.title = "Farbpalette «" + preset.label + "» anwenden";
+
+        const swatches = document.createElement("span");
+        swatches.className = "db-palette-mini-swatches";
+        preset.colors.forEach(function (hex) {
+          const sw = document.createElement("span");
+          sw.className = "db-palette-mini-swatch";
+          sw.style.backgroundColor = hex;
+          swatches.appendChild(sw);
+        });
+
+        const lblSpan = document.createElement("span");
+        lblSpan.textContent = preset.label;
+
+        pBtn.appendChild(swatches);
+        pBtn.appendChild(lblSpan);
+        pBtn.addEventListener("click", function () {
+          blk.palette = preset.id;
+          renderPaletteControls();
+          renderSeriesRows();
+          requestDbChartPreview(blk, true);
+          markDirty();
+        });
+        palettePresetsWrap.appendChild(pBtn);
+      });
+    }
+
+    paletteTop.appendChild(paletteLbl);
+    paletteTop.appendChild(palettePresetsWrap);
+    paletteBar.appendChild(paletteTop);
+    container.appendChild(paletteBar);
+
     // Zeile 4: Zeitreihen-Builder (maximal 5 Ticker)
     const seriesSection = document.createElement("div");
     seriesSection.className = "db-chart-series-section";
@@ -3742,6 +4225,7 @@
     function renderSeriesRows() {
       seriesListEl.innerHTML = "";
       const count = blk.series.length;
+      const activeColors = getActivePaletteColors();
       seriesTitle.textContent =
         "Zeitreihen aus ts_db (" +
         count +
@@ -3753,14 +4237,15 @@
           sItem.chart_types = [sItem.chart_type || "line"];
         }
         sItem.chart_type = sItem.chart_types[0];
+        delete sItem.color;
 
         const row = document.createElement("div");
         row.className = "db-chart-series-row";
 
         const colorDot = document.createElement("span");
         colorDot.className = "db-series-color-dot";
-        colorDot.style.backgroundColor = LUKB_SERIES_COLORS[sIdx % LUKB_SERIES_COLORS.length];
-        colorDot.title = "Farbe der Zeitreihe " + (sIdx + 1);
+        colorDot.style.backgroundColor = activeColors[sIdx % activeColors.length];
+        colorDot.title = "Farbe der Zeitreihe " + (sIdx + 1) + " (aus gewählter Palette)";
 
         const tickerInp = document.createElement("input");
         tickerInp.type = "text";
@@ -3884,6 +4369,7 @@
       markDirty();
     });
 
+    renderPaletteControls();
     renderSeriesRows();
     container.appendChild(seriesSection);
 
@@ -4192,7 +4678,7 @@
       tbl.className = "cms-grid-editor";
 
       if (!Array.isArray(blk.columns) || blk.columns.length === 0) {
-        blk.columns = [{ field: "col_1", title: "Spalte 1", align: "left" }];
+        blk.columns = [{ field: "col_1", title: "Spalte 1", align: "left", width: 1.4 }];
       }
       if (!Array.isArray(blk.rows)) {
         blk.rows = [];
@@ -4201,8 +4687,26 @@
       // THEAD
       const thead = document.createElement("thead");
       const htr = document.createElement("tr");
+      const pctBadges = [];
+
+      function updateColumnWidthPercentages() {
+        const total = blk.columns.reduce(function (acc, c, idx) {
+          const w = parseFloat(c.width != null ? c.width : (idx === 0 ? 1.4 : 1.0));
+          return acc + (w > 0 ? w : 1.0);
+        }, 0) || 1.0;
+        blk.columns.forEach(function (c, idx) {
+          const w = parseFloat(c.width != null ? c.width : (idx === 0 ? 1.4 : 1.0));
+          const pct = Math.round(((w > 0 ? w : 1.0) / total) * 100);
+          if (pctBadges[idx]) {
+            pctBadges[idx].textContent = pct + "%";
+          }
+        });
+      }
 
       blk.columns.forEach(function (col, cIdx) {
+        if (col.width == null || isNaN(parseFloat(col.width)) || parseFloat(col.width) <= 0) {
+          col.width = cIdx === 0 && blk.columns.length > 1 ? 1.4 : 1.0;
+        }
         const th = document.createElement("th");
         const ctrl = document.createElement("div");
         ctrl.className = "grid-header-controls";
@@ -4248,9 +4752,49 @@
           ctrl.appendChild(delColBtn);
         }
 
+        const widthRow = document.createElement("div");
+        widthRow.className = "grid-header-width-row";
+        widthRow.title = "Relative Spaltenbreite (z.B. 1, 1.5, 2 oder Prozentanteile)";
+
+        const widthLbl = document.createElement("span");
+        widthLbl.textContent = "Breite:";
+
+        const widthInp = document.createElement("input");
+        widthInp.type = "number";
+        widthInp.className = "grid-col-width-input";
+        widthInp.min = "0.1";
+        widthInp.max = "1000";
+        widthInp.step = "0.1";
+        widthInp.value = col.width;
+        widthInp.addEventListener("input", function () {
+          const parsed = parseFloat(widthInp.value);
+          if (!isNaN(parsed) && parsed > 0) {
+            col.width = Math.max(0.1, Math.min(1000, Math.round(parsed * 100) / 100));
+            updateColumnWidthPercentages();
+            markDirty();
+          }
+        });
+        widthInp.addEventListener("blur", function () {
+          const parsed = parseFloat(widthInp.value);
+          if (isNaN(parsed) || parsed <= 0) {
+            widthInp.value = col.width || 1.0;
+          }
+        });
+
+        const pctSpan = document.createElement("span");
+        pctSpan.className = "grid-col-width-pct";
+        pctBadges[cIdx] = pctSpan;
+
+        widthRow.appendChild(widthLbl);
+        widthRow.appendChild(widthInp);
+        widthRow.appendChild(pctSpan);
+
         th.appendChild(ctrl);
+        th.appendChild(widthRow);
         htr.appendChild(th);
       });
+
+      updateColumnWidthPercentages();
 
       const actionTh = document.createElement("th");
       actionTh.style.width = "38px";
@@ -4306,6 +4850,7 @@
                     field: newField,
                     title: "Spalte " + (blk.columns.length + 1),
                     align: "right",
+                    width: 1.0,
                   });
                 }
                 const targetField = blk.columns[targetColIdx].field;
@@ -4359,6 +4904,7 @@
         field: newField,
         title: "Spalte " + (blk.columns.length + 1),
         align: "right",
+        width: 1.0,
       });
       blk.rows.forEach(function (r) {
         r[newField] = "";
@@ -4454,6 +5000,46 @@
         }
       });
     });
+
+    // Kontinuierliche Aktualisierung der Typst-Vorschau an-/ausschalten
+    const autoPreviewChk = document.getElementById("toggle-auto-preview");
+    try {
+      const savedPref = window.localStorage.getItem("lukb_auto_preview");
+      if (savedPref === "false") {
+        state.autoPreview = false;
+      }
+    } catch (e) {}
+
+    if (autoPreviewChk) {
+      autoPreviewChk.checked = state.autoPreview;
+      autoPreviewChk.addEventListener("change", function () {
+        state.autoPreview = !!autoPreviewChk.checked;
+        try {
+          window.localStorage.setItem("lukb_auto_preview", state.autoPreview ? "true" : "false");
+        } catch (e) {}
+
+        const pageBadge = document.getElementById("preview-page-count");
+        const refreshBtn = document.getElementById("btn_refresh_preview");
+        if (!state.autoPreview && pageBadge) {
+          pageBadge.textContent =
+            (state.lastKnownPageCount > 0 ? state.lastKnownPageCount + " S. · " : "") + "Auto-Typst aus";
+        } else if (state.autoPreview && refreshBtn) {
+          refreshBtn.classList.remove("has-pending-preview");
+        }
+
+        if (window.Shiny && window.Shiny.setInputValue) {
+          window.Shiny.setInputValue(
+            "lukb_auto_preview_toggle",
+            {
+              enabled: state.autoPreview,
+              refresh_now: state.autoPreview,
+              ts: Date.now(),
+            },
+            { priority: "event" }
+          );
+        }
+      });
+    }
   }
 
   // ==========================================================================
@@ -5440,6 +6026,7 @@
       const pdfContainer = document.getElementById("preview-container-pdf");
       const webIframe = document.getElementById("preview-iframe-web");
       const pageBadge = document.getElementById("preview-page-count");
+      const refreshBtn = document.getElementById("btn_refresh_preview");
 
       if (pdfContainer && Array.isArray(msg.svg_pages)) {
         pdfContainer.innerHTML = "";
@@ -5449,9 +6036,24 @@
           pageWrap.innerHTML = svgMarkup;
           pdfContainer.appendChild(pageWrap);
         });
+        state.lastKnownPageCount = msg.svg_pages.length;
+        state.previewPending = false;
+        if (refreshBtn) {
+          refreshBtn.classList.remove("has-pending-preview");
+        }
+        if (pageBadge) {
+          const baseLabel =
+            msg.svg_pages.length + (msg.svg_pages.length === 1 ? " PDF-Seite (Typst)" : " PDF-Seiten (Typst)");
+          pageBadge.textContent = state.autoPreview ? baseLabel : baseLabel + " · Pausiert";
+        }
+      } else if (msg.typst_skipped) {
+        state.previewPending = true;
+        if (refreshBtn) {
+          refreshBtn.classList.add("has-pending-preview");
+        }
         if (pageBadge) {
           pageBadge.textContent =
-            msg.svg_pages.length + (msg.svg_pages.length === 1 ? " PDF-Seite (Typst)" : " PDF-Seiten (Typst)");
+            (state.lastKnownPageCount > 0 ? state.lastKnownPageCount + " S. · " : "") + "Typst veraltet (↻)";
         }
       }
 
@@ -5459,6 +6061,14 @@
         webIframe.srcdoc = msg.web_html;
       }
     });
+
+    if (!state.autoPreview && window.Shiny.setInputValue) {
+      window.Shiny.setInputValue(
+        "lukb_auto_preview_toggle",
+        { enabled: false, refresh_now: false, ts: Date.now() },
+        { priority: "event" }
+      );
+    }
   }
 
   // ==========================================================================

@@ -69,10 +69,13 @@ class _HtmlToTypstParser(HTMLParser):
             for k, v in attrs:
                 if k.lower() == "href" and v:
                     href = v.strip()
-            self.link_href_stack.append(href)
-            if href and (href.startswith("http://") or href.startswith("https://") or href.startswith("mailto:")):
+            is_valid_link = bool(
+                href and (href.startswith("http://") or href.startswith("https://") or href.startswith("mailto:"))
+            )
+            self.link_href_stack.append(href if is_valid_link else "")
+            if is_valid_link:
                 safe_url = href.replace("\\", "\\\\").replace('"', '\\"')
-                self.parts.append(f'#link("{safe_url}")[')
+                self.parts.append(f'#link("{safe_url}")[#text(fill: rgb("#002855"))[')
             else:
                 self.parts.append("[")
         elif t == "span":
@@ -93,9 +96,11 @@ class _HtmlToTypstParser(HTMLParser):
         if t in ("b", "strong", "i", "em", "u", "sub", "sup"):
             self.parts.append("]")
         elif t == "a":
-            if self.link_href_stack:
-                self.link_href_stack.pop()
-            self.parts.append("]")
+            href = self.link_href_stack.pop() if self.link_href_stack else ""
+            if href:
+                self.parts.append('#h(0.18em)#box(baseline: -0.05em)[#text(size: 0.8em, fill: rgb("#005A9C"))[#sym.arrow.tr]]]]')
+            else:
+                self.parts.append("]")
         elif t == "span":
             if self.tooltip_stack:
                 tip = self.tooltip_stack.pop()

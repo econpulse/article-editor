@@ -382,6 +382,27 @@ def render_preview_svg_pages(doc: ArticleDocument) -> list[str]:
         return [p.decode("utf-8") for p in pages_bytes]
 
 
+_ANCHOR_TAG_RE = re.compile(r"<a\b([^>]*)>", re.IGNORECASE)
+
+
+def _normalize_inline_links_html(html_str: str) -> str:
+    """Stellt sicher, dass alle <a>-Links in Textabsätzen target='_blank' und rel='noopener noreferrer' tragen."""
+    if not html_str or "<a" not in html_str.lower():
+        return html_str
+
+    def _repl(match: re.Match[str]) -> str:
+        attrs = match.group(1) or ""
+        if not re.search(r"\btarget\s*=", attrs, re.IGNORECASE):
+            attrs += ' target="_blank"'
+        else:
+            attrs = re.sub(r'\btarget\s*=\s*(["\']).*?\1', 'target="_blank"', attrs, flags=re.IGNORECASE)
+        if not re.search(r"\brel\s*=", attrs, re.IGNORECASE):
+            attrs += ' rel="noopener noreferrer"'
+        return f"<a{attrs}>"
+
+    return _ANCHOR_TAG_RE.sub(_repl, html_str)
+
+
 def render_web_html(doc: ArticleDocument) -> str:
     """
     Rendert ein ArticleDocument als eigenständiges, responsives HTML5-Dokument
@@ -394,7 +415,9 @@ def render_web_html(doc: ArticleDocument) -> str:
     payload["metadata"]["publication_date_formatted"] = formatted_date
     payload["metadata"]["publication_date"] = formatted_date or raw_date
     for blk in payload.get("blocks", []):
-        if blk.get("type") == "figure":
+        if blk.get("type") in ("richtext", "callout"):
+            blk["html"] = _normalize_inline_links_html(blk.get("html", ""))
+        elif blk.get("type") == "figure":
             asset_id = blk.get("asset_id", "")
             data_uri = ""
             if asset_id:
@@ -482,6 +505,7 @@ class _DocxHtmlRunParser(HTMLParser):
         self.is_bold = False
         self.is_italic = False
         self.is_underline = False
+        self.link_stack: list[str] = []
         self.tooltip_stack: list[str | None] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -494,6 +518,12 @@ class _DocxHtmlRunParser(HTMLParser):
             self.is_underline = True
         elif t == "br":
             self.paragraph.add_run().add_break()
+        elif t == "a":
+            href = ""
+            for k, v in attrs:
+                if k.lower() == "href" and v:
+                    href = v.strip()
+            self.link_stack.append(href)
         elif t == "span":
             tip = ""
             for k, v in attrs:
@@ -513,6 +543,12 @@ class _DocxHtmlRunParser(HTMLParser):
             self.is_italic = False
         elif t == "u":
             self.is_underline = False
+        elif t == "a":
+            href = self.link_stack.pop() if self.link_stack else ""
+            if href:
+                r = self.paragraph.add_run(" ↗")
+                r.font.size = Pt(8.5)
+                r.font.color.rgb = RGBColor(0x00, 0x5A, 0x9C)
         elif t == "span":
             if self.tooltip_stack:
                 tip = self.tooltip_stack.pop()
@@ -528,6 +564,8 @@ class _DocxHtmlRunParser(HTMLParser):
         run.bold = self.is_bold
         run.italic = self.is_italic
         run.underline = self.is_underline
+        if self.link_stack and self.link_stack[-1]:
+            run.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
 
 
 def _add_html_runs_to_paragraph(paragraph, html_fragment: str) -> None:
@@ -805,9 +843,24 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             if cols:
                 t = container.add_table(rows=len(rows) + 1, cols=len(cols))
                 t.alignment = WD_TABLE_ALIGNMENT.CENTER
+                t.autofit = False
+
+                weights: list[float] = []
+                for c_idx, col in enumerate(cols):
+                    try:
+                        w = float(col.get("width") or (1.4 if c_idx == 0 else 1.0))
+                    except (TypeError, ValueError):
+                        w = 1.0
+                    weights.append(w if w > 0 else 1.0)
+                total_weight = sum(weights) or 1.0
+                total_table_inches = 6.5
+
                 hdr_cells = t.rows[0].cells
                 for c_idx, col in enumerate(cols):
+                    col_w = Inches(total_table_inches * (weights[c_idx] / total_weight))
+                    t.columns[c_idx].width = col_w
                     cell = hdr_cells[c_idx]
+                    cell.width = col_w
                     _set_docx_cell_background(cell, "002855")
                     _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
                     p = cell.paragraphs[0]
@@ -822,7 +875,9 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                     row_cells = t.rows[r_idx + 1].cells
                     bg_hex = "E6EEF7" if is_total else ("F4F7FA" if r_idx % 2 == 1 else "FFFFFF")
                     for c_idx, col in enumerate(cols):
+                        col_w = Inches(total_table_inches * (weights[c_idx] / total_weight))
                         cell = row_cells[c_idx]
+                        cell.width = col_w
                         _set_docx_cell_background(cell, bg_hex)
                         _set_docx_cell_margins(cell, top=90, bottom=90, left=150, right=150)
                         p = cell.paragraphs[0]

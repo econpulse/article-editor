@@ -5,6 +5,7 @@ Validiert und normalisiert Artikel-Metadaten sowie alle Drag-and-Drop Content-Bl
 
 from __future__ import annotations
 
+import math
 import uuid
 from datetime import date
 from typing import Any, Literal, Union
@@ -162,11 +163,15 @@ class DbChartBlock(BaseModel):
         default="none",
         description="'none' = Originalwerte, 'index_100' = Indexiert auf 100 am Startdatum",
     )
+    palette: Literal["lukb_classic", "lukb_blues"] = Field(
+        default="lukb_classic",
+        description="ID der gewählten Farbpalette ('lukb_classic' oder 'lukb_blues')",
+    )
     series: list[TimeSeriesItem] = Field(
         default_factory=lambda: [
-            TimeSeriesItem(ticker="SNB_RATE", chart_type="step", label=""),
-            TimeSeriesItem(ticker="ECB_RATE", chart_type="step", label=""),
-            TimeSeriesItem(ticker="FED_RATE", chart_type="step", label=""),
+            TimeSeriesItem(ticker="SNB_RATE", chart_type="line", label=""),
+            TimeSeriesItem(ticker="ECB_RATE", chart_type="line", label=""),
+            TimeSeriesItem(ticker="FED_RATE", chart_type="line", label=""),
         ],
         description="Bis zu 5 Zeitreihen aus ts_db",
     )
@@ -184,6 +189,12 @@ class DbChartBlock(BaseModel):
             val = int(round(val / 2.0) * 2)
         return val
 
+    @field_validator("palette", mode="before")
+    @classmethod
+    def validate_palette(cls, v: Any) -> str:
+        s = str(v or "lukb_classic").strip()
+        return s if s in ("lukb_classic", "lukb_blues") else "lukb_classic"
+
     @field_validator("series", mode="before")
     @classmethod
     def validate_series_seq(cls, v: Any) -> list[Any]:
@@ -196,6 +207,20 @@ class TableColumn(BaseModel):
     field: str
     title: str
     align: Literal["left", "center", "right"] = "left"
+    width: float = Field(default=1.0, ge=0.1, le=1000.0, description="Relative Spaltenbreite")
+
+    @field_validator("width", mode="before")
+    @classmethod
+    def validate_width(cls, v: Any) -> float:
+        if v is None or v == "":
+            return 1.0
+        try:
+            val = float(v)
+        except (TypeError, ValueError):
+            return 1.0
+        if math.isnan(val) or math.isinf(val) or val <= 0:
+            return 1.0
+        return max(0.1, min(1000.0, round(val, 2)))
 
 
 class TableBlock(BaseModel):
@@ -208,9 +233,9 @@ class TableBlock(BaseModel):
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
     columns: list[TableColumn] = Field(
         default_factory=lambda: [
-            TableColumn(field="col_1", title="Anlageklasse", align="left"),
-            TableColumn(field="col_2", title="Aktuell", align="right"),
-            TableColumn(field="col_3", title="Veränderung", align="right"),
+            TableColumn(field="col_1", title="Anlageklasse", align="left", width=1.4),
+            TableColumn(field="col_2", title="Aktuell", align="right", width=1.0),
+            TableColumn(field="col_3", title="Veränderung", align="right", width=1.0),
         ]
     )
     rows: list[dict[str, str]] = Field(
@@ -220,6 +245,28 @@ class TableBlock(BaseModel):
             {"col_1": "Aktien Schweiz", "col_2": "22.0 %", "col_3": "+1.5 %"},
         ]
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_legacy_first_col_width(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        raw_cols = data.get("columns")
+        if isinstance(raw_cols, (list, tuple)) and len(raw_cols) > 1:
+            has_any_width = any(isinstance(c, dict) and c.get("width") is not None for c in raw_cols)
+            if not has_any_width:
+                out = dict(data)
+                new_cols = []
+                for idx, c in enumerate(raw_cols):
+                    if isinstance(c, dict):
+                        c_copy = dict(c)
+                        c_copy["width"] = 1.4 if idx == 0 else 1.0
+                        new_cols.append(c_copy)
+                    else:
+                        new_cols.append(c)
+                out["columns"] = new_cols
+                return out
+        return data
 
     @field_validator("columns", "rows", mode="before")
     @classmethod

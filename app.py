@@ -614,14 +614,27 @@ app_ui = ui.page_fluid(
                     ui.span(
                         "Typst 0.15",
                         id="preview-page-count",
-                        style="font-size:12px;color:#5A687C;margin-right:8px;",
+                        style="font-size:11.5px;color:#5A687C;",
+                    ),
+                    ui.tags.label(
+                        ui.tags.input(
+                            id="toggle-auto-preview",
+                            type="checkbox",
+                            checked=True,
+                            class_="auto-preview-checkbox",
+                        ),
+                        ui.span(class_="auto-preview-slider"),
+                        ui.span("Auto-Typst", class_="auto-preview-label"),
+                        class_="auto-preview-toggle",
+                        title="Kontinuierliche Aktualisierung der Typst-Vorschau beim Bearbeiten ein- oder ausschalten",
                     ),
                     ui.input_action_button(
                         "btn_refresh_preview",
-                        "↻ Vorschau aktualisieren",
+                        "↻ Aktualisieren",
                         class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        title="Typst- & Web-Vorschau sofort manuell aktualisieren",
                     ),
-                    style="display:flex;align-items:center;",
+                    class_="preview-toolbar-right",
                 ),
                 class_="preview-toolbar",
             ),
@@ -883,6 +896,7 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         "color": peer_color,
         "article_id": "",
         "focused_target": "",
+        "auto_preview": True,
         "sync_doc_cb": _update_local_doc_from_peer,
     }
 
@@ -928,18 +942,20 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             },
         )
 
-    async def _send_preview(doc: ArticleDocument) -> None:
-        try:
-            svg_pages = render_preview_svg_pages(doc)
-        except Exception as exc:
-            logger.exception("Typst Preview-Fehler")
-            err_svg = (
-                f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200">'
-                f'<rect width="600" height="200" fill="#FEF2F2"/>'
-                f'<text x="24" y="50" fill="#B91C1C" font-size="14">'
-                f"Typst Vorschau-Hinweis: {str(exc)[:90]}</text></svg>"
-            )
-            svg_pages = [err_svg]
+    async def _send_preview(doc: ArticleDocument, include_typst: bool = True) -> None:
+        svg_pages: list[str] | None = None
+        if include_typst:
+            try:
+                svg_pages = render_preview_svg_pages(doc)
+            except Exception as exc:
+                logger.exception("Typst Preview-Fehler")
+                err_svg = (
+                    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200">'
+                    f'<rect width="600" height="200" fill="#FEF2F2"/>'
+                    f'<text x="24" y="50" fill="#B91C1C" font-size="14">'
+                    f"Typst Vorschau-Hinweis: {str(exc)[:90]}</text></svg>"
+                )
+                svg_pages = [err_svg]
 
         try:
             web_html = render_web_html(doc)
@@ -949,7 +965,11 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
 
         await session.send_custom_message(
             "lukb_update_preview",
-            {"svg_pages": svg_pages, "web_html": web_html},
+            {
+                "svg_pages": svg_pages,
+                "web_html": web_html,
+                "typst_skipped": not include_typst,
+            },
         )
 
     async def _load_and_broadcast_article(article_id: str) -> None:
@@ -1032,7 +1052,8 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
         )
         doc = current_doc.get()
         if doc is not None:
-            await _send_preview(doc)
+            auto_preview = bool(_ACTIVE_PEERS.get(session_id, {}).get("auto_preview", True))
+            await _send_preview(doc, include_typst=auto_preview)
 
     # Einzelne DB-Chart-Vorschau im Block sofort aktualisieren
     @reactive.effect
@@ -1122,7 +1143,11 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
             save_info["assets"] = _collect_article_assets_map(merged_doc)
             await session.send_custom_message("lukb_autosave_ack", save_info)
             await _send_article_list(merged_doc.id)
-            await _send_preview(merged_doc)
+
+            auto_preview = bool(payload.get("auto_preview", _ACTIVE_PEERS.get(session_id, {}).get("auto_preview", True)))
+            if session_id in _ACTIVE_PEERS:
+                _ACTIVE_PEERS[session_id]["auto_preview"] = auto_preview
+            await _send_preview(merged_doc, include_typst=auto_preview)
 
             # Synchronisiere alle Co-Autoren (und bei erfolgtem DB-Merge auch den Sender selbst)
             await _broadcast_article_sync(
@@ -1138,11 +1163,16 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                     peer_sess: Session | None = info.get("session")
                     if peer_sess is not None:
                         try:
-                            svg_pages = render_preview_svg_pages(merged_doc)
+                            peer_auto = bool(info.get("auto_preview", True))
+                            svg_pages = render_preview_svg_pages(merged_doc) if peer_auto else None
                             web_html = render_web_html(merged_doc)
                             await peer_sess.send_custom_message(
                                 "lukb_update_preview",
-                                {"svg_pages": svg_pages, "web_html": web_html},
+                                {
+                                    "svg_pages": svg_pages,
+                                    "web_html": web_html,
+                                    "typst_skipped": not peer_auto,
+                                },
                             )
                         except Exception:
                             pass
@@ -1332,13 +1362,28 @@ def server(input: Inputs, output: Outputs, session: Session) -> None:
                 await _send_article_list(current_article_id.get())
             ui.notification_show("Publikation wurde in das Archiv verschoben (Soft-Delete).", type="message", duration=3)
 
+    # Umschalten der kontinuierlichen Typst-Vorschau
+    @reactive.effect
+    @reactive.event(input.lukb_auto_preview_toggle)
+    async def _on_auto_preview_toggle() -> None:
+        payload = input.lukb_auto_preview_toggle()
+        if not isinstance(payload, dict):
+            return
+        enabled = bool(payload.get("enabled", True))
+        if session_id in _ACTIVE_PEERS:
+            _ACTIVE_PEERS[session_id]["auto_preview"] = enabled
+        if enabled and payload.get("refresh_now"):
+            doc = current_doc.get()
+            if doc is not None:
+                await _send_preview(doc, include_typst=True)
+
     # Manueller Preview-Refresh
     @reactive.effect
     @reactive.event(input.btn_refresh_preview)
     async def _on_refresh_preview() -> None:
         doc = current_doc.get()
         if doc is not None:
-            await _send_preview(doc)
+            await _send_preview(doc, include_typst=True)
 
     # ------------------------------------------------------------------------
     # Freigabe-Workflow: Zur Prüfung einreichen (Autor -> Review)

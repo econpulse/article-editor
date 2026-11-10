@@ -31,6 +31,24 @@ LUKB_CHART_PALETTE: list[str] = [
     "#6482A6",  # 5. LUKB Slate
 ]
 
+CHART_PALETTES: dict[str, dict[str, Any]] = {
+    "lukb_classic": {
+        "label": "LUKB Standard",
+        "colors": list(LUKB_CHART_PALETTE),
+    },
+    "lukb_blues": {
+        "label": "Blau-Abstufung",
+        "colors": ["#002855", "#005A9C", "#009FE3", "#5BB8E8", "#9BD3F2"],
+    },
+}
+
+
+def resolve_chart_palette(block_data: dict[str, Any]) -> list[str]:
+    """Löst die effektive 5-Farben-Palette eines DB-Chart-Blocks auf."""
+    palette_id = str(block_data.get("palette") or "lukb_classic").strip()
+    preset = CHART_PALETTES.get(palette_id, CHART_PALETTES["lukb_classic"])
+    return list(preset["colors"])
+
 VALID_CHART_TYPES = ("line", "step", "dot", "area", "bar", "stacked_bar")
 
 FONT_BODY = "Yoga Sans for LUKB Light, Calibri, Arial, sans-serif"
@@ -171,8 +189,10 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
     layout_mode = str(block_data.get("layout") or "column").strip()
     is_column_layout = layout_mode != "full"
 
+    active_palette = resolve_chart_palette(block_data)
+
     configured_items: list[dict[str, Any]] = []
-    for item in list(raw_series)[:5]:
+    for raw_idx, item in enumerate(list(raw_series)[:5]):
         if isinstance(item, dict):
             t_str = str(item.get("ticker") or "").strip()
             lbl = str(item.get("label") or "").strip()
@@ -187,6 +207,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
                     "chart_types": ctypes,
                     "chart_type": ctypes[0],
                     "label": lbl,
+                    "color": active_palette[raw_idx % len(active_palette)],
                 }
             )
 
@@ -200,7 +221,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
     db_data = query_timeseries_data(requested_tickers, start_date=start_date_str)
 
     resolved_series: list[dict[str, Any]] = []
-    for idx, it in enumerate(configured_items):
+    for it in configured_items:
         req_t = it["ticker"]
         entry = db_data.get(req_t) or db_data.get(req_t.upper())
         if not entry or not entry.get("points"):
@@ -213,7 +234,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
                 pts = [(d, (v / base_val) * 100.0) for d, v in pts]
 
         display_label = it["label"] if it["label"] else (entry.get("name") or entry.get("ticker") or req_t)
-        color = LUKB_CHART_PALETTE[idx % len(LUKB_CHART_PALETTE)]
+        color = it["color"]
         ctypes_set = set(it["chart_types"])
         resolved_series.append(
             {

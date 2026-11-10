@@ -249,8 +249,10 @@
     else { left + horizon }
   })
 
-  let col-widths = cols.enumerate().map(((idx, _)) => {
-    if idx == 0 { 1.4fr } else { 1fr }
+  let col-widths = cols.enumerate().map(((idx, c)) => {
+    let raw-w = float(c.at("width", default: if idx == 0 { 1.4 } else { 1.0 }))
+    let safe-w = if raw-w > 0 { raw-w } else { 1.0 }
+    safe-w * 1fr
   })
 
   let tbl-box = block(
