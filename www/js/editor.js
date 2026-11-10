@@ -376,6 +376,7 @@
         source: "Quelle: Bloomberg, LUKB Investment Office",
         asset_id: "",
         layout: "column",
+        full_position: "auto",
       };
     }
     if (type === "db_chart") {
@@ -386,6 +387,7 @@
         subtitle: "Entwicklung seit Startdatum",
         source: "Quelle: Bloomberg, LUKB Investment Office",
         layout: "column",
+        full_position: "auto",
         chart_height_mm: 36,
         start_date: "2022-01-01",
         rebasing: "none",
@@ -406,6 +408,7 @@
         subtitle: "Untertitel / Einheit",
         source: "Quelle: LUKB Investment Office",
         layout: "column",
+        full_position: "auto",
         highlight_last_row: false,
         columns: [
           { field: "col_1", title: "Kennzahl / Sektor", align: "left", width: 33.4 },
@@ -3261,6 +3264,76 @@
     }
   });
 
+  function createFullLayoutControl(blk, onChanged) {
+    if (!blk.full_position) {
+      blk.full_position = "auto";
+    }
+    const layoutWrap = document.createElement("div");
+    const layoutLbl = document.createElement("label");
+    layoutLbl.className = "field-label";
+    layoutLbl.textContent = "Satz-Breite im PDF";
+
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+
+    const posWrap = document.createElement("div");
+    posWrap.style.marginTop = "6px";
+    posWrap.style.display = (blk.layout || "column") === "full" ? "block" : "none";
+
+    const posLbl = document.createElement("label");
+    posLbl.className = "field-label";
+    posLbl.style.fontSize = "11px";
+    posLbl.textContent = "Position (2-spaltig)";
+
+    const posSel = document.createElement("select");
+    posSel.className = "cms-select";
+    posSel.style.fontSize = "12px";
+    posSel.style.padding = "4px 7px";
+    [
+      { val: "auto", label: "Auto (S.1 unten / S.2+ oben)" },
+      { val: "bottom", label: "Seitenende (Unten)" },
+      { val: "top", label: "Seitenanfang (Oben)" },
+      { val: "inline", label: "Im Textfluss (Inline)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.full_position || "auto") === o.val) opt.selected = true;
+      posSel.appendChild(opt);
+    });
+
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      posWrap.style.display = blk.layout === "full" ? "block" : "none";
+      if (onChanged) onChanged();
+      markDirty();
+    });
+
+    posSel.addEventListener("change", function () {
+      blk.full_position = posSel.value;
+      if (onChanged) onChanged();
+      markDirty();
+    });
+
+    posWrap.appendChild(posLbl);
+    posWrap.appendChild(posSel);
+
+    layoutWrap.appendChild(layoutLbl);
+    layoutWrap.appendChild(layoutSel);
+    layoutWrap.appendChild(posWrap);
+    return layoutWrap;
+  }
+
   function buildFigureBlockBody(container, blk) {
     // Zeile 1: Grafik-Titel & Layout-Breite
     const topGrid = document.createElement("div");
@@ -3285,29 +3358,9 @@
     titleWrap.appendChild(titleLbl);
     titleWrap.appendChild(titleInp);
 
-    const layoutWrap = document.createElement("div");
-    const layoutLbl = document.createElement("label");
-    layoutLbl.className = "field-label";
-    layoutLbl.textContent = "Satz-Breite im PDF";
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
+    const layoutWrap = createFullLayoutControl(blk, function () {
       requestDbChartPreview(blk, true);
-      markDirty();
     });
-    layoutWrap.appendChild(layoutLbl);
-    layoutWrap.appendChild(layoutSel);
 
     topGrid.appendChild(titleWrap);
     topGrid.appendChild(layoutWrap);
@@ -4008,29 +4061,9 @@
     titleWrap.appendChild(titleLbl);
     titleWrap.appendChild(titleInp);
 
-    const layoutWrap = document.createElement("div");
-    const layoutLbl = document.createElement("label");
-    layoutLbl.className = "field-label";
-    layoutLbl.textContent = "Satz-Breite im PDF";
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
+    const layoutWrap = createFullLayoutControl(blk, function () {
       requestDbChartPreview(blk, true);
-      markDirty();
     });
-    layoutWrap.appendChild(layoutLbl);
-    layoutWrap.appendChild(layoutSel);
 
     topGrid.appendChild(titleWrap);
     topGrid.appendChild(layoutWrap);
@@ -4567,29 +4600,9 @@
     titleWrap.appendChild(titleLbl);
     titleWrap.appendChild(titleInp);
 
-    const layoutWrap = document.createElement("div");
-    const layoutLbl = document.createElement("label");
-    layoutLbl.className = "field-label";
-    layoutLbl.textContent = "Satz-Breite im PDF";
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
+    const layoutWrap = createFullLayoutControl(blk, function () {
       requestDbChartPreview(blk, true);
-      markDirty();
     });
-    layoutWrap.appendChild(layoutLbl);
-    layoutWrap.appendChild(layoutSel);
 
     topGrid.appendChild(titleWrap);
     topGrid.appendChild(layoutWrap);

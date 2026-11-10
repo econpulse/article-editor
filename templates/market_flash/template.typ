@@ -282,14 +282,29 @@
   ]
 }
 
+#let place-full-float(blk, box-el) = {
+  let pos-mode = blk.at("full_position", default: "auto")
+  if pos-mode == "top" {
+    place(top, scope: "parent", float: true, clearance: 14pt, box-el)
+  } else if pos-mode == "bottom" {
+    place(bottom, scope: "parent", float: true, clearance: 14pt, box-el)
+  } else {
+    context {
+      let auto-pos = if here().page() == 1 { bottom } else { top }
+      place(auto-pos, scope: "parent", float: true, clearance: 14pt, box-el)
+    }
+  }
+}
+
 #let render-figure-box(blk) = {
+  let is-floating = (blk.at("layout", default: "column") == "full") and not blk.at("_inline_full", default: false)
   let fig-box = block(
     width: 100%,
     breakable: false,
     stroke: (top: 1.5pt + lukb-navy, bottom: 0.6pt + lukb-border),
     inset: (top: 7pt, bottom: 6pt),
-    above: 2.0em,
-    below: 1.1em
+    above: if is-floating { 0pt } else { 2.0em },
+    below: if is-floating { 0pt } else { 1.1em }
   )[
     #if blk.title != "" [
       #block(above: 0pt, below: if blk.subtitle != "" { 5.5pt } else { 6pt })[
@@ -325,13 +340,8 @@
     ]
   ]
 
-  if blk.layout == "full" and not blk.at("_inline_full", default: false) {
-    place(
-      bottom,
-      scope: "parent",
-      float: true,
-      fig-box
-    )
+  if is-floating {
+    place-full-float(blk, fig-box)
   } else {
     fig-box
   }
@@ -354,13 +364,14 @@
     safe-w * 1fr
   })
 
-  let can-break = not (blk.layout == "full" and not blk.at("_inline_full", default: false))
+  let is-floating = (blk.at("layout", default: "column") == "full") and not blk.at("_inline_full", default: false)
+  let can-break = not is-floating
 
   let tbl-box = block(
     width: 100%,
     breakable: can-break,
-    above: 1.1em,
-    below: 1.1em
+    above: if is-floating { 0pt } else { 1.1em },
+    below: if is-floating { 0pt } else { 1.1em }
   )[
     #block(
       width: 100%,
@@ -431,13 +442,8 @@
     ]
   ]
 
-  if blk.layout == "full" and not blk.at("_inline_full", default: false) {
-    place(
-      bottom,
-      scope: "parent",
-      float: true,
-      tbl-box
-    )
+  if is-floating {
+    place-full-float(blk, tbl-box)
   } else {
     tbl-box
   }
@@ -715,8 +721,15 @@
     let bottom-margin = 2.4cm
     let avail-h = page-h - start-pos.y - bottom-margin
 
+    let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "full"))
     let manual-colbreak-idx = items.position(it => it.type == "colbreak")
-    if manual-colbreak-idx != none and avail-h > 100pt {
+    if has-full-float {
+      columns(2, gutter: gutter)[
+        #for it in items [
+          #render-single-block(it, in-box: false)
+        ]
+      ]
+    } else if manual-colbreak-idx != none and avail-h > 100pt {
       let left-items = items.slice(0, manual-colbreak-idx)
       let right-items = items.slice(manual-colbreak-idx + 1)
       let left-h = measure(block(width: col-w, for it in left-items [ #render-single-block(it, in-box: false) ])).height
@@ -813,12 +826,28 @@
   })
 }
 
-#{
+#layout(bounds => {
+  let max-float-h = 520pt
   let runs = ()
   let curr-cols = ()
   for blk in blocks {
-    let is-full = (blk.type in ("figure", "db_chart", "table")) and (blk.at("layout", default: "column") == "full")
-    if is-full {
+    let is-full-block = (blk.type in ("figure", "db_chart", "table")) and (blk.at("layout", default: "column") == "full")
+    let is-inline-full = false
+    if is-full-block {
+      let pos-mode = blk.at("full_position", default: "auto")
+      if pos-mode == "inline" {
+        is-inline-full = true
+      } else if blk.type == "table" {
+        let b-probe = blk
+        b-probe.insert("_inline_full", true)
+        let measured-h = measure(block(width: bounds.width, render-table-box(b-probe))).height
+        if measured-h > max-float-h {
+          is-inline-full = true
+        }
+      }
+    }
+
+    if is-inline-full {
       if curr-cols.len() > 0 {
         runs.push((kind: "cols", items: curr-cols))
         curr-cols = ()
@@ -839,4 +868,4 @@
       render-balanced-col-run(run.items, gutter: 16pt)
     }
   }
-}
+})

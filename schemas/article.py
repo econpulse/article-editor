@@ -91,6 +91,14 @@ class BoxEndBlock(BaseModel):
     type: Literal["box_end"] = "box_end"
 
 
+FullPositionMode = Literal["auto", "top", "bottom", "inline"]
+
+
+def _normalize_full_position(v: Any) -> str:
+    s = str(v or "auto").strip().lower()
+    return s if s in ("auto", "top", "bottom", "inline") else "auto"
+
+
 class FigureBlock(BaseModel):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["figure"] = "figure"
@@ -102,6 +110,19 @@ class FigureBlock(BaseModel):
         default="column",
         description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
     )
+    full_position: FullPositionMode = Field(
+        default="auto",
+        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
+    )
+    full_position: FullPositionMode = Field(
+        default="auto",
+        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
+    )
+
+    @field_validator("full_position", mode="before")
+    @classmethod
+    def validate_figure_full_pos(cls, v: Any) -> str:
+        return _normalize_full_position(v)
 
 
 ChartSeriesType = Literal["line", "step", "dot", "area", "bar", "stacked_bar"]
@@ -154,6 +175,10 @@ class DbChartBlock(BaseModel):
         default="column",
         description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
     )
+    full_position: FullPositionMode = Field(
+        default="auto",
+        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
+    )
     chart_height_mm: int = Field(
         default=36,
         description="Höhe der eigentlichen Chartfläche (Y-Achsenbereich) in Millimeter (2mm-Schritte, Default: 36mm)",
@@ -176,6 +201,11 @@ class DbChartBlock(BaseModel):
         description="Bis zu 5 Zeitreihen aus ts_db",
     )
     asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
+
+    @field_validator("full_position", mode="before")
+    @classmethod
+    def validate_chart_full_pos(cls, v: Any) -> str:
+        return _normalize_full_position(v)
 
     @field_validator("chart_height_mm", mode="before")
     @classmethod
@@ -241,7 +271,16 @@ class TableBlock(BaseModel):
     subtitle: str = Field(default="", description="Tabellen-Untertitel")
     source: str = Field(default="Quelle: LUKB Investment Office", description="Tabellen-Quelle / Fussnote")
     layout: Literal["column", "full"] = Field(default="column")
+    full_position: FullPositionMode = Field(
+        default="auto",
+        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
+    )
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
+
+    @field_validator("full_position", mode="before")
+    @classmethod
+    def validate_table_full_pos(cls, v: Any) -> str:
+        return _normalize_full_position(v)
     columns: list[TableColumn] = Field(
         default_factory=lambda: [
             TableColumn(field="col_1", title="Anlageklasse", align="left", width=33.4),

@@ -1028,6 +1028,64 @@ def test_typst_long_table_breaking_with_repeated_header():
             assert "set table.cell(breakable: false)" in tpl_src
 
 
+def test_hybrid_full_width_float_and_overflow_fallback():
+    """
+    Prüft die Hybrid-Lösung für 2-spaltige Elemente (layout='full'):
+    - Normale 2-spaltige Tabellen/Grafiken mit full_position='auto'/'top'/'bottom' floaten
+      innerhalb von columns(2) mit scope='parent', sodass 2-spaltiger Text nahtlos darüber/darunter fliesst.
+    - full_position='inline' rendert direkt im Textfluss.
+    - Ungültiges full_position wird sicher auf 'auto' normalisiert.
+    """
+    from schemas.article import ArticleDocument, DbChartBlock, FigureBlock, TableBlock
+
+    tbl_invalid = TableBlock(layout="full", full_position="invalid_val")
+    assert tbl_invalid.full_position == "auto"
+    fig_top = FigureBlock(layout="full", full_position="top")
+    assert fig_top.full_position == "top"
+    chart_bot = DbChartBlock(layout="full", full_position="bottom")
+    assert chart_bot.full_position == "bottom"
+
+    short_tbl = TableBlock(
+        title="Kompakte 2-spaltige Tabelle",
+        layout="full",
+        full_position="bottom",
+        columns=[
+            {"field": "k", "title": "Region", "align": "left", "width": 50.0},
+            {"field": "v", "title": "Gewicht", "align": "right", "width": 50.0},
+        ],
+        rows=[
+            {"k": "Schweiz", "v": "45 %"},
+            {"k": "USA", "v": "35 %"},
+            {"k": "Europa", "v": "20 %"},
+        ],
+    )
+    intro_p = "<p>Einleitender Zweispaltentext zur globalen Aktienallokation im aktuellen Marktumfeld.</p>" * 3
+    outro_p = "<p>Weiterführender Zweispaltentext, der elegant über bzw. um die Floating-Tabelle fliesst.</p>" * 3
+
+    for pos_mode in ("auto", "top", "bottom", "inline"):
+        tbl_dict = short_tbl.model_dump()
+        tbl_dict["full_position"] = pos_mode
+        for tpl_id in ("investment_focus", "market_flash"):
+            doc = ArticleDocument(
+                id=f"art-hybrid-{tpl_id}-{pos_mode}",
+                template_id=tpl_id,
+                blocks=[
+                    {"id": "h1", "type": "heading", "level": 1, "text": "Marktkommentar"},
+                    {"id": "p1", "type": "richtext", "html": intro_p},
+                    tbl_dict,
+                    {"id": "p2", "type": "richtext", "html": outro_p},
+                ],
+            )
+            pdf_bytes = render_pdf_bytes(doc)
+            assert pdf_bytes.startswith(b"%PDF-")
+            svgs = render_preview_svg_pages(doc)
+            assert len(svgs) == 1, f"Kompakte Tabelle + Text ({tpl_id}/{pos_mode}) muss auf 1 Seite passen"
+
+            tpl_src = (ROOT / "templates" / tpl_id / "template.typ").read_text(encoding="utf-8")
+            assert "place-full-float" in tpl_src
+            assert "max-float-h = 520pt" in tpl_src
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1042,6 +1100,7 @@ if __name__ == "__main__":
     test_publications_block_layout_and_url()
     test_table_column_widths_db_chart_palette_and_paragraph_links()
     test_typst_long_table_breaking_with_repeated_header()
+    test_hybrid_full_width_float_and_overflow_fallback()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()
