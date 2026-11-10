@@ -3679,13 +3679,13 @@
     container.appendChild(srcWrap);
   }
 
-  const LUKB_SERIES_COLORS = ["#002855", "#009FE3", "#C59B27", "#005A9C", "#6482A6"];
+  const LUKB_SERIES_COLORS = ["#037FDA", "#9CD4FB", "#431231", "#BA249D", "#F07E2C"];
 
   const DB_CHART_PALETTES = [
     {
       id: "lukb_classic",
       label: "LUKB Standard",
-      colors: ["#002855", "#009FE3", "#C59B27", "#005A9C", "#6482A6"],
+      colors: ["#037FDA", "#9CD4FB", "#431231", "#BA249D", "#F07E2C"],
     },
     {
       id: "lukb_blues",

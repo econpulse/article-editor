@@ -889,6 +889,17 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     # 2. DB-Chart Palettensteuerung (nur LUKB Standard & Blau-Abstufung) & Default-Typ 'line'
     default_chart = DbChartBlock(title="Default Chart")
     assert all(s.chart_type == "line" for s in default_chart.series)
+    assert resolve_chart_palette(default_chart.model_dump()) == [
+        "#037FDA",
+        "#9CD4FB",
+        "#431231",
+        "#BA249D",
+        "#F07E2C",
+    ]
+    default_svg = generate_db_chart_svg(default_chart.model_dump())
+    assert "#037FDA" in default_svg
+    assert "#9CD4FB" in default_svg
+    assert "#431231" in default_svg
 
     legacy_chart = DbChartBlock(title="Legacy Palette", palette="lukb_contrast")
     assert legacy_chart.palette == "lukb_classic"

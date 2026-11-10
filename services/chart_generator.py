@@ -22,13 +22,13 @@ from typing import Any
 
 from database.repository import query_timeseries_data
 
-# Offizielle LUKB 5er-Farbpalette für bis zu 5 Zeitreihen
+# Offizielle LUKB 5er-Farbpalette für bis zu 5 Zeitreihen (LUKB Standard)
 LUKB_CHART_PALETTE: list[str] = [
-    "#002855",  # 1. LUKB Navy
-    "#009FE3",  # 2. LUKB Cyan
-    "#C59B27",  # 3. LUKB Gold
-    "#005A9C",  # 4. LUKB Blue
-    "#6482A6",  # 5. LUKB Slate
+    "#037FDA",
+    "#9CD4FB",
+    "#431231",
+    "#BA249D",
+    "#F07E2C",
 ]
 
 CHART_PALETTES: dict[str, dict[str, Any]] = {
