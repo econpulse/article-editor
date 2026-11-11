@@ -15,11 +15,19 @@ oder `step` + `area`, sowie über bis zu 5 Zeitreihen hinweg):
 
 from __future__ import annotations
 
+import base64
 import html
 import math
 from datetime import date
+from pathlib import Path
 from typing import Any
 
+from config import (
+    FONTS_DIR,
+    LUKB_FONT_FAMILY_BASE,
+    LUKB_FONT_LIGHT,
+    LUKB_FONT_MEDIUM,
+)
 from database.repository import query_timeseries_data
 
 # Offizielle LUKB 5er-Farbpalette für bis zu 5 Zeitreihen (LUKB Standard)
@@ -51,8 +59,132 @@ def resolve_chart_palette(block_data: dict[str, Any]) -> list[str]:
 
 VALID_CHART_TYPES = ("line", "step", "dot", "area", "bar", "stacked_bar")
 
-FONT_BODY = "Yoga Sans for LUKB Light, Calibri, Arial, sans-serif"
-FONT_HEADING = "Yoga Sans for LUKB Medium, Calibri, Arial, sans-serif"
+FONT_WEIGHT_BODY = "300"
+FONT_WEIGHT_HEADING = "500"
+
+_GENERIC_CSS_FAMILIES = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui"}
+
+
+def _quote_svg_font(name: str) -> str:
+    """Formatiert einen Font-Namen CSS-/SVG-konform (Mehrwortnamen in einfachen Anführungszeichen)."""
+    cleaned = name.strip().strip("'\"").replace('"', "").replace("'", "")
+    if not cleaned:
+        return ""
+    if cleaned.lower() in _GENERIC_CSS_FAMILIES or " " not in cleaned:
+        return cleaned
+    return f"'{cleaned}'"
+
+
+def _build_svg_font_stack(*families: str) -> str:
+    """Erstellt eine deduplizierte SVG-font-family-Kette analog zu Typst und HTML5."""
+    seen: set[str] = set()
+    parts: list[str] = []
+    for fam in families:
+        formatted = _quote_svg_font(fam)
+        if not formatted:
+            continue
+        key = formatted.lower()
+        if key not in seen:
+            seen.add(key)
+            parts.append(formatted)
+    return ", ".join(parts)
+
+
+FONT_BODY = _build_svg_font_stack(
+    LUKB_FONT_LIGHT,
+    LUKB_FONT_FAMILY_BASE,
+    "Calibri Light",
+    "Calibri",
+    "Arial",
+    "sans-serif",
+)
+FONT_HEADING = _build_svg_font_stack(
+    LUKB_FONT_MEDIUM,
+    LUKB_FONT_FAMILY_BASE,
+    "Calibri",
+    "Arial",
+    "sans-serif",
+)
+
+_FONT_MIME_FORMATS: dict[str, tuple[str, str]] = {
+    ".woff2": ("font/woff2", "woff2"),
+    ".woff": ("font/woff", "woff"),
+    ".otf": ("font/otf", "opentype"),
+    ".ttf": ("font/ttf", "truetype"),
+}
+_FONT_DEFS_CACHE: dict[tuple[str, tuple[tuple[str, int, int], ...]], str] = {}
+
+
+def _infer_corporate_font_faces(stem_lower: str) -> list[tuple[str, str]]:
+    """Ordnet eine Corporate-Font-Datei anhand des Dateinamens den passenden CSS-Familien & Schnitten zu."""
+    if "light" in stem_lower:
+        return [
+            (LUKB_FONT_LIGHT, FONT_WEIGHT_BODY),
+            (LUKB_FONT_FAMILY_BASE, FONT_WEIGHT_BODY),
+        ]
+    if "medium" in stem_lower:
+        return [
+            (LUKB_FONT_MEDIUM, FONT_WEIGHT_HEADING),
+            (LUKB_FONT_FAMILY_BASE, FONT_WEIGHT_HEADING),
+        ]
+    if "bold" in stem_lower:
+        return [(LUKB_FONT_FAMILY_BASE, "700")]
+    return [(LUKB_FONT_FAMILY_BASE, "400")]
+
+
+def _build_embedded_font_face_defs(fonts_dir: Path | None = None) -> str:
+    """
+    Erzeugt optional einen SVG-<defs><style>-Block mit eingebetteten @font-face-Regeln,
+    sofern Corporate-Font-Dateien (z.B. Yoga Sans for LUKB) in `www/fonts/` abgelegt sind.
+    Dadurch stellen Browser die Corporate-Schriften auch in isolierten `<img src="data:image/svg+xml...">`-
+    Vorschauen ohne lokal installierte System-Fonts dar.
+    """
+    target_dir = fonts_dir if fonts_dir is not None else FONTS_DIR
+    if not target_dir or not target_dir.exists():
+        return ""
+
+    candidates: list[Path] = []
+    for path in sorted(target_dir.iterdir()):
+        if not path.is_file():
+            continue
+        ext = path.suffix.lower()
+        if ext not in _FONT_MIME_FORMATS:
+            continue
+        stem_low = path.stem.lower()
+        if "yoga" in stem_low or "lukb" in stem_low:
+            candidates.append(path)
+
+    if not candidates:
+        return ""
+
+    sig = tuple(
+        (p.name, st.st_mtime_ns, st.st_size)
+        for p in candidates
+        for st in (p.stat(),)
+    )
+    cache_key = (str(target_dir.resolve()), sig)
+    cached = _FONT_DEFS_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    rules: list[str] = []
+    for path in candidates:
+        mime, fmt = _FONT_MIME_FORMATS[path.suffix.lower()]
+        b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+        data_uri = f"data:{mime};base64,{b64}"
+        for family_name, weight in _infer_corporate_font_faces(path.stem.lower()):
+            rules.append(
+                f"      @font-face {{ font-family: '{family_name}'; font-weight: {weight}; "
+                f"font-style: normal; src: url(\"{data_uri}\") format(\"{fmt}\"); }}"
+            )
+
+    defs_block = (
+        "  <defs>\n    <style type=\"text/css\">\n"
+        + "\n".join(rules)
+        + "\n    </style>\n  </defs>"
+    )
+    _FONT_DEFS_CACHE[cache_key] = defs_block
+    return defs_block
 
 
 def _nice_step(span: float, target_ticks: int = 5) -> float:
@@ -145,14 +277,16 @@ def _format_date_tick(dt: date, total_days: int) -> str:
     return dt.strftime("%d.%m.%y")
 
 
-def _render_empty_state_svg(message: str, detail: str = "") -> str:
+def _render_empty_state_svg(message: str, detail: str = "", embed_fonts: bool = True) -> str:
     esc_msg = html.escape(message)
     esc_det = html.escape(detail)
-    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" width="680" height="320">
+    font_defs = _build_embedded_font_face_defs() if embed_fonts else ""
+    defs_part = f"\n{font_defs}" if font_defs else ""
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 320" width="680" height="320" font-family="{FONT_BODY}">{defs_part}
   <rect width="680" height="320" fill="#FFFFFF"/>
   <rect x="2" y="20" width="676" height="280" rx="4" fill="#F4F7FA" stroke="#D6DEE8" stroke-dasharray="5,5"/>
-  <text x="340" y="150" font-family="{FONT_HEADING}" font-size="14" fill="#002855" text-anchor="middle">{esc_msg}</text>
-  <text x="340" y="178" font-family="{FONT_BODY}" font-size="12.5" fill="#5A687C" text-anchor="middle">{esc_det}</text>
+  <text x="340" y="150" font-family="{FONT_HEADING}" font-weight="{FONT_WEIGHT_HEADING}" font-size="14" fill="#002855" text-anchor="middle">{esc_msg}</text>
+  <text x="340" y="178" font-family="{FONT_BODY}" font-weight="{FONT_WEIGHT_BODY}" font-size="12.5" fill="#5A687C" text-anchor="middle">{esc_det}</text>
 </svg>"""
 
 
@@ -176,12 +310,13 @@ def _extract_series_chart_types(item: Any) -> list[str]:
     return cleaned
 
 
-def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
+def generate_db_chart_svg(block_data: dict[str, Any], embed_fonts: bool = True) -> str:
     """
     Zieht die konfigurierten Zeitreihen (bis zu 5 Ticker) ab `start_date` aus `ts_db`
     und rendert ein publikationsreifes SVG im LUKB Corporate Design.
     - Linke Kante der längsten Y-Achsen-Zahl schliesst exakt bei `x = 0` bündig mit Titel/Untertitel ab.
     - Schriftgrössen für Achsen und Legende passen sich an `layout` ('column' vs. 'full') an.
+    - `embed_fonts=True` bettet optional Corporate-Fonts aus `www/fonts/` per `@font-face` für Web-`<img>`-Vorschauen ein.
     """
     raw_series = block_data.get("series") or []
     start_date_str = str(block_data.get("start_date") or "2022-01-01").strip()
@@ -215,6 +350,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
         return _render_empty_state_svg(
             "Keine Zeitreihe ausgewählt",
             "Bitte geben Sie im DB-Chart-Block mindestens einen Ticker aus ts_db ein (z.B. SMI, SNB_RATE).",
+            embed_fonts=embed_fonts,
         )
 
     requested_tickers = [it["ticker"] for it in configured_items]
@@ -254,6 +390,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
         return _render_empty_state_svg(
             f"Keine Datenpunkte in ts_db gefunden ({tickers_joined})",
             f"Geprüfter Zeitraum ab Startdatum {start_date_str}",
+            embed_fonts=embed_fonts,
         )
 
     # 1. Datumsbereich (X-Achse) ermitteln
@@ -374,9 +511,13 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
     zero_y = y_px(0.0) if (y_min <= 0.0 <= y_max) else (plot_bottom if y_min > 0 else plot_top)
 
     svg_parts: list[str] = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svg_w} {svg_h}" width="{svg_w}" height="{svg_h}">',
-        f'  <rect width="{svg_w}" height="{svg_h}" fill="#FFFFFF"/>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svg_w} {svg_h}" width="{svg_w}" height="{svg_h}" font-family="{FONT_BODY}">',
     ]
+    if embed_fonts:
+        font_defs = _build_embedded_font_face_defs()
+        if font_defs:
+            svg_parts.append(font_defs)
+    svg_parts.append(f'  <rect width="{svg_w}" height="{svg_h}" fill="#FFFFFF"/>')
 
     # 4. Horizontale Gitterlinien & Y-Achsen-Labels (bündig links bei x=0 für die längste Zahl)
     svg_parts.append('  <g stroke="#E2E8F0" stroke-width="1">')
@@ -400,7 +541,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
 
     y_text_offset = 7.0 if is_column_layout else 5.0
     svg_parts.append(
-        f'  <g font-family="{FONT_BODY}" font-size="{axis_font_size}" fill="#5A687C" text-anchor="end">'
+        f'  <g font-family="{FONT_BODY}" font-weight="{FONT_WEIGHT_BODY}" font-size="{axis_font_size}" fill="#5A687C" text-anchor="end">'
     )
     for tick, raw_lbl in zip(y_ticks, y_tick_labels):
         ty = y_px(tick)
@@ -423,7 +564,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
             x_tick_dates.append(date.fromordinal(t_ord))
 
     svg_parts.append(
-        f'  <g font-family="{FONT_BODY}" font-size="{axis_font_size}" fill="#5A687C">'
+        f'  <g font-family="{FONT_BODY}" font-weight="{FONT_WEIGHT_BODY}" font-size="{axis_font_size}" fill="#5A687C">'
     )
     for idx_t, dt in enumerate(x_tick_dates):
         tx = x_px(dt)
@@ -620,7 +761,7 @@ def generate_db_chart_svg(block_data: dict[str, Any]) -> str:
     max_label_chars = 27 if is_column_layout else 34
 
     svg_parts.append(
-        f'  <g font-family="{FONT_HEADING}" font-size="{legend_font_size}" fill="#1A2433">'
+        f'  <g font-family="{FONT_HEADING}" font-weight="{FONT_WEIGHT_HEADING}" font-size="{legend_font_size}" fill="#1A2433">'
     )
     for idx, s in enumerate(resolved_series):
         row_num = idx // items_per_legend_row

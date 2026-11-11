@@ -1086,6 +1086,77 @@ def test_hybrid_full_width_float_and_overflow_fallback():
             assert "max-float-h = 520pt" in tpl_src
 
 
+def test_db_chart_corporate_fonts():
+    """
+    Prüft, dass DB-Charts für sämtliche Beschriftungen (Y-Achse, X-Achse, Legende,
+    Empty-State) die LUKB Corporate-Schriften (`Yoga Sans for LUKB Light/Medium` bzw.
+    Basis-Familie `Yoga Sans for LUKB` inkl. korrekter `font-weight`-Attribute 300/500)
+    verwenden und bei abgelegten Font-Dateien `@font-face` für Web-Vorschauen einbetten.
+    """
+    import re
+    import tempfile
+    import typst
+    from schemas.article import ArticleDocument, DbChartBlock
+    from services.chart_generator import (
+        FONT_BODY,
+        FONT_HEADING,
+        _build_embedded_font_face_defs,
+        generate_db_chart_svg,
+    )
+
+    assert "'Yoga Sans for LUKB Light'" in FONT_BODY
+    assert "'Yoga Sans for LUKB'" in FONT_BODY
+    assert "'Calibri Light'" in FONT_BODY
+    assert "'Yoga Sans for LUKB Medium'" in FONT_HEADING
+    assert "'Yoga Sans for LUKB'" in FONT_HEADING
+
+    chart_blk = DbChartBlock(
+        title="Corporate Font Test Chart",
+        series=[
+            {"ticker": "SMI", "chart_type": "line", "label": "SMI"},
+            {"ticker": "SP500", "chart_type": "line", "label": "S&P 500"},
+        ],
+    )
+    svg_chart = generate_db_chart_svg(chart_blk.model_dump())
+    assert f'font-family="{FONT_BODY}" font-weight="300"' in svg_chart
+    assert f'font-family="{FONT_HEADING}" font-weight="500"' in svg_chart
+    assert svg_chart.count('font-weight="300"') >= 2  # Y-Achse und X-Achse
+    assert svg_chart.count('font-weight="500"') >= 1  # Legende
+
+    empty_svg = generate_db_chart_svg({"series": []})
+    assert f'font-family="{FONT_HEADING}" font-weight="500"' in empty_svg
+    assert f'font-family="{FONT_BODY}" font-weight="300"' in empty_svg
+
+    # Typst-PDF-Kompilierung muss durch font-weight="300" den Light-Schnitt auflösen
+    doc = ArticleDocument(
+        id="art-dbchart-font-test",
+        template_id="investment_focus",
+        blocks=[chart_blk.model_dump()],
+    )
+    pdf_bytes = render_pdf_bytes(doc)
+    assert pdf_bytes.startswith(b"%PDF-")
+    base_fonts = [f.decode("latin1") for f in re.findall(rb"/BaseFont\s*/([^\s/\[\]>]+)", pdf_bytes)]
+    assert any("Light" in bf for bf in base_fonts), (
+        f"Erwartete Light-Schriftschnitt in PDF-Fonts, erhalten: {base_fonts}"
+    )
+
+    # Optionales @font-face Embedding testen, wenn LUKB/Yoga-Fontdateien vorliegen
+    with tempfile.TemporaryDirectory() as tmp_fonts:
+        tmp_path = Path(tmp_fonts)
+        (tmp_path / "YogaSansForLUKB-Light.ttf").write_bytes(b"dummy-light-font")
+        (tmp_path / "YogaSansForLUKB-Medium.ttf").write_bytes(b"dummy-medium-font")
+        defs_html = _build_embedded_font_face_defs(tmp_path)
+        assert "@font-face" in defs_html
+        assert "font-family: 'Yoga Sans for LUKB Light'; font-weight: 300;" in defs_html
+        assert "font-family: 'Yoga Sans for LUKB Medium'; font-weight: 500;" in defs_html
+        assert "font-family: 'Yoga Sans for LUKB'; font-weight: 300;" in defs_html
+        assert "font-family: 'Yoga Sans for LUKB'; font-weight: 500;" in defs_html
+
+    # Typst PNG Rasterisierung für Word-Export darf nicht fehlschlagen
+    docx_bytes = render_docx_bytes(doc)
+    assert docx_bytes.startswith(b"PK\x03\x04")
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1093,6 +1164,7 @@ if __name__ == "__main__":
     test_textbox_start_end_markers_grouping()
     test_concurrent_multi_author_block_merge()
     test_db_chart_timeseries_block()
+    test_db_chart_corporate_fonts()
     test_layout_elements_spacer_and_colbreak()
     test_smart_cms_features_3a_and_3b()
     test_publication_date_and_page_numbering()
