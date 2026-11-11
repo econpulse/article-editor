@@ -318,6 +318,11 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   font-size: 12px;
 }
 
+.btn-lukb:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
 /* ============================================================================
    3-Column Main Workspace Grid
    ============================================================================ */
@@ -1839,12 +1844,59 @@ button.db-height-preset-btn.active {
   margin: 10px 0;
   border: 1px solid var(--lukb-border);
   border-radius: var(--radius-sm);
+  outline: none;
+}
+
+.table-selection-actions {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 6px 0 2px;
+  padding: 6px 10px;
+  background: #F0F9FF;
+  border: 1px solid #BAE6FD;
+  border-radius: var(--radius-sm);
+}
+
+.table-selection-actions.is-visible {
+  display: flex;
+}
+
+.table-selection-actions-left {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.table-selection-badge {
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: 11.5px;
+  color: #0369A1;
+  background: #E0F2FE;
+  border: 1px solid #BAE6FD;
+  border-radius: 999px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.table-selection-hint {
+  font-size: 11px;
+  color: #5A687C;
 }
 
 table.cms-grid-editor {
   width: 100%;
   border-collapse: collapse;
   font-size: 13px;
+}
+
+table.cms-grid-editor.is-selecting-cells {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 table.cms-grid-editor th {
@@ -1861,6 +1913,35 @@ table.cms-grid-editor td {
   padding: 0;
   background: #FFFFFF;
   vertical-align: top;
+}
+
+table.cms-grid-editor td.is-cell-selected {
+  background: #E0F2FE;
+  --sel-top: 0 0 0 0 transparent;
+  --sel-bottom: 0 0 0 0 transparent;
+  --sel-left: 0 0 0 0 transparent;
+  --sel-right: 0 0 0 0 transparent;
+  box-shadow: var(--sel-top), var(--sel-bottom), var(--sel-left), var(--sel-right);
+}
+
+table.cms-grid-editor td.is-cell-selected .grid-cell-input {
+  background: transparent;
+}
+
+table.cms-grid-editor td.is-cell-selected.sel-top {
+  --sel-top: inset 0 2px 0 0 var(--lukb-cyan);
+}
+
+table.cms-grid-editor td.is-cell-selected.sel-bottom {
+  --sel-bottom: inset 0 -2px 0 0 var(--lukb-cyan);
+}
+
+table.cms-grid-editor td.is-cell-selected.sel-left {
+  --sel-left: inset 2px 0 0 0 var(--lukb-cyan);
+}
+
+table.cms-grid-editor td.is-cell-selected.sel-right {
+  --sel-right: inset -2px 0 0 0 var(--lukb-cyan);
 }
 
 .grid-header-controls {
@@ -1889,6 +1970,10 @@ table.cms-grid-editor td {
   padding: 3px 5px;
   font-size: 11px;
   cursor: pointer;
+}
+
+.grid-col-align-btn:hover {
+  background: rgba(255, 255, 255, 0.28);
 }
 
 .grid-header-width-row {

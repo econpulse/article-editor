@@ -1085,6 +1085,111 @@ def test_hybrid_full_width_float_and_overflow_fallback():
             assert "place-full-float" in tpl_src
             assert "max-float-h = 520pt" in tpl_src
 
+    # Mittelgrosse 2-spaltige Tabelle (<= 520pt) nach vorausgehendem Text:
+    # Überschreitet sie den verbleibenden Seitenrand, muss sie zwischen Zeilen
+    # auf Seite 2 umbrechen und dort die Kopfzeile wiederholen.
+    med_rows = [
+        {"k": f"Zeile {i:02d} Beschreibung eines längeren Inhalts", "v": f"{i}.0 %"}
+        for i in range(1, 23)
+    ]
+    med_tbl = TableBlock(
+        title="Mittelgrosse 2-spaltige Tabelle",
+        layout="full",
+        full_position="auto",
+        columns=[
+            {"field": "k", "title": "Kategorie", "align": "left", "width": 70.0},
+            {"field": "v", "title": "Wert", "align": "right", "width": 30.0},
+        ],
+        rows=med_rows,
+    )
+    long_intro = "<p>" + ("Langer Fliesstext der die erste Seite halb füllt. " * 45) + "</p>"
+    for pos_mode in ("auto", "top", "bottom"):
+        tbl_dict = med_tbl.model_dump()
+        tbl_dict["full_position"] = pos_mode
+        for tpl_id in ("investment_focus", "market_flash"):
+            doc = ArticleDocument(
+                id=f"art-med-tbl-{tpl_id}-{pos_mode}",
+                template_id=tpl_id,
+                blocks=[
+                    {"id": "h1", "type": "heading", "level": 1, "text": "Einleitung"},
+                    {"id": "p1", "type": "richtext", "html": long_intro},
+                    tbl_dict,
+                ],
+            )
+            svgs = render_preview_svg_pages(doc)
+            assert len(svgs) == 2, f"2-spaltige Tabelle ({tpl_id}/{pos_mode}) muss über 2 Seiten umbrechen"
+            assert "#002855" in svgs[0] and "#002855" in svgs[1], (
+                f"2-spaltige Tabelle ({tpl_id}/{pos_mode}) muss auf Seite 1 beginnen und auf Seite 2 mit Kopfzeile fortfahren"
+            )
+
+    # 5 gleich lange Absätze nach einer über 2 Seiten umbrechenden 2-spaltigen Tabelle:
+    # Links müssen 3 Absätze stehen und rechts 2 (links >= rechts), nicht umgekehrt.
+    import re
+    from lxml import etree
+
+    tall_tbl = TableBlock(
+        title="Lange 2-spaltige Tabelle",
+        layout="full",
+        full_position="auto",
+        columns=[
+            {"field": "k", "title": "Kategorie", "align": "left", "width": 70.0},
+            {"field": "v", "title": "Wert", "align": "right", "width": 30.0},
+        ],
+        rows=[
+            {"k": f"Zeile {i:02d} Beschreibung eines längeren Inhalts", "v": f"{i}.0 %"}
+            for i in range(1, 35)
+        ],
+    )
+    five_paras = [
+        {
+            "id": f"fp_{i}",
+            "type": "richtext",
+            "html": "<p>" + (f"{i} Ein gleich langer Absatz im Anschluss an die Tabelle. " * 6) + "</p>",
+        }
+        for i in range(1, 6)
+    ]
+    for tpl_id in ("investment_focus", "market_flash"):
+        doc = ArticleDocument(
+            id=f"art-5-paras-{tpl_id}",
+            template_id=tpl_id,
+            metadata={
+                "title": "Neue Investment-Publikation",
+                "lead": "Management Summary.",
+            },
+            blocks=[tall_tbl.model_dump()] + five_paras,
+        )
+        svgs = render_preview_svg_pages(doc)
+        assert len(svgs) == 2
+        root = etree.fromstring(svgs[1].encode("utf-8"))
+        left_ys: list[float] = []
+        right_ys: list[float] = []
+
+        def _walk_svg(el, cx: float, cy: float) -> None:
+            tr = el.get("transform", "")
+            for m_tr in re.finditer(r"translate\(\s*([-0-9.]+)(?:[,\s]+([-0-9.]+))?\s*\)", tr):
+                cx += float(m_tr.group(1))
+                cy += float(m_tr.group(2) or 0)
+            for m_mx in re.finditer(r"matrix\([^)]+\s+([-0-9.]+)\s+([-0-9.]+)\)", tr):
+                cx += float(m_mx.group(1))
+                cy += float(m_mx.group(2))
+            if el.tag.endswith("use"):
+                ux = cx + float(el.get("x", 0))
+                uy = cy + float(el.get("y", 0))
+                if 40 < uy < 750:
+                    if ux < 280:
+                        left_ys.append(uy)
+                    elif ux > 295:
+                        right_ys.append(uy)
+            for ch in el:
+                _walk_svg(ch, cx, cy)
+
+        _walk_svg(root, 0.0, 0.0)
+        assert left_ys and right_ys
+        assert len(left_ys) > len(right_ys) and max(left_ys) >= max(right_ys), (
+            f"Linke Spalte muss bei {tpl_id} länger als rechte Spalte sein: "
+            f"left=({len(left_ys)}, {max(left_ys):.1f}), right=({len(right_ys)}, {max(right_ys):.1f})"
+        )
+
 
 def test_db_chart_corporate_fonts():
     """

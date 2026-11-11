@@ -4577,6 +4577,266 @@
     container.appendChild(srcWrap);
   }
 
+  const tableEditorState = {
+    active: null,
+    drag: null,
+  };
+
+  function normalizeTableCellRange(a, b) {
+    return {
+      minRow: Math.min(a.row, b.row),
+      maxRow: Math.max(a.row, b.row),
+      minCol: Math.min(a.col, b.col),
+      maxCol: Math.max(a.col, b.col),
+    };
+  }
+
+  function isTableCellInRange(r, c, range) {
+    return !!range && r >= range.minRow && r <= range.maxRow && c >= range.minCol && c <= range.maxCol;
+  }
+
+  function closeTableContextMenu() {
+    const existing = document.getElementById("active-table-context-menu");
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+  }
+
+  function clearTableSelection() {
+    const active = tableEditorState.active;
+    if (!active) return;
+    active.range = null;
+    active.lead = null;
+    if (active.gridScroll && active.gridScroll.isConnected) {
+      active.applySelectionStyles();
+      active.updateSelectionUI();
+    } else {
+      tableEditorState.active = null;
+    }
+  }
+
+  function escapeTableHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function formatTsvCell(val) {
+    const s = val != null ? String(val) : "";
+    if (/[\t\n\r"]/.test(s)) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function getTableRangeTsv(blk, range) {
+    const lines = [];
+    for (let r = range.minRow; r <= range.maxRow && r < blk.rows.length; r++) {
+      const rowObj = blk.rows[r] || {};
+      const cols = [];
+      for (let c = range.minCol; c <= range.maxCol && c < blk.columns.length; c++) {
+        cols.push(formatTsvCell(rowObj[blk.columns[c].field]));
+      }
+      lines.push(cols.join("\t"));
+    }
+    return lines.join("\n");
+  }
+
+  function getTableRangeHtml(blk, range) {
+    const rowsHtml = [];
+    for (let r = range.minRow; r <= range.maxRow && r < blk.rows.length; r++) {
+      const rowObj = blk.rows[r] || {};
+      const cellsHtml = [];
+      for (let c = range.minCol; c <= range.maxCol && c < blk.columns.length; c++) {
+        const val = rowObj[blk.columns[c].field] != null ? String(rowObj[blk.columns[c].field]) : "";
+        cellsHtml.push("<td>" + escapeTableHtml(val).replace(/\n/g, "<br>") + "</td>");
+      }
+      rowsHtml.push("<tr>" + cellsHtml.join("") + "</tr>");
+    }
+    return "<table><tbody>" + rowsHtml.join("") + "</tbody></table>";
+  }
+
+  function parseClipboardTsv(clipText) {
+    const normalized = String(clipText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const rows = [];
+    let currentRow = [];
+    let currentCell = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < normalized.length; i++) {
+      const ch = normalized[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (i + 1 < normalized.length && normalized[i + 1] === '"') {
+            currentCell += '"';
+            i++;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          currentCell += ch;
+        }
+      } else {
+        if (ch === '"' && currentCell === "") {
+          inQuotes = true;
+        } else if (ch === "\t") {
+          currentRow.push(currentCell);
+          currentCell = "";
+        } else if (ch === "\n") {
+          currentRow.push(currentCell);
+          rows.push(currentRow);
+          currentRow = [];
+          currentCell = "";
+        } else {
+          currentCell += ch;
+        }
+      }
+    }
+
+    if (currentCell !== "" || currentRow.length > 0) {
+      currentRow.push(currentCell);
+      rows.push(currentRow);
+    }
+
+    return rows;
+  }
+
+  function copyViaHiddenTextarea(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    ta.style.top = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch (_err) {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function writeTableSelectionToClipboard(text, html, onDone) {
+    if (navigator.clipboard && typeof navigator.clipboard.write === "function" && typeof window.ClipboardItem === "function") {
+      try {
+        const item = new window.ClipboardItem({
+          "text/plain": new Blob([text], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        });
+        navigator.clipboard.write([item]).then(
+          function () { if (onDone) onDone(true); },
+          function () {
+            const ok = copyViaHiddenTextarea(text);
+            if (onDone) onDone(ok);
+          }
+        );
+        return;
+      } catch (_err) {
+        // Fallback below
+      }
+    }
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+      navigator.clipboard.writeText(text).then(
+        function () { if (onDone) onDone(true); },
+        function () {
+          const ok = copyViaHiddenTextarea(text);
+          if (onDone) onDone(ok);
+        }
+      );
+      return;
+    }
+    const ok = copyViaHiddenTextarea(text);
+    if (onDone) onDone(ok);
+  }
+
+  document.addEventListener("mousemove", function (e) {
+    const drag = tableEditorState.drag;
+    const active = tableEditorState.active;
+    if (!drag || !drag.active || !active || active.blockId !== drag.blockId) return;
+    if (!drag.tbl || !drag.tbl.isConnected) {
+      drag.active = false;
+      return;
+    }
+
+    const hit = document.elementFromPoint(e.clientX, e.clientY) || e.target;
+    const td = hit && hit.closest ? hit.closest("td[data-row-idx][data-col-idx]") : null;
+    if (!td || !drag.tbl.contains(td)) return;
+
+    const r = parseInt(td.dataset.rowIdx, 10);
+    const c = parseInt(td.dataset.colIdx, 10);
+    if (isNaN(r) || isNaN(c)) return;
+
+    if (r !== drag.anchor.row || c !== drag.anchor.col) {
+      if (!drag.movedOut) {
+        drag.movedOut = true;
+        drag.tbl.classList.add("is-selecting-cells");
+        if (window.getSelection) {
+          const sel = window.getSelection();
+          if (sel) sel.removeAllRanges();
+        }
+        if (document.activeElement && drag.tbl.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") {
+          document.activeElement.blur();
+        }
+        drag.gridScroll.focus({ preventScroll: true });
+      }
+    }
+
+    if (drag.movedOut) {
+      active.lead = { row: r, col: c };
+      active.range = normalizeTableCellRange(drag.anchor, active.lead);
+      active.applySelectionStyles();
+      active.updateSelectionUI();
+    }
+  });
+
+  document.addEventListener("mouseup", function () {
+    const drag = tableEditorState.drag;
+    if (!drag || !drag.active) return;
+    if (drag.tbl) {
+      drag.tbl.classList.remove("is-selecting-cells");
+    }
+    if (drag.movedOut && drag.gridScroll && drag.gridScroll.isConnected) {
+      drag.gridScroll.focus({ preventScroll: true });
+      if (tableEditorState.active && tableEditorState.active.blockId === drag.blockId) {
+        tableEditorState.active.updateSelectionUI();
+      }
+    }
+    drag.active = false;
+  });
+
+  document.addEventListener("mousedown", function (e) {
+    const active = tableEditorState.active;
+    if (!active || !active.range) return;
+    if (e.target.closest && (e.target.closest("#active-table-context-menu") || e.target.closest(".table-selection-actions"))) {
+      return;
+    }
+    if (active.gridScroll && active.gridScroll.isConnected && active.gridScroll.contains(e.target)) {
+      return;
+    }
+    clearTableSelection();
+  });
+
+  document.addEventListener("click", function (e) {
+    if (!e.target.closest || !e.target.closest("#active-table-context-menu")) {
+      closeTableContextMenu();
+    }
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") {
+      closeTableContextMenu();
+      if (tableEditorState.active && tableEditorState.active.range) {
+        clearTableSelection();
+      }
+    }
+  });
+
   function buildTableBlockBody(container, blk) {
     // Zeile 1: Tabellen-Titel & Satz-Breite
     const topGrid = document.createElement("div");
@@ -4626,7 +4886,7 @@
     subWrap.appendChild(subInp);
     container.appendChild(subWrap);
 
-    // Zeile 3: Tabellen-Steuerleiste (+ Zeile, + Spalte, Total-Zeile Checkbox, Excel-Hinweis)
+    // Zeile 3: Tabellen-Steuerleiste (+ Zeile, + Spalte, 1. Zeile -> Kopfzeile, Total-Zeile Checkbox, Excel-Hinweis)
     const controlsBar = document.createElement("div");
     controlsBar.style.display = "flex";
     controlsBar.style.justifyContent = "space-between";
@@ -4639,6 +4899,7 @@
     btnGroup.style.display = "flex";
     btnGroup.style.gap = "6px";
     btnGroup.style.alignItems = "center";
+    btnGroup.style.flexWrap = "wrap";
 
     const addRowBtn = document.createElement("button");
     addRowBtn.type = "button";
@@ -4649,6 +4910,12 @@
     addColBtn.type = "button";
     addColBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
     addColBtn.textContent = "+ Spalte";
+
+    const useFirstRowHeaderBtn = document.createElement("button");
+    useFirstRowHeaderBtn.type = "button";
+    useFirstRowHeaderBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    useFirstRowHeaderBtn.textContent = "↥ 1. Zeile → Kopfzeile";
+    useFirstRowHeaderBtn.title = "Erste Datenzeile als Kopfzeilenwerte übernehmen und danach aus den Datenzeilen löschen";
 
     const eqWidthBtn = document.createElement("button");
     eqWidthBtn.type = "button";
@@ -4680,6 +4947,7 @@
 
     btnGroup.appendChild(addRowBtn);
     btnGroup.appendChild(addColBtn);
+    btnGroup.appendChild(useFirstRowHeaderBtn);
     btnGroup.appendChild(eqWidthBtn);
     btnGroup.appendChild(widthSumBadge);
     btnGroup.appendChild(totalToggleWrap);
@@ -4687,15 +4955,60 @@
     const excelHint = document.createElement("span");
     excelHint.style.fontSize = "11.5px";
     excelHint.style.color = "#5A687C";
-    excelHint.textContent = "Tipp: Bereiche direkt aus Excel kopieren und in eine Zelle einfügen (Ctrl+V)";
+    excelHint.textContent = "Tipp: Excel-Bereiche einfügen (Ctrl+V) · Zellen ziehen / Shift+Klick markieren · Rechtsklick für Zeilen/Spalten";
 
     controlsBar.appendChild(btnGroup);
     controlsBar.appendChild(excelHint);
     container.appendChild(controlsBar);
 
+    // Aktionsleiste für markierte Zellbereiche
+    const selectionBar = document.createElement("div");
+    selectionBar.className = "table-selection-actions";
+
+    const selLeft = document.createElement("div");
+    selLeft.className = "table-selection-actions-left";
+
+    const selBadge = document.createElement("span");
+    selBadge.className = "table-selection-badge";
+
+    const copySelBtn = document.createElement("button");
+    copySelBtn.type = "button";
+    copySelBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    copySelBtn.textContent = "📋 Kopieren (Ctrl+C)";
+    copySelBtn.title = "Markierte Zellen als Tabelle in die Zwischenablage kopieren";
+
+    const clearSelValuesBtn = document.createElement("button");
+    clearSelValuesBtn.type = "button";
+    clearSelValuesBtn.className = "btn-lukb btn-lukb-danger-ghost btn-lukb-sm";
+    clearSelValuesBtn.textContent = "🧹 Werte entfernen (Entf)";
+    clearSelValuesBtn.title = "Inhalte der markierten Zellen leeren";
+
+    const deselectBtn = document.createElement("button");
+    deselectBtn.type = "button";
+    deselectBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    deselectBtn.textContent = "✕ Auswahl";
+    deselectBtn.title = "Zellmarkierung aufheben (Esc)";
+
+    selLeft.appendChild(selBadge);
+    selLeft.appendChild(copySelBtn);
+    selLeft.appendChild(clearSelValuesBtn);
+    selLeft.appendChild(deselectBtn);
+
+    const selHint = document.createElement("span");
+    selHint.className = "table-selection-hint";
+    selHint.textContent = "Tipp: Mit Shift+Pfeiltasten oder Maus ziehen erweitern";
+
+    selectionBar.appendChild(selLeft);
+    selectionBar.appendChild(selHint);
+    container.appendChild(selectionBar);
+
     // Zeile 4: Interaktives Daten-Grid
     const gridScroll = document.createElement("div");
     gridScroll.className = "table-editor-scroll";
+    gridScroll.tabIndex = -1;
+
+    let tblRef = null;
+    let copyFeedbackTimer = null;
 
     function distributeEqualColumnWidths(columns) {
       if (!Array.isArray(columns) || columns.length === 0) return;
@@ -4745,10 +5058,340 @@
       });
     }
 
+    function applySelectionStyles() {
+      if (!tblRef) return;
+      const active = tableEditorState.active;
+      const range = active && active.blockId === blk.id ? active.range : null;
+      tblRef.querySelectorAll("td[data-row-idx][data-col-idx]").forEach(function (td) {
+        const r = parseInt(td.dataset.rowIdx, 10);
+        const c = parseInt(td.dataset.colIdx, 10);
+        const selected = isTableCellInRange(r, c, range);
+        td.classList.toggle("is-cell-selected", selected);
+        td.classList.toggle("sel-top", selected && r === range.minRow);
+        td.classList.toggle("sel-bottom", selected && r === range.maxRow);
+        td.classList.toggle("sel-left", selected && c === range.minCol);
+        td.classList.toggle("sel-right", selected && c === range.maxCol);
+      });
+    }
+
+    function updateSelectionUI() {
+      const active = tableEditorState.active;
+      const range = active && active.blockId === blk.id ? active.range : null;
+      if (!range || !blk.rows.length || !blk.columns.length) {
+        selectionBar.classList.remove("is-visible");
+        return;
+      }
+      const rowCount = Math.min(range.maxRow, blk.rows.length - 1) - range.minRow + 1;
+      const colCount = Math.min(range.maxCol, blk.columns.length - 1) - range.minCol + 1;
+      if (rowCount <= 0 || colCount <= 0) {
+        selectionBar.classList.remove("is-visible");
+        return;
+      }
+      const cellTotal = rowCount * colCount;
+      selBadge.textContent =
+        cellTotal === 1
+          ? "Markiert: 1 Zelle"
+          : "Markiert: " + rowCount + " × " + colCount + " Zellen (" + cellTotal + ")";
+      selectionBar.classList.add("is-visible");
+    }
+
+    function ensureActiveTableState() {
+      if (tableEditorState.active && tableEditorState.active.blockId !== blk.id) {
+        clearTableSelection();
+      }
+      if (!tableEditorState.active || tableEditorState.active.blockId !== blk.id) {
+        tableEditorState.active = {
+          blockId: blk.id,
+          blk: blk,
+          gridScroll: gridScroll,
+          tbl: tblRef,
+          anchor: null,
+          lead: null,
+          range: null,
+          applySelectionStyles: applySelectionStyles,
+          updateSelectionUI: updateSelectionUI,
+        };
+      } else {
+        tableEditorState.active.tbl = tblRef;
+        tableEditorState.active.gridScroll = gridScroll;
+      }
+      return tableEditorState.active;
+    }
+
+    function resetTableSelectionForStructuralChange() {
+      if (tableEditorState.active && tableEditorState.active.blockId === blk.id) {
+        tableEditorState.active.range = null;
+        tableEditorState.active.anchor = null;
+        tableEditorState.active.lead = null;
+      }
+      updateSelectionUI();
+    }
+
+    function flashCopiedButtonFeedback() {
+      if (copyFeedbackTimer) {
+        clearTimeout(copyFeedbackTimer);
+      }
+      copySelBtn.textContent = "✓ Kopiert!";
+      copyFeedbackTimer = setTimeout(function () {
+        copySelBtn.textContent = "📋 Kopieren (Ctrl+C)";
+        copyFeedbackTimer = null;
+      }, 1500);
+    }
+
+    function copySelectedRange() {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      const tsv = getTableRangeTsv(blk, active.range);
+      const html = getTableRangeHtml(blk, active.range);
+      writeTableSelectionToClipboard(tsv, html, function (ok) {
+        if (ok) {
+          flashCopiedButtonFeedback();
+        }
+        gridScroll.focus({ preventScroll: true });
+      });
+    }
+
+    function clearSelectedRangeValues() {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      const range = active.range;
+      let changed = false;
+      for (let r = range.minRow; r <= range.maxRow && r < blk.rows.length; r++) {
+        for (let c = range.minCol; c <= range.maxCol && c < blk.columns.length; c++) {
+          const field = blk.columns[c].field;
+          if (blk.rows[r][field] !== "") {
+            blk.rows[r][field] = "";
+            changed = true;
+          }
+          if (tblRef) {
+            const td = tblRef.querySelector('td[data-row-idx="' + r + '"][data-col-idx="' + c + '"]');
+            if (td) {
+              const ta = td.querySelector("textarea.grid-cell-input");
+              if (ta) {
+                ta.value = "";
+                autoResizeCellTextarea(ta);
+              }
+            }
+          }
+        }
+      }
+      if (changed) {
+        markDirty();
+      }
+      gridScroll.focus({ preventScroll: true });
+    }
+
+    function insertRowAt(insertIdx) {
+      const newRow = {};
+      blk.columns.forEach(function (c) {
+        newRow[c.field] = "";
+      });
+      blk.rows.splice(insertIdx, 0, newRow);
+      resetTableSelectionForStructuralChange();
+      renderGrid();
+      markDirty();
+    }
+
+    function insertColumnAt(insertIdx) {
+      const newField = "col_" + uid("c");
+      blk.columns.splice(insertIdx, 0, {
+        field: newField,
+        title: "Spalte " + (blk.columns.length + 1),
+        align: insertIdx === 0 ? "left" : "right",
+        width: 100,
+      });
+      distributeEqualColumnWidths(blk.columns);
+      blk.rows.forEach(function (r) {
+        r[newField] = "";
+      });
+      resetTableSelectionForStructuralChange();
+      renderGrid();
+      markDirty();
+    }
+
+    function deleteColumnAt(colIdx) {
+      deleteColumnsRange(colIdx, colIdx);
+    }
+
+    function deleteColumnsRange(startCol, endCol) {
+      const from = Math.max(0, startCol);
+      const to = Math.min(blk.columns.length - 1, endCol);
+      const removeCount = to - from + 1;
+      if (removeCount <= 0 || blk.columns.length - removeCount < 1) return;
+      const removedCols = blk.columns.splice(from, removeCount);
+      removedCols.forEach(function (col) {
+        blk.rows.forEach(function (r) {
+          delete r[col.field];
+        });
+      });
+      distributeEqualColumnWidths(blk.columns);
+      resetTableSelectionForStructuralChange();
+      renderGrid();
+      markDirty();
+    }
+
+    function deleteRowAt(rowIdx) {
+      deleteRowsRange(rowIdx, rowIdx);
+    }
+
+    function deleteRowsRange(startRow, endRow) {
+      const from = Math.max(0, startRow);
+      const to = Math.min(blk.rows.length - 1, endRow);
+      if (to < from) return;
+      blk.rows.splice(from, to - from + 1);
+      resetTableSelectionForStructuralChange();
+      renderGrid();
+      markDirty();
+    }
+
+    function promoteFirstRowToHeader() {
+      if (!Array.isArray(blk.rows) || blk.rows.length === 0) return;
+      const confirmed =
+        typeof window.confirm === "function"
+          ? window.confirm(
+              "Erste Datenzeile als Kopfzeilenwerte übernehmen?\n" +
+                "Die bisherigen Spaltenüberschriften werden überschrieben und die erste Zeile anschliessend aus den Datenzeilen gelöscht."
+            )
+          : true;
+      if (!confirmed) return;
+      const firstRow = blk.rows[0];
+      blk.columns.forEach(function (col) {
+        const val = firstRow[col.field];
+        col.title = val != null ? String(val) : "";
+      });
+      blk.rows.shift();
+      resetTableSelectionForStructuralChange();
+      renderGrid();
+      markDirty();
+    }
+
+    function pasteTsvAtCell(startRowIdx, startColIdx, clipText) {
+      const prevColCount = blk.columns.length;
+      const pastedRows = parseClipboardTsv(clipText);
+      if (!pastedRows.length) return;
+
+      pastedRows.forEach(function (cells, rOffset) {
+        const targetRowIdx = startRowIdx + rOffset;
+        while (blk.rows.length <= targetRowIdx) {
+          const emptyRow = {};
+          blk.columns.forEach(function (c) { emptyRow[c.field] = ""; });
+          blk.rows.push(emptyRow);
+        }
+        cells.forEach(function (cellVal, cOffset) {
+          const targetColIdx = startColIdx + cOffset;
+          if (targetColIdx >= blk.columns.length) {
+            const newField = "col_" + uid("c");
+            blk.columns.push({
+              field: newField,
+              title: "Spalte " + (blk.columns.length + 1),
+              align: "right",
+              width: 100,
+            });
+          }
+          const targetField = blk.columns[targetColIdx].field;
+          blk.rows[targetRowIdx][targetField] = String(cellVal).trim();
+        });
+      });
+
+      if (blk.columns.length !== prevColCount) {
+        distributeEqualColumnWidths(blk.columns);
+      }
+      resetTableSelectionForStructuralChange();
+      renderGrid();
+      markDirty();
+    }
+
+    function openTableCellContextMenu(clientX, clientY, rIdx, cIdx) {
+      closeTableContextMenu();
+      const menu = document.createElement("div");
+      menu.className = "figure-context-menu";
+      menu.id = "active-table-context-menu";
+
+      function addMenuItem(icon, label, shortcut, isDanger, onClick) {
+        const item = document.createElement("div");
+        item.className = "figure-context-menu-item" + (isDanger ? " danger" : "");
+        const iconSpan = document.createElement("span");
+        iconSpan.textContent = icon;
+        const lblSpan = document.createElement("span");
+        lblSpan.textContent = label;
+        item.appendChild(iconSpan);
+        item.appendChild(lblSpan);
+        if (shortcut) {
+          const scSpan = document.createElement("span");
+          scSpan.className = "figure-context-menu-shortcut";
+          scSpan.textContent = shortcut;
+          item.appendChild(scSpan);
+        }
+        item.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          closeTableContextMenu();
+          onClick();
+        });
+        menu.appendChild(item);
+      }
+
+      function addDivider() {
+        const div = document.createElement("div");
+        div.className = "figure-context-menu-divider";
+        menu.appendChild(div);
+      }
+
+      addMenuItem("📋", "Markierte Zellen kopieren", "Ctrl+C", false, copySelectedRange);
+      addMenuItem("🧹", "Werte entfernen", "Entf", true, clearSelectedRangeValues);
+      addDivider();
+      addMenuItem("↑", "Zeile oberhalb einfügen", "", false, function () { insertRowAt(rIdx); });
+      addMenuItem("↓", "Zeile unterhalb einfügen", "", false, function () { insertRowAt(rIdx + 1); });
+      addMenuItem("←", "Spalte links einfügen", "", false, function () { insertColumnAt(cIdx); });
+      addMenuItem("→", "Spalte rechts einfügen", "", false, function () { insertColumnAt(cIdx + 1); });
+      addDivider();
+      const active = tableEditorState.active;
+      const range = active && active.blockId === blk.id ? active.range : null;
+      const hasMultiRowSel = !!(range && range.maxRow > range.minRow && rIdx >= range.minRow && rIdx <= range.maxRow);
+      if (hasMultiRowSel) {
+        const rowCount = Math.min(range.maxRow, blk.rows.length - 1) - Math.max(0, range.minRow) + 1;
+        addMenuItem("✕", rowCount + " markierte Zeilen löschen", "", true, function () {
+          deleteRowsRange(range.minRow, range.maxRow);
+        });
+      } else {
+        addMenuItem("✕", "Zeile löschen", "", true, function () {
+          deleteRowAt(rIdx);
+        });
+      }
+
+      const hasMultiColSel = !!(range && range.maxCol > range.minCol && cIdx >= range.minCol && cIdx <= range.maxCol);
+      if (hasMultiColSel) {
+        const colCount = Math.min(range.maxCol, blk.columns.length - 1) - Math.max(0, range.minCol) + 1;
+        if (blk.columns.length - colCount >= 1) {
+          addMenuItem("✕", colCount + " markierte Spalten löschen", "", true, function () {
+            deleteColumnsRange(range.minCol, range.maxCol);
+          });
+        }
+      } else if (blk.columns.length > 1) {
+        addMenuItem("✕", "Spalte löschen", "", true, function () {
+          deleteColumnAt(cIdx);
+        });
+      }
+
+      document.body.appendChild(menu);
+
+      const rect = menu.getBoundingClientRect();
+      let left = clientX;
+      let top = clientY;
+      if (left + rect.width > window.innerWidth - 10) {
+        left = window.innerWidth - rect.width - 10;
+      }
+      if (top + rect.height > window.innerHeight - 10) {
+        top = window.innerHeight - rect.height - 10;
+      }
+      menu.style.left = Math.max(10, left) + "px";
+      menu.style.top = Math.max(10, top) + "px";
+    }
+
     const renderGrid = () => {
       gridScroll.innerHTML = "";
       const tbl = document.createElement("table");
       tbl.className = "cms-grid-editor";
+      tblRef = tbl;
 
       if (!Array.isArray(blk.columns) || blk.columns.length === 0) {
         blk.columns = [{ field: "col_1", title: "Spalte 1", align: "left", width: 100 }];
@@ -4757,6 +5400,7 @@
         blk.rows = [];
       }
       ensurePercentageWidths(blk.columns);
+      useFirstRowHeaderBtn.disabled = blk.rows.length === 0;
 
       function updateWidthSumBadge() {
         const sum = blk.columns.reduce(function (acc, c) {
@@ -4807,14 +5451,7 @@
           delColBtn.title = "Spalte löschen";
           delColBtn.textContent = "✕";
           delColBtn.addEventListener("click", function () {
-            const removedField = col.field;
-            blk.columns.splice(cIdx, 1);
-            blk.rows.forEach(function (r) {
-              delete r[removedField];
-            });
-            distributeEqualColumnWidths(blk.columns);
-            renderGrid();
-            markDirty();
+            deleteColumnAt(cIdx);
           });
           ctrl.appendChild(delColBtn);
         }
@@ -4877,6 +5514,9 @@
 
         blk.columns.forEach(function (col, cIdx) {
           const td = document.createElement("td");
+          td.dataset.rowIdx = String(rIdx);
+          td.dataset.colIdx = String(cIdx);
+
           const cellInp = document.createElement("textarea");
           cellInp.rows = 1;
           cellInp.className = "grid-cell-input";
@@ -4889,52 +5529,25 @@
             markDirty();
           });
 
+          cellInp.addEventListener("focus", function () {
+            const active = ensureActiveTableState();
+            if (!tableEditorState.drag || !tableEditorState.drag.active) {
+              active.anchor = { row: rIdx, col: cIdx };
+            }
+          });
+
           // Excel Multi-Zellen Copy-Paste Support
           cellInp.addEventListener("paste", function (e) {
             const clipText = (e.clipboardData || window.clipboardData).getData("text/plain");
-            if (!clipText || (clipText.indexOf("\t") === -1 && clipText.indexOf("\n") === -1)) {
+            if (!clipText || (clipText.indexOf("\t") === -1 && clipText.indexOf("\n") === -1 && clipText.indexOf("\r") === -1)) {
               setTimeout(function () {
                 autoResizeCellTextarea(cellInp);
               }, 0);
               return; // Normales Einfügen in einzelne Zelle
             }
             e.preventDefault();
-            const prevColCount = blk.columns.length;
-            const pastedRows = clipText
-              .replace(/\r\n/g, "\n")
-              .replace(/\r/g, "\n")
-              .split("\n")
-              .filter((line, idx, arr) => !(idx === arr.length - 1 && line === ""));
-
-            pastedRows.forEach(function (line, rOffset) {
-              const targetRowIdx = rIdx + rOffset;
-              while (blk.rows.length <= targetRowIdx) {
-                const emptyRow = {};
-                blk.columns.forEach((c) => (emptyRow[c.field] = ""));
-                blk.rows.push(emptyRow);
-              }
-              const cells = line.split("\t");
-              cells.forEach(function (cellVal, cOffset) {
-                const targetColIdx = cIdx + cOffset;
-                if (targetColIdx >= blk.columns.length) {
-                  const newField = "col_" + uid("c");
-                  blk.columns.push({
-                    field: newField,
-                    title: "Spalte " + (blk.columns.length + 1),
-                    align: "right",
-                    width: 100,
-                  });
-                }
-                const targetField = blk.columns[targetColIdx].field;
-                blk.rows[targetRowIdx][targetField] = cellVal.trim();
-              });
-            });
-
-            if (blk.columns.length !== prevColCount) {
-              distributeEqualColumnWidths(blk.columns);
-            }
-            renderGrid();
-            markDirty();
+            e.stopPropagation();
+            pasteTsvAtCell(rIdx, cIdx, clipText);
           });
 
           td.appendChild(cellInp);
@@ -4951,9 +5564,7 @@
         delRowBtn.title = "Zeile löschen";
         delRowBtn.textContent = "✕";
         delRowBtn.addEventListener("click", function () {
-          blk.rows.splice(rIdx, 1);
-          renderGrid();
-          markDirty();
+          deleteRowAt(rIdx);
         });
         delTd.appendChild(delRowBtn);
         tr.appendChild(delTd);
@@ -4962,9 +5573,182 @@
       });
 
       tbl.appendChild(tbody);
+
+      // Mehrzellige Markierung per Maus-Ziehen & Shift+Klick
+      tbl.addEventListener("mousedown", function (e) {
+        if (e.button !== 0) return;
+        const td = e.target.closest("td[data-row-idx][data-col-idx]");
+        if (!td || !tbl.contains(td)) return;
+
+        const rIdx = parseInt(td.dataset.rowIdx, 10);
+        const cIdx = parseInt(td.dataset.colIdx, 10);
+        if (isNaN(rIdx) || isNaN(cIdx)) return;
+
+        const active = ensureActiveTableState();
+
+        if (e.shiftKey && active.anchor) {
+          e.preventDefault();
+          active.lead = { row: rIdx, col: cIdx };
+          active.range = normalizeTableCellRange(active.anchor, active.lead);
+          applySelectionStyles();
+          updateSelectionUI();
+          gridScroll.focus({ preventScroll: true });
+          return;
+        }
+
+        if (active.range) {
+          active.range = null;
+          active.lead = null;
+          applySelectionStyles();
+          updateSelectionUI();
+        }
+        active.anchor = { row: rIdx, col: cIdx };
+        tableEditorState.drag = {
+          active: true,
+          movedOut: false,
+          blockId: blk.id,
+          tbl: tbl,
+          gridScroll: gridScroll,
+          anchor: { row: rIdx, col: cIdx },
+        };
+      });
+
+      tbl.addEventListener("contextmenu", function (e) {
+        const td = e.target.closest("td[data-row-idx][data-col-idx]");
+        if (!td || !tbl.contains(td)) return;
+        const rIdx = parseInt(td.dataset.rowIdx, 10);
+        const cIdx = parseInt(td.dataset.colIdx, 10);
+        if (isNaN(rIdx) || isNaN(cIdx)) return;
+
+        e.preventDefault();
+        const active = ensureActiveTableState();
+        if (!active.range || !isTableCellInRange(rIdx, cIdx, active.range)) {
+          active.anchor = { row: rIdx, col: cIdx };
+          active.lead = { row: rIdx, col: cIdx };
+          active.range = { minRow: rIdx, maxRow: rIdx, minCol: cIdx, maxCol: cIdx };
+          applySelectionStyles();
+          updateSelectionUI();
+          gridScroll.focus({ preventScroll: true });
+        }
+        openTableCellContextMenu(e.clientX, e.clientY, rIdx, cIdx);
+      });
+
       gridScroll.appendChild(tbl);
+      if (tableEditorState.active && tableEditorState.active.blockId === blk.id) {
+        tableEditorState.active.tbl = tbl;
+        applySelectionStyles();
+      }
+      updateSelectionUI();
       requestAnimationFrame(autoResizeAllGridCells);
     };
+
+    gridScroll.addEventListener("copy", function (e) {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT") && gridScroll.contains(ae)) {
+        if (ae.selectionStart !== ae.selectionEnd) return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.clipboardData) {
+        e.clipboardData.setData("text/plain", getTableRangeTsv(blk, active.range));
+        e.clipboardData.setData("text/html", getTableRangeHtml(blk, active.range));
+      }
+      flashCopiedButtonFeedback();
+    });
+
+    gridScroll.addEventListener("cut", function (e) {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT") && gridScroll.contains(ae)) {
+        if (ae.selectionStart !== ae.selectionEnd) return;
+      }
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.clipboardData) {
+        e.clipboardData.setData("text/plain", getTableRangeTsv(blk, active.range));
+        e.clipboardData.setData("text/html", getTableRangeHtml(blk, active.range));
+      }
+      clearSelectedRangeValues();
+    });
+
+    gridScroll.addEventListener("paste", function (e) {
+      if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      const clipText = (e.clipboardData || window.clipboardData).getData("text/plain");
+      if (!clipText) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (clipText.indexOf("\t") === -1 && clipText.indexOf("\n") === -1 && clipText.indexOf("\r") === -1) {
+        const val = clipText.trim();
+        let changed = false;
+        for (let r = active.range.minRow; r <= active.range.maxRow && r < blk.rows.length; r++) {
+          for (let c = active.range.minCol; c <= active.range.maxCol && c < blk.columns.length; c++) {
+            const field = blk.columns[c].field;
+            if (blk.rows[r][field] !== val) {
+              blk.rows[r][field] = val;
+              changed = true;
+            }
+          }
+        }
+        if (changed) {
+          renderGrid();
+          markDirty();
+        }
+        gridScroll.focus({ preventScroll: true });
+        return;
+      }
+      pasteTsvAtCell(active.range.minRow, active.range.minCol, clipText);
+    });
+
+    gridScroll.addEventListener("keydown", function (e) {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
+        if (!blk.rows.length || !blk.columns.length) return;
+        e.preventDefault();
+        active.anchor = { row: 0, col: 0 };
+        active.lead = { row: blk.rows.length - 1, col: blk.columns.length - 1 };
+        active.range = normalizeTableCellRange(active.anchor, active.lead);
+        applySelectionStyles();
+        updateSelectionUI();
+        return;
+      }
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        clearSelectedRangeValues();
+        return;
+      }
+
+      if (e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown" || e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+        if (!blk.rows.length || !blk.columns.length) return;
+        e.preventDefault();
+        const lead = active.lead || { row: active.range.maxRow, col: active.range.maxCol };
+        let nextRow = lead.row;
+        let nextCol = lead.col;
+        if (e.key === "ArrowUp") nextRow = Math.max(0, nextRow - 1);
+        if (e.key === "ArrowDown") nextRow = Math.min(blk.rows.length - 1, nextRow + 1);
+        if (e.key === "ArrowLeft") nextCol = Math.max(0, nextCol - 1);
+        if (e.key === "ArrowRight") nextCol = Math.min(blk.columns.length - 1, nextCol + 1);
+        active.lead = { row: nextRow, col: nextCol };
+        active.range = normalizeTableCellRange(active.anchor || lead, active.lead);
+        applySelectionStyles();
+        updateSelectionUI();
+      }
+    });
+
+    copySelBtn.addEventListener("click", copySelectedRange);
+    clearSelValuesBtn.addEventListener("click", clearSelectedRangeValues);
+    deselectBtn.addEventListener("click", clearTableSelection);
+
+    useFirstRowHeaderBtn.addEventListener("click", promoteFirstRowToHeader);
 
     eqWidthBtn.addEventListener("click", function () {
       distributeEqualColumnWidths(blk.columns);
@@ -4973,29 +5757,11 @@
     });
 
     addRowBtn.addEventListener("click", function () {
-      const newRow = {};
-      blk.columns.forEach(function (c) {
-        newRow[c.field] = "";
-      });
-      blk.rows.push(newRow);
-      renderGrid();
-      markDirty();
+      insertRowAt(blk.rows.length);
     });
 
     addColBtn.addEventListener("click", function () {
-      const newField = "col_" + uid("f");
-      blk.columns.push({
-        field: newField,
-        title: "Spalte " + (blk.columns.length + 1),
-        align: "right",
-        width: 100,
-      });
-      distributeEqualColumnWidths(blk.columns);
-      blk.rows.forEach(function (r) {
-        r[newField] = "";
-      });
-      renderGrid();
-      markDirty();
+      insertColumnAt(blk.columns.length);
     });
 
     renderGrid();

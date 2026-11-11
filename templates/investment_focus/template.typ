@@ -766,8 +766,9 @@
     } else {
       // 1. Suche nach dem optimalen Trennpunkt zwischen eigenständigen Blöcken.
       // Typografische Grundregel: Niemals direkt nach einer Überschrift trennen!
+      // Bei Gleichstand oder geringem Unterschied soll die linke Spalte mindestens so lang wie die rechte sein.
       let best-split-idx = 0
-      let best-diff = 999999pt
+      let best-score = 999999pt
       let best-max-h = 999999pt
 
       if items.len() >= 2 {
@@ -780,8 +781,10 @@
             let right-h = measure(block(width: col-w, for it in right-items [ #render-single-block(it, in-box: false) ])).height
             let diff = calc.abs(left-h - right-h)
             let max-h = calc.max(left-h, right-h)
-            if diff < best-diff {
-              best-diff = diff
+            let right-heavy-penalty = if right-h > left-h + 2pt { 60pt } else { 0pt }
+            let score = diff + right-heavy-penalty
+            if score < best-score {
+              best-score = score
               best-split-idx = split-idx
               best-max-h = max-h
             }
@@ -792,7 +795,11 @@
       // Wenn ein sauberer Block-Split gefunden wird, der auf die Seite passt:
       // Rendere als 2-spaltiges Grid. Dadurch werden NIE Wörter oder Absätze
       // über die Spaltengrenze hinweg zerrissen und die Spalten sind perfekt balanciert!
-      if best-split-idx > 0 and avail-h > 80pt and best-max-h <= (avail-h + 10pt) {
+      let page-body-h = page-h - 2cm - bottom-margin
+      if best-split-idx > 0 and ((avail-h > 80pt and best-max-h <= (avail-h + 10pt)) or (avail-h <= 80pt and best-max-h <= page-body-h)) {
+        if avail-h <= 80pt {
+          pagebreak(weak: true)
+        }
         let left-items = items.slice(0, best-split-idx)
         let right-items = items.slice(best-split-idx)
         grid(
@@ -835,6 +842,85 @@
   })
 }
 
+#let render-col-run-smart(items, bounds, max-float-h: 520pt, gutter: 16pt) = context {
+  let start-pos = here().position()
+  let col-w = (bounds.width - gutter) / 2
+  let page-h = 841.89pt
+  let top-margin = 2cm
+  let bottom-margin = 2.4cm
+  let page-body-h = page-h - top-margin - bottom-margin
+  let avail-h = calc.max(0pt, page-h - start-pos.y - bottom-margin)
+
+  let has-full-table = items.any(it => it.type == "table" and it.at("layout", default: "column") == "full")
+  if not has-full-table {
+    render-balanced-col-run(items, gutter: gutter)
+  } else {
+    let used-h = 0pt
+    let pending-col-items = ()
+    let overflow-idx = none
+
+    let flush-col-h = (col-items) => {
+      if col-items.len() == 0 {
+        0pt
+      } else {
+        let h = measure(block(width: col-w, for c-it in col-items [ #render-single-block(c-it, in-box: false) ])).height
+        let max-indiv-h = 0pt
+        for c-it in col-items {
+          if c-it.type in ("figure", "db_chart", "callout", "quote") {
+            let ih = measure(block(width: col-w, render-single-block(c-it, in-box: false))).height
+            if ih > max-indiv-h { max-indiv-h = ih }
+          }
+        }
+        calc.max(h / 2 + 8pt, max-indiv-h + 8pt)
+      }
+    }
+
+    for (idx, it) in items.enumerate() {
+      let is-full = (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "full")
+      if not is-full {
+        pending-col-items.push(it)
+      } else {
+        used-h = used-h + flush-col-h(pending-col-items)
+        pending-col-items = ()
+
+        let b-probe = it
+        b-probe.insert("_inline_full", true)
+        let box-h = if it.type == "table" {
+          measure(block(width: bounds.width, render-table-box(b-probe))).height
+        } else {
+          measure(block(width: bounds.width, render-figure-box(b-probe))).height
+        }
+
+        if it.type == "table" {
+          let rem-h = if used-h <= avail-h {
+            avail-h - used-h
+          } else {
+            let spill = used-h - avail-h
+            page-body-h - calc.rem(spill, page-body-h)
+          }
+          if box-h > max-float-h or (box-h + 14pt) > rem-h {
+            overflow-idx = idx
+            break
+          }
+        }
+        used-h = used-h + box-h + 14pt
+      }
+    }
+
+    if overflow-idx == none {
+      render-balanced-col-run(items, gutter: gutter)
+    } else {
+      if overflow-idx > 0 {
+        render-balanced-col-run(items.slice(0, overflow-idx), gutter: gutter)
+      }
+      render-single-block(items.at(overflow-idx), in-box: false, inline-full: true)
+      if overflow-idx + 1 < items.len() {
+        render-col-run-smart(items.slice(overflow-idx + 1), bounds, max-float-h: max-float-h, gutter: gutter)
+      }
+    }
+  }
+}
+
 #layout(bounds => {
   let max-float-h = 520pt
   let runs = ()
@@ -874,7 +960,7 @@
     if run.kind == "full" {
       render-single-block(run.item, in-box: false, inline-full: true)
     } else {
-      render-balanced-col-run(run.items, gutter: 16pt)
+      render-col-run-smart(run.items, bounds, max-float-h: max-float-h, gutter: 16pt)
     }
   }
 })
