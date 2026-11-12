@@ -287,6 +287,7 @@ class TableBlock(BaseModel):
         description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
     )
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
+    show_header: bool = Field(default=True, description="Tabellen-Kopfzeile anzeigen")
 
     @field_validator("full_position", mode="before")
     @classmethod

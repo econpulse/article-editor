@@ -642,6 +642,7 @@
         source: "Quelle: LUKB Investment Office",
         layout: "column",
         full_position: "auto",
+        show_header: true,
         highlight_last_row: false,
         columns: [
           { field: "col_1", title: "Kennzahl / Sektor", align: "left", width: 33.4 },
@@ -5064,6 +5065,25 @@
     widthSumBadge.className = "table-width-sum-badge";
     widthSumBadge.title = "Summe der Spaltenbreiten (sollte 100 % ergeben)";
 
+    const headerToggleWrap = document.createElement("label");
+    headerToggleWrap.style.display = "inline-flex";
+    headerToggleWrap.style.alignItems = "center";
+    headerToggleWrap.style.gap = "5px";
+    headerToggleWrap.style.fontSize = "12px";
+    headerToggleWrap.style.marginLeft = "8px";
+    headerToggleWrap.style.cursor = "pointer";
+
+    const headerCheckbox = document.createElement("input");
+    headerCheckbox.type = "checkbox";
+    headerCheckbox.checked = blk.show_header !== false;
+    headerCheckbox.addEventListener("change", function () {
+      blk.show_header = headerCheckbox.checked;
+      renderGrid();
+      markDirty();
+    });
+    headerToggleWrap.appendChild(headerCheckbox);
+    headerToggleWrap.appendChild(document.createTextNode("Kopfzeile einblenden"));
+
     const totalToggleWrap = document.createElement("label");
     totalToggleWrap.style.display = "inline-flex";
     totalToggleWrap.style.alignItems = "center";
@@ -5087,6 +5107,7 @@
     btnGroup.appendChild(useFirstRowHeaderBtn);
     btnGroup.appendChild(eqWidthBtn);
     btnGroup.appendChild(widthSumBadge);
+    btnGroup.appendChild(headerToggleWrap);
     btnGroup.appendChild(totalToggleWrap);
 
     const excelHint = document.createElement("span");
@@ -5551,6 +5572,10 @@
 
       // THEAD
       const thead = document.createElement("thead");
+      const isHeaderHidden = blk.show_header === false;
+      if (isHeaderHidden) {
+        thead.className = "is-header-hidden";
+      }
       const htr = document.createElement("tr");
 
       blk.columns.forEach(function (col, cIdx) {
@@ -5562,6 +5587,10 @@
         colInp.type = "text";
         colInp.className = "grid-col-title-input";
         colInp.value = col.title || "";
+        if (isHeaderHidden) {
+          colInp.title = "Kopfzeile ist ausgeblendet (wird im PDF/HTML nicht gerendert)";
+          colInp.placeholder = "(ausgeblendet)";
+        }
         colInp.addEventListener("input", function () {
           col.title = colInp.value;
           markDirty();

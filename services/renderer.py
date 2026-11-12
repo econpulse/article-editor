@@ -845,8 +845,10 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
 
             cols = blk.get("columns", [])
             rows = blk.get("rows", [])
+            show_header = blk.get("show_header", True)
             if cols:
-                t = container.add_table(rows=len(rows) + 1, cols=len(cols))
+                total_rows = len(rows) + (1 if show_header else 0)
+                t = container.add_table(rows=total_rows, cols=len(cols))
                 t.alignment = WD_TABLE_ALIGNMENT.CENTER
                 t.autofit = False
 
@@ -861,28 +863,32 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 total_weight = sum(weights) or 100.0
                 total_table_inches = 6.5
 
-                hdr_cells = t.rows[0].cells
-                for c_idx, col in enumerate(cols):
-                    col_w = Inches(total_table_inches * (weights[c_idx] / total_weight))
-                    t.columns[c_idx].width = col_w
-                    cell = hdr_cells[c_idx]
-                    cell.width = col_w
-                    cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
-                    _set_docx_cell_background(cell, "002855")
-                    _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
-                    p = cell.paragraphs[0]
-                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT if col.get("align") == "right" else WD_ALIGN_PARAGRAPH.LEFT
-                    run = p.add_run(col.get("title", ""))
-                    run.bold = True
-                    run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                    run.font.size = Pt(8.5)
+                if show_header:
+                    hdr_cells = t.rows[0].cells
+                    for c_idx, col in enumerate(cols):
+                        col_w = Inches(total_table_inches * (weights[c_idx] / total_weight))
+                        t.columns[c_idx].width = col_w
+                        cell = hdr_cells[c_idx]
+                        cell.width = col_w
+                        cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                        _set_docx_cell_background(cell, "002855")
+                        _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
+                        p = cell.paragraphs[0]
+                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT if col.get("align") == "right" else WD_ALIGN_PARAGRAPH.LEFT
+                        run = p.add_run(col.get("title", ""))
+                        run.bold = True
+                        run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
+                        run.font.size = Pt(8.5)
 
+                row_offset = 1 if show_header else 0
                 for r_idx, row in enumerate(rows):
                     is_total = blk.get("highlight_last_row") and (r_idx == len(rows) - 1)
-                    row_cells = t.rows[r_idx + 1].cells
+                    row_cells = t.rows[r_idx + row_offset].cells
                     bg_hex = "E6EEF7" if is_total else ("F4F7FA" if r_idx % 2 == 1 else "FFFFFF")
                     for c_idx, col in enumerate(cols):
                         col_w = Inches(total_table_inches * (weights[c_idx] / total_weight))
+                        if not show_header:
+                            t.columns[c_idx].width = col_w
                         cell = row_cells[c_idx]
                         cell.width = col_w
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP

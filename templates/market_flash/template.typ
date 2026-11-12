@@ -399,24 +399,45 @@
     ]
 
     #set table.cell(breakable: false)
+    #let show-header = blk.at("show_header", default: true)
     #table(
       columns: col-widths,
       align: aligns,
       stroke: (x, y) => (
-        top: if y == 0 { 0.8pt + lukb-navy } else if y == 1 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border },
-        bottom: if y == rows.len() { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+        top: if show-header {
+          if y == 0 { 0.8pt + lukb-navy } else if y == 1 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+        } else {
+          if y == 0 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+        },
+        bottom: if show-header {
+          if y == rows.len() { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+        } else {
+          if rows.len() > 0 and y == rows.len() - 1 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+        }
       ),
       fill: (x, y) => {
-        if y == 0 { lukb-navy }
-        else if blk.highlight_last_row and y == rows.len() { rgb("#E6EEF7") }
-        else if calc.even(y) { lukb-surface }
-        else { white }
+        if show-header {
+          if y == 0 { lukb-navy }
+          else if blk.highlight_last_row and y == rows.len() { rgb("#E6EEF7") }
+          else if calc.even(y) { lukb-surface }
+          else { white }
+        } else {
+          if rows.len() > 0 and blk.highlight_last_row and y == rows.len() - 1 { rgb("#E6EEF7") }
+          else if calc.odd(y) { lukb-surface }
+          else { white }
+        }
       },
       inset: (x: 6pt, y: 5pt),
-      table.header(
-        repeat: true,
-        ..cols.map(c => text(font: font-heading, weight: "medium", size: 8.2pt, fill: white)[#c.title]),
-      ),
+      ..(if show-header {
+        (
+          table.header(
+            repeat: true,
+            ..cols.map(c => text(font: font-heading, weight: "medium", size: 8.2pt, fill: white)[#c.title]),
+          ),
+        )
+      } else {
+        ()
+      }),
       ..for (r-idx, row-dict) in rows.enumerate() {
         let is-total = blk.highlight_last_row and (r-idx == rows.len() - 1)
         cols.map(c => {

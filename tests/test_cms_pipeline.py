@@ -885,6 +885,38 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     )
     assert tbl_blk.columns[0].width == 75.0
     assert tbl_blk.columns[1].width == 25.0
+    assert tbl_blk.show_header is True
+
+    # 1b. Option Kopfzeile ein-/ausblenden (show_header)
+    assert default_tbl.show_header is True
+    tbl_no_hdr = TableBlock(
+        title="Tabelle ohne Kopfzeile",
+        show_header=False,
+        columns=[
+            {"field": "k", "title": "Kennzahl", "align": "left", "width": 50.0},
+            {"field": "v", "title": "Wert", "align": "right", "width": 50.0},
+        ],
+        rows=[
+            {"k": "KGV 2026", "v": "14.2"},
+            {"k": "Dividendenrendite", "v": "3.8 %"},
+        ],
+    )
+    assert tbl_no_hdr.show_header is False
+    doc_no_hdr = ArticleDocument(
+        id="art-table-no-header-test",
+        template_id="investment_focus",
+        blocks=[tbl_no_hdr.model_dump()],
+    )
+    html_no_hdr = render_web_html(doc_no_hdr)
+    assert "<thead>" not in html_no_hdr
+    assert "KGV 2026" in html_no_hdr
+    pdf_no_hdr_focus = render_pdf_bytes(doc_no_hdr)
+    assert pdf_no_hdr_focus.startswith(b"%PDF-")
+    doc_no_hdr.template_id = "market_flash"
+    pdf_no_hdr_flash = render_pdf_bytes(doc_no_hdr)
+    assert pdf_no_hdr_flash.startswith(b"%PDF-")
+    docx_no_hdr = render_docx_bytes(doc_no_hdr)
+    assert docx_no_hdr.startswith(b"PK\x03\x04")
 
     # 2. DB-Chart Palettensteuerung (nur LUKB Standard & Blau-Abstufung) & Default-Typ 'line'
     default_chart = DbChartBlock(title="Default Chart")

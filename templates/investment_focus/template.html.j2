@@ -785,6 +785,7 @@
                   <col style="width: {{ '%.2f'|format(pct) }}%;" />
                 {% endfor %}
               </colgroup>
+              {% if blk.show_header is not defined or blk.show_header %}
               <thead>
                 <tr>
                   {% for col in blk.columns %}
@@ -792,6 +793,7 @@
                   {% endfor %}
                 </tr>
               </thead>
+              {% endif %}
               <tbody>
                 {% for row in blk.rows %}
                 <tr class="{% if blk.highlight_last_row and loop.last %}row-total{% endif %}">
