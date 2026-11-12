@@ -19,6 +19,7 @@
     sortableInstance: null,
     selectedBlockIds: new Set(),
     lastSelectedBlockId: null,
+    undoStack: [],
     previewMode: "pdf", // "pdf" (Typst SVG) | "web" (HTML5)
     autoPreview: true, // Kontinuierliche Aktualisierung der Typst-Vorschau
     previewPending: false,
@@ -45,6 +46,231 @@
 
   function deepClone(obj) {
     return obj ? JSON.parse(JSON.stringify(obj)) : null;
+  }
+
+  function escapeHtml(str) {
+    if (str == null) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  // ==========================================================================
+  // Undo-Stack & Interaktive Toast-Notification
+  // ==========================================================================
+
+  const MAX_UNDO_STACK = 25;
+  let undoToastTimer = null;
+
+  function pushUndo(entry) {
+    if (!state.undoStack) state.undoStack = [];
+    state.undoStack.push(entry);
+    if (state.undoStack.length > MAX_UNDO_STACK) {
+      state.undoStack.shift();
+    }
+    updateUndoUi();
+    showUndoToast(entry);
+  }
+
+  function clearUndoStack() {
+    state.undoStack = [];
+    updateUndoUi();
+    hideUndoToast();
+  }
+
+  function updateUndoUi() {
+    const btn = document.getElementById("btn-undo-action");
+    if (!btn) return;
+    const count = state.undoStack ? state.undoStack.length : 0;
+    if (count > 0) {
+      btn.disabled = false;
+      btn.classList.remove("btn-undo-disabled");
+      btn.classList.add("btn-undo-active");
+      const last = state.undoStack[state.undoStack.length - 1];
+      btn.innerHTML = `<span class="undo-icon" style="font-size:14px;margin-right:4px;">↩</span>Rückgängig <span class="undo-count-badge">${count}</span>`;
+      btn.title = `«${last.description}» rückgängig machen (Ctrl+Z)`;
+    } else {
+      btn.disabled = true;
+      btn.classList.add("btn-undo-disabled");
+      btn.classList.remove("btn-undo-active");
+      btn.innerHTML = `<span class="undo-icon" style="font-size:14px;margin-right:4px;">↩</span>Rückgängig`;
+      btn.title = "Keine Aktionen zum Rückgängig machen vorhanden (Ctrl+Z)";
+    }
+  }
+
+  function performUndo() {
+    if (!state.undoStack || state.undoStack.length === 0) {
+      return false;
+    }
+    if (!state.article) return false;
+    if (!Array.isArray(state.article.blocks)) state.article.blocks = [];
+
+    const entry = state.undoStack.pop();
+    updateUndoUi();
+
+    if (entry.type === "delete_blocks") {
+      // Sortiere aufsteigend nach ursprünglichem Index, damit das Einfügen an korrekten Stellen erfolgt
+      const sorted = entry.items.slice().sort(function (a, b) {
+        return a.index - b.index;
+      });
+      const restoredIds = [];
+      sorted.forEach(function (item) {
+        const targetIdx = Math.min(Math.max(0, item.index), state.article.blocks.length);
+        state.article.blocks.splice(targetIdx, 0, deepClone(item.block));
+        restoredIds.push(item.block.id);
+      });
+
+      renderBlocksCanvas();
+      markDirty();
+      updateFloatingSelectionBar();
+
+      // Zum ersten wiederhergestellten Block scrollen und dezent hervorheben
+      if (restoredIds.length > 0) {
+        setTimeout(function () {
+          const firstEl = document.querySelector('[data-block-id="' + restoredIds[0] + '"]');
+          if (firstEl) {
+            firstEl.scrollIntoView({ behavior: "smooth", block: "center" });
+            firstEl.classList.add("block-restored-highlight");
+            setTimeout(function () {
+              firstEl.classList.remove("block-restored-highlight");
+            }, 1800);
+          }
+        }, 60);
+      }
+
+      const countRemaining = state.undoStack ? state.undoStack.length : 0;
+      const countRestored = restoredIds.length;
+      const label = countRestored === 1 ? "Block wiederhergestellt" : `${countRestored} Blöcke wiederhergestellt`;
+      showRestoredToast(label, countRemaining);
+      return true;
+    }
+    return false;
+  }
+
+  function ensureUndoToastContainer() {
+    let container = document.getElementById("cms-undo-toast");
+    if (!container) {
+      container = document.createElement("div");
+      container.id = "cms-undo-toast";
+      container.className = "cms-undo-toast";
+      document.body.appendChild(container);
+    }
+    return container;
+  }
+
+  function hideUndoToast() {
+    if (undoToastTimer) {
+      clearTimeout(undoToastTimer);
+      undoToastTimer = null;
+    }
+    const container = document.getElementById("cms-undo-toast");
+    if (container) {
+      container.classList.remove("is-visible");
+    }
+  }
+
+  function showUndoToast(entry) {
+    const container = ensureUndoToastContainer();
+    if (undoToastTimer) {
+      clearTimeout(undoToastTimer);
+      undoToastTimer = null;
+    }
+
+    const DURATION = 9000; // 9 Sekunden Anzeigedauer
+
+    container.innerHTML = `
+      <div class="cms-undo-toast-inner">
+        <div class="cms-undo-toast-content">
+          <span class="cms-undo-toast-icon">🗑️</span>
+          <span class="cms-undo-toast-message">${escapeHtml(entry.description || "Inhaltsblock gelöscht")}</span>
+        </div>
+        <div class="cms-undo-toast-actions">
+          <button type="button" class="btn-undo-toast-action" id="btn-toast-undo-click">
+            ↩ Rückgängig <kbd>Ctrl+Z</kbd>
+          </button>
+          <button type="button" class="btn-undo-toast-close" title="Schliessen" id="btn-toast-undo-dismiss">✕</button>
+        </div>
+        <div class="cms-undo-toast-progress-track">
+          <div class="cms-undo-toast-progress-bar" id="cms-undo-progress-bar"></div>
+        </div>
+      </div>
+    `;
+
+    const undoBtn = container.querySelector("#btn-toast-undo-click");
+    if (undoBtn) {
+      undoBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        performUndo();
+      });
+    }
+
+    const closeBtn = container.querySelector("#btn-toast-undo-dismiss");
+    if (closeBtn) {
+      closeBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        hideUndoToast();
+      });
+    }
+
+    container.classList.add("is-visible");
+
+    const bar = container.querySelector("#cms-undo-progress-bar");
+    if (bar) {
+      bar.style.width = "100%";
+      bar.style.transition = `width ${DURATION}ms linear`;
+      void bar.offsetWidth; // Reflow erzwingen
+      bar.style.width = "0%";
+    }
+
+    undoToastTimer = setTimeout(function () {
+      hideUndoToast();
+    }, DURATION);
+  }
+
+  function showRestoredToast(message, countRemaining) {
+    const container = ensureUndoToastContainer();
+    if (undoToastTimer) {
+      clearTimeout(undoToastTimer);
+      undoToastTimer = null;
+    }
+
+    let extraHtml = "";
+    if (countRemaining > 0) {
+      extraHtml = `
+        <div class="cms-undo-toast-actions">
+          <button type="button" class="btn-undo-toast-action" id="btn-toast-undo-next">
+            Nochmals rückgängig (${countRemaining})
+          </button>
+        </div>
+      `;
+    }
+
+    container.innerHTML = `
+      <div class="cms-undo-toast-inner cms-undo-toast-success">
+        <div class="cms-undo-toast-content">
+          <span class="cms-undo-toast-icon">✓</span>
+          <span class="cms-undo-toast-message">${escapeHtml(message)}</span>
+        </div>
+        ${extraHtml}
+      </div>
+    `;
+
+    const nextBtn = container.querySelector("#btn-toast-undo-next");
+    if (nextBtn) {
+      nextBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        performUndo();
+      });
+    }
+
+    container.classList.add("is-visible");
+
+    undoToastTimer = setTimeout(function () {
+      hideUndoToast();
+    }, countRemaining > 0 ? 5000 : 2200);
   }
 
   function getActiveFocusedBlockId() {
@@ -923,6 +1149,14 @@
     if (count > 1 && !confirm(count + " ausgewählte Blöcke wirklich löschen?")) {
       return;
     }
+
+    const deletedItems = [];
+    state.article.blocks.forEach(function (b, idx) {
+      if (state.selectedBlockIds.has(b.id)) {
+        deletedItems.push({ index: idx, block: deepClone(b) });
+      }
+    });
+
     state.article.blocks = state.article.blocks.filter(function (b) {
       return !state.selectedBlockIds.has(b.id);
     });
@@ -931,6 +1165,18 @@
     renderBlocksCanvas();
     markDirty();
     updateFloatingSelectionBar();
+
+    if (deletedItems.length > 0) {
+      const desc =
+        deletedItems.length === 1
+          ? `Block «${getBlockTypeLabel(deletedItems[0].block.type)}» gelöscht`
+          : `${deletedItems.length} Blöcke gelöscht`;
+      pushUndo({
+        type: "delete_blocks",
+        description: desc,
+        items: deletedItems,
+      });
+    }
   }
 
   function openMoveToDialog(anchorBtn) {
@@ -1452,10 +1698,21 @@
     delBtn.title = "Block löschen";
     delBtn.textContent = "✕";
     delBtn.addEventListener("click", function () {
+      const deletedBlock = deepClone(blk);
+      const deletedIndex = index;
+      const typeLabel = getBlockTypeLabel(blk.type);
+
       state.selectedBlockIds.delete(blk.id);
       state.article.blocks.splice(index, 1);
       renderBlocksCanvas();
       markDirty();
+      updateFloatingSelectionBar();
+
+      pushUndo({
+        type: "delete_blocks",
+        description: `Block «${typeLabel}» gelöscht`,
+        items: [{ index: deletedIndex, block: deletedBlock }],
+      });
     });
 
     headerActions.appendChild(upBtn);
@@ -6088,6 +6345,8 @@
 
   window.lukbToggleSidebar = toggleSidebar;
   window.lukbSetSidebarCollapsed = setSidebarCollapsed;
+  window.lukbPerformUndo = performUndo;
+  window.lukbClearUndo = clearUndoStack;
 
   // ==========================================================================
   // Such- & Publikations-Dialog (Modal / Command Palette, Ctrl+K)
@@ -6521,7 +6780,7 @@
       });
     }
 
-    // Globale Shortcuts: Ctrl+K (Such- & Publikations-Dialog), Ctrl+B (Sidebar ein-/ausklappen), Esc (Schliessen)
+    // Globale Shortcuts: Ctrl+K (Such- & Publikations-Dialog), Ctrl+B (Sidebar ein-/ausklappen), Ctrl+Z (Undo), Esc (Schliessen)
     document.addEventListener("keydown", function (ev) {
       if ((ev.ctrlKey || ev.metaKey) && ev.key && ev.key.toLowerCase() === "k") {
         ev.preventDefault();
@@ -6538,6 +6797,26 @@
       ) {
         ev.preventDefault();
         toggleSidebar();
+      } else if (
+        (ev.ctrlKey || ev.metaKey) &&
+        ev.key &&
+        ev.key.toLowerCase() === "z" &&
+        !ev.shiftKey
+      ) {
+        // Native Text-Eingaben (Inputs, Textareas, Contenteditable, RichText) behalten ihr natives Browser-Undo
+        const target = ev.target;
+        const isTextEditing =
+          target &&
+          (target.tagName === "INPUT" ||
+            target.tagName === "TEXTAREA" ||
+            target.isContentEditable ||
+            target.closest(".richtext-surface"));
+        if (!isTextEditing) {
+          if (state.undoStack && state.undoStack.length > 0) {
+            ev.preventDefault();
+            performUndo();
+          }
+        }
       } else if (ev.key === "Escape" && state.modalOpen) {
         ev.preventDefault();
         closePubModal();
@@ -6578,6 +6857,7 @@
       }
       state.selectedBlockIds.clear();
       state.lastSelectedBlockId = null;
+      clearUndoStack();
       if (typeof closeBlockPickerPopup === "function") closeBlockPickerPopup();
       renderMetadataForm();
       renderBlocksCanvas();

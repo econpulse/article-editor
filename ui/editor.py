@@ -249,10 +249,24 @@ def block_toolbar_ui() -> ui.Tag:
         )
 
     return ui.div(
-        ui.span(
-            "Inhaltsblöcke (per Drag & Drop ⋮⋮ sortierbar):",
-            class_="font-medium",
-            style="color:#002855;font-size:13.5px;",
+        ui.div(
+            ui.span(
+                "Inhaltsblöcke (per Drag & Drop ⋮⋮ sortierbar):",
+                class_="font-medium",
+                style="color:#002855;font-size:13.5px;",
+            ),
+            ui.tags.button(
+                ui.span("↩", class_="undo-icon", style="font-size:14px;margin-right:4px;"),
+                "Rückgängig",
+                id="btn-undo-action",
+                type="button",
+                class_="btn-lukb btn-lukb-ghost btn-lukb-sm btn-undo-action btn-undo-disabled",
+                title="Gelöschten Block rückgängig machen (Ctrl+Z)",
+                disabled=True,
+                onclick="if(window.lukbPerformUndo){window.lukbPerformUndo();}",
+            ),
+            class_="blocks-toolbar-left",
+            style="display:flex;align-items:center;gap:10px;",
         ),
         ui.div(*buttons, class_="add-block-bar"),
         class_="blocks-toolbar-sticky",
