@@ -85,11 +85,16 @@
     label.textContent = text;
   }
 
+  let statsDebounceTimer = null;
+
   function markDirty() {
     if (!state.article) return;
     state.isDirty = true;
     setAutosaveIndicator("dirty", "Ungespeicherte Änderungen …");
-    updateLiveStatsCounter();
+    if (statsDebounceTimer) {
+      clearTimeout(statsDebounceTimer);
+    }
+    statsDebounceTimer = setTimeout(updateLiveStatsCounter, 250);
     if (state.autosaveTimer) {
       clearTimeout(state.autosaveTimer);
     }
@@ -653,6 +658,17 @@
 
   function openBlockPickerPopup(triggerElement, targetIndex) {
     closeBlockPickerPopup();
+
+    if (typeof targetIndex !== "number" || targetIndex < 0) {
+      const card = triggerElement.closest(".cms-block-card");
+      if (card && card.parentElement) {
+        const cards = Array.from(card.parentElement.querySelectorAll(":scope > .cms-block-card"));
+        const idx = cards.indexOf(card);
+        targetIndex = idx >= 0 ? idx + 1 : 0;
+      } else {
+        targetIndex = 0;
+      }
+    }
 
     const parentInserter = triggerElement.closest(".block-inline-inserter");
     if (parentInserter) {
@@ -1256,18 +1272,57 @@
       },
       onEnd: function () {
         stopEditorAutoScroll();
-
-        const cardElements = Array.from(canvas.querySelectorAll(":scope > .cms-block-card"));
-        const newOrderIds = cardElements.map(function (el) { return el.dataset.blockId; });
-        const blockMap = new Map();
-        (state.article.blocks || []).forEach(function (b) { blockMap.set(b.id, b); });
-
-        state.article.blocks = newOrderIds.map(function (id) { return blockMap.get(id); }).filter(Boolean);
-
-        renderBlocksCanvas();
+        syncBlockOrderFromDOM(canvas);
         markDirty();
         updateFloatingSelectionBar();
       },
+    });
+  }
+
+  function syncBlockOrderFromDOM(canvas) {
+    if (!canvas) canvas = document.getElementById("lukb-blocks-canvas");
+    if (!canvas || !state.article || !state.article.blocks) return;
+
+    const cardElements = Array.from(canvas.querySelectorAll(":scope > .cms-block-card"));
+    const newOrderIds = cardElements.map(function (el) { return el.dataset.blockId; });
+    const blockMap = new Map();
+    state.article.blocks.forEach(function (b) { blockMap.set(b.id, b); });
+
+    state.article.blocks = newOrderIds.map(function (id) { return blockMap.get(id); }).filter(Boolean);
+
+    // Bestehende DOM-Karten ohne destruktives Re-Rendering in-place anpassen
+    let insideBox = false;
+    cardElements.forEach(function (card, index) {
+      const blk = state.article.blocks[index];
+      if (!blk) return;
+      const isMarker = blk.type === "box_start" || blk.type === "box_end";
+      if (blk.type === "box_start") insideBox = true;
+
+      if (insideBox && !isMarker) {
+        card.classList.add("block-inside-textbox");
+      } else {
+        card.classList.remove("block-inside-textbox");
+      }
+
+      // Nummerierung im Badge anpassen
+      const pill = card.querySelector(".block-type-pill");
+      if (pill) {
+        pill.textContent = (index + 1) + ". " + getBlockTypeLabel(blk.type);
+      }
+
+      // Top-Inserter: Nur an erster Karte führen
+      const existingTopInserter = card.querySelector(":scope > .top-inserter");
+      if (index === 0) {
+        if (!existingTopInserter) {
+          card.insertBefore(createInlineInserterElement(0, true), card.firstChild);
+        }
+      } else {
+        if (existingTopInserter) {
+          existingTopInserter.remove();
+        }
+      }
+
+      if (blk.type === "box_end") insideBox = false;
     });
   }
 
@@ -2858,183 +2913,6 @@
     const rect = targetEl.getBoundingClientRect();
     popover.style.top = (rect.bottom + window.scrollY + 6) + "px";
     popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left + window.scrollX)) + "px";
-  }
-
-  function openLinkPopover(targetOrContext, editable, onChange) {
-    closeActivePopover();
-
-    const isExistingAnchor =
-      targetOrContext &&
-      targetOrContext.nodeType === 1 &&
-      targetOrContext.tagName === "A";
-    const anchorEl = isExistingAnchor ? targetOrContext : null;
-    const savedRange = !isExistingAnchor ? targetOrContext : null;
-
-    const popover = document.createElement("div");
-    popover.className = "lukb-term-popover";
-
-    const header = document.createElement("div");
-    header.className = "lukb-popover-header";
-    header.innerHTML = isExistingAnchor
-      ? "<span>🔗 Link bearbeiten</span>"
-      : "<span>🔗 Link einfügen</span>";
-    const closeBtn = document.createElement("button");
-    closeBtn.type = "button";
-    closeBtn.className = "btn-icon-only";
-    closeBtn.textContent = "✕";
-    closeBtn.style.padding = "0 4px";
-    closeBtn.addEventListener("click", closeActivePopover);
-    header.appendChild(closeBtn);
-    popover.appendChild(header);
-
-    const textLbl = document.createElement("label");
-    textLbl.className = "field-label";
-    textLbl.style.fontSize = "11px";
-    textLbl.style.marginBottom = "3px";
-    textLbl.textContent = "Angezeigter Link-Text:";
-    popover.appendChild(textLbl);
-
-    const textInp = document.createElement("input");
-    textInp.type = "text";
-    textInp.className = "cms-input font-medium";
-    textInp.style.marginBottom = "8px";
-    textInp.placeholder = "z.B. Publikation öffnen";
-    textInp.value = anchorEl
-      ? anchorEl.textContent.trim()
-      : (savedRange ? savedRange.toString().trim() : "");
-    popover.appendChild(textInp);
-
-    const urlLbl = document.createElement("label");
-    urlLbl.className = "field-label";
-    urlLbl.style.fontSize = "11px";
-    urlLbl.style.marginBottom = "3px";
-    urlLbl.textContent = "Ziel-URL (öffnet im neuen Tab):";
-    popover.appendChild(urlLbl);
-
-    const urlInp = document.createElement("input");
-    urlInp.type = "url";
-    urlInp.className = "cms-input";
-    urlInp.placeholder = "https://www.lukb.ch/...";
-    urlInp.value = anchorEl ? (anchorEl.getAttribute("href") || "") : "";
-    popover.appendChild(urlInp);
-
-    const actions = document.createElement("div");
-    actions.className = "lukb-popover-actions";
-
-    if (anchorEl) {
-      const removeBtn = document.createElement("button");
-      removeBtn.type = "button";
-      removeBtn.className = "btn-lukb btn-lukb-outline-light btn-lukb-sm";
-      removeBtn.style.color = "#DC2626";
-      removeBtn.style.borderColor = "#FCA5A5";
-      removeBtn.textContent = "✕ Link entfernen";
-      removeBtn.title = "Entfernt den Link und behält den Text";
-      removeBtn.addEventListener("click", function () {
-        const textNode = document.createTextNode(anchorEl.textContent);
-        anchorEl.parentNode.replaceChild(textNode, anchorEl);
-        closeActivePopover();
-        onChange(editable.innerHTML);
-        markDirty();
-      });
-      actions.appendChild(removeBtn);
-    } else {
-      const spacer = document.createElement("span");
-      actions.appendChild(spacer);
-    }
-
-    const applyLink = function () {
-      let href = (urlInp.value || "").trim();
-      if (!href) {
-        urlInp.focus();
-        return;
-      }
-      if (!/^(https?:\/\/|mailto:)/i.test(href)) {
-        href = "https://" + href;
-      }
-      const linkText = (textInp.value || "").trim() || href;
-
-      if (anchorEl) {
-        anchorEl.setAttribute("href", href);
-        anchorEl.setAttribute("target", "_blank");
-        anchorEl.setAttribute("rel", "noopener noreferrer");
-        anchorEl.textContent = linkText;
-      } else {
-        const a = document.createElement("a");
-        a.setAttribute("href", href);
-        a.setAttribute("target", "_blank");
-        a.setAttribute("rel", "noopener noreferrer");
-        a.textContent = linkText;
-
-        if (savedRange) {
-          savedRange.deleteContents();
-          savedRange.insertNode(a);
-          const spaceNode = document.createTextNode("\u00A0");
-          if (a.parentNode) {
-            a.parentNode.insertBefore(spaceNode, a.nextSibling);
-          }
-        } else {
-          editable.appendChild(a);
-        }
-      }
-      closeActivePopover();
-      onChange(editable.innerHTML);
-      markDirty();
-    };
-
-    urlInp.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        applyLink();
-      } else if (ev.key === "Escape") {
-        closeActivePopover();
-      }
-    });
-
-    textInp.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        urlInp.focus();
-      } else if (ev.key === "Escape") {
-        closeActivePopover();
-      }
-    });
-
-    const saveBtn = document.createElement("button");
-    saveBtn.type = "button";
-    saveBtn.className = "btn-lukb btn-lukb-primary btn-lukb-sm";
-    saveBtn.textContent = "Übernehmen";
-    saveBtn.addEventListener("click", applyLink);
-
-    actions.appendChild(saveBtn);
-    popover.appendChild(actions);
-
-    document.body.appendChild(popover);
-    activePopover = popover;
-    popover.addEventListener("mousedown", function (ev) {
-      ev.stopPropagation();
-    });
-
-    let rect = null;
-    if (anchorEl) {
-      rect = anchorEl.getBoundingClientRect();
-    } else if (savedRange && savedRange.getBoundingClientRect) {
-      const r = savedRange.getBoundingClientRect();
-      rect = r && (r.width > 0 || r.height > 0) ? r : editable.getBoundingClientRect();
-    } else {
-      rect = editable.getBoundingClientRect();
-    }
-    const clampedTop = Math.max(10, Math.min(window.innerHeight - 230, rect.bottom + 6));
-    popover.style.position = "fixed";
-    popover.style.top = clampedTop + "px";
-    popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left)) + "px";
-
-    setTimeout(function () {
-      if (textInp.value.trim()) {
-        urlInp.focus();
-      } else {
-        textInp.focus();
-      }
-    }, 10);
   }
 
   function createRichTextWidget(initialHtml, onChange, extraRightEl) {
