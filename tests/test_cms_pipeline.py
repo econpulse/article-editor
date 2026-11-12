@@ -1262,6 +1262,45 @@ def test_db_chart_corporate_fonts():
     assert docx_bytes.startswith(b"PK\x03\x04")
 
 
+def test_header_series_selection_and_rendering() -> None:
+    """
+    Prüft die Auswahl der Kopfzeile oben rechts ('Investment Office News' als Default
+    oder 'Finanzanalyse'), die DB-Persistenz sowie das HTML- und Typst-Rendering.
+    """
+    from schemas.article import ArticleDocument, ArticleMetadata
+
+    init_db_and_seed()
+
+    # 1. Default-Wert prüfen
+    default_meta = ArticleMetadata()
+    assert default_meta.header_series == "Investment Office News"
+    empty_meta = ArticleMetadata(header_series="")
+    assert empty_meta.header_series == "Investment Office News"
+
+    # 2. Artikel mit 'Finanzanalyse' anlegen, speichern und neu laden
+    doc = create_new_article(template_id="investment_focus", user="Test Analyst")
+    doc.metadata.header_series = "Finanzanalyse"
+    save_article(doc, user="Test Analyst", create_revision=False)
+
+    reloaded = get_article(doc.id)
+    assert reloaded is not None
+    assert reloaded.metadata.header_series == "Finanzanalyse"
+
+    # 3. Web-HTML Rendering prüfen
+    html_out = render_web_html(reloaded)
+    assert '<span class="lukb-header-series">Finanzanalyse</span>' in html_out
+
+    # 4. Typst PDF & SVG Rendering für beide Templates prüfen
+    for tpl_id in ("investment_focus", "market_flash"):
+        reloaded.template_id = tpl_id
+        pdf_bytes = render_pdf_bytes(reloaded)
+        assert pdf_bytes.startswith(b"%PDF-"), f"Typst PDF fehlgeschlagen für {tpl_id}"
+        svgs = render_preview_svg_pages(reloaded)
+        assert len(svgs) >= 1 and "<svg" in svgs[0]
+
+    assert delete_article(doc.id) is True
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1278,6 +1317,7 @@ if __name__ == "__main__":
     test_table_column_widths_db_chart_palette_and_paragraph_links()
     test_typst_long_table_breaking_with_repeated_header()
     test_hybrid_full_width_float_and_overflow_fallback()
+    test_header_series_selection_and_rendering()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()

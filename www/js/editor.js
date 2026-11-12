@@ -208,6 +208,7 @@
     setVal("meta-template-id", state.article.template_id || "investment_focus");
     setVal("meta-status", state.article.status || "draft");
     setVal("meta-category", meta.category || "");
+    setVal("meta-header-series", meta.header_series || "Investment Office News");
     setVal("meta-pub-date", meta.publication_date || "");
     setVal("meta-title", meta.title || "");
     setVal("meta-subtitle", meta.subtitle || "");
@@ -310,6 +311,7 @@
     bindField("meta-template-id", (v) => (state.article.template_id = v));
     bindField("meta-status", (v) => (state.article.status = v));
     bindField("meta-category", (v) => (state.article.metadata.category = v));
+    bindField("meta-header-series", (v) => (state.article.metadata.header_series = v));
     bindField("meta-pub-date", (v) => (state.article.metadata.publication_date = v));
     bindField("meta-title", (v) => (state.article.metadata.title = v));
     bindField("meta-subtitle", (v) => (state.article.metadata.subtitle = v));
@@ -6786,6 +6788,7 @@
       state.article.status = incoming.status;
       const metaFields = [
         { key: "category", domId: "meta-category" },
+        { key: "header_series", domId: "meta-header-series" },
         { key: "publication_date", domId: "meta-pub-date" },
         { key: "title", domId: "meta-title" },
         { key: "subtitle", domId: "meta-subtitle" },

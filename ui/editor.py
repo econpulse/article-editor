@@ -22,7 +22,7 @@ def editor_ui(templates_list: list[dict[str, Any]] | None = None) -> ui.Tag:
                 ),
                 class_="editor-card-header",
             ),
-            # Zeile 1: Template, Status, Publikationsdatum
+            # Zeile 1: Template & Kopfzeile oben rechts
             ui.div(
                 ui.div(
                     ui.tags.label("Dokumenten-Template (PDF & Web)", class_="field-label", **{"for": "meta-template-id"}),
@@ -35,6 +35,19 @@ def editor_ui(templates_list: list[dict[str, Any]] | None = None) -> ui.Tag:
                         class_="cms-select font-medium",
                     ),
                 ),
+                ui.div(
+                    ui.tags.label("Kopfzeile oben rechts", class_="field-label", **{"for": "meta-header-series"}),
+                    ui.tags.select(
+                        ui.tags.option("Investment Office News", value="Investment Office News", selected="selected"),
+                        ui.tags.option("Finanzanalyse", value="Finanzanalyse"),
+                        id="meta-header-series",
+                        class_="cms-select",
+                    ),
+                ),
+                class_="meta-grid-2",
+            ),
+            # Zeile 2: Status & Publikationsdatum
+            ui.div(
                 ui.div(
                     ui.tags.label("Publikations-Status", class_="field-label", **{"for": "meta-status"}),
                     ui.tags.select(
@@ -49,9 +62,9 @@ def editor_ui(templates_list: list[dict[str, Any]] | None = None) -> ui.Tag:
                     ui.tags.label("Publikationsdatum", class_="field-label", **{"for": "meta-pub-date"}),
                     ui.tags.input(id="meta-pub-date", type="date", class_="cms-input"),
                 ),
-                class_="meta-grid-3",
+                class_="meta-grid-2",
             ),
-            # Zeile 2: Rubrik & Untertitel / Dachzeile
+            # Zeile 3: Rubrik & Untertitel / Dachzeile
             ui.div(
                 ui.div(
                     ui.tags.label("Rubrik / Publikationsreihe", class_="field-label", **{"for": "meta-category"}),

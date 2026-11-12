@@ -672,7 +672,7 @@
           <strong>Luzerner Kantonalbank</strong>
           {% endif %}
         </div>
-        <span class="lukb-header-series">Investment Office News</span>
+        <span class="lukb-header-series">{{ article.metadata.header_series or "Investment Office News" }}</span>
       </div>
 
       {% set pub_date = article.metadata.publication_date_formatted or article.metadata.publication_date %}

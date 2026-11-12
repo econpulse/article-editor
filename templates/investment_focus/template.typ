@@ -518,8 +518,10 @@
     ],
     align(right + top)[
       #pad(top: 3.5pt)[
+        #let raw-header-series = meta.at("header_series", default: none)
+        #let header-series-text = if raw-header-series != none and raw-header-series != "" { raw-header-series } else { "Investment Office News" }
         #text(font: font-heading, weight: "medium", size: 14pt, fill: rgb("#0093D1"))[
-          Investment Office News
+          #header-series-text
         ]
       ]
     ]
@@ -896,7 +898,7 @@
             avail-h - used-h
           } else {
             let spill = used-h - avail-h
-            page-body-h - calc.rem(spill, page-body-h)
+            page-body-h - calc.rem(spill.pt(), page-body-h.pt()) * 1pt
           }
           if box-h > max-float-h or (box-h + 14pt) > rem-h {
             overflow-idx = idx

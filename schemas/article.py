@@ -44,6 +44,10 @@ class ArticleMetadata(BaseModel):
         description="Publikationsdatum (ISO oder Anzeigeformat)",
     )
     category: str = Field(default="Anlagepolitik & Märkte", description="Rubrik / Publikationsreihe")
+    header_series: str = Field(
+        default="Investment Office News",
+        description="Kopfzeile oben rechts (Investment Office News oder Finanzanalyse)",
+    )
     tags: list[str] = Field(default_factory=list, description="Themen-Tags / Schlagwörter")
     authors: list[AuthorItem] = Field(default_factory=list, description="Autorenliste")
     disclaimer: str = Field(
@@ -66,6 +70,13 @@ class ArticleMetadata(BaseModel):
         if isinstance(v, (list, tuple)):
             return list(v)
         return []
+
+    @field_validator("header_series", mode="before")
+    @classmethod
+    def validate_header_series(cls, v: Any) -> str:
+        if not v or not str(v).strip():
+            return "Investment Office News"
+        return str(v).strip()
 
 
 class HeadingBlock(BaseModel):

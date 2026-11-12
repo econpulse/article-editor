@@ -54,6 +54,7 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
         lead=row.lead or "",
         publication_date=row.publication_date or "",
         category=row.category or "Anlagepolitik & Märkte",
+        header_series=getattr(row, "header_series", None) or "Investment Office News",
         authors=[AuthorItem.model_validate(a) for a in authors_raw if isinstance(a, dict)],
         disclaimer=resolved_disclaimer,
     )
@@ -310,6 +311,7 @@ def save_article(
                 subtitle=doc.metadata.subtitle,
                 lead=doc.metadata.lead,
                 category=doc.metadata.category,
+                header_series=doc.metadata.header_series or "Investment Office News",
                 publication_date=doc.metadata.publication_date,
                 authors_json=authors_serialized,
                 disclaimer=doc.metadata.disclaimer,
@@ -326,6 +328,7 @@ def save_article(
             row.subtitle = doc.metadata.subtitle
             row.lead = doc.metadata.lead
             row.category = doc.metadata.category
+            row.header_series = doc.metadata.header_series or "Investment Office News"
             row.publication_date = doc.metadata.publication_date
             row.authors_json = authors_serialized
             row.disclaimer = doc.metadata.disclaimer
@@ -1009,9 +1012,37 @@ SAMPLE_SVG_EQUITY = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 
 </svg>"""
 
 
+def _ensure_schema_columns() -> None:
+    """Ergänzt nachträglich hinzugekommene Spalten in bestehenden Datenbanken (SQLite & MSSQL)."""
+    try:
+        from sqlalchemy import inspect, text
+
+        with engine.connect() as conn:
+            inspector = inspect(conn)
+            if "io_articles" in inspector.get_table_names():
+                cols = {c["name"] for c in inspector.get_columns("io_articles")}
+                if "header_series" not in cols:
+                    if engine.dialect.name == "sqlite":
+                        conn.execute(
+                            text(
+                                "ALTER TABLE io_articles ADD COLUMN header_series VARCHAR(200) NOT NULL DEFAULT 'Investment Office News'"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "ALTER TABLE io_articles ADD header_series NVARCHAR(200) NOT NULL DEFAULT 'Investment Office News'"
+                            )
+                        )
+                    conn.commit()
+    except Exception as exc:
+        logger.warning("Schema-Migration io_articles.header_series übersprungen: %s", exc)
+
+
 def init_db_and_seed() -> None:
     """Erstellt alle MSSQL/SQLAlchemy-Tabellen und legt initiale Beispielartikel an, falls leer."""
     Base.metadata.create_all(bind=engine)
+    _ensure_schema_columns()
     _seed_sample_timeseries()
 
     # Lege Beispiel-Assets an
