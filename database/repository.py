@@ -17,7 +17,13 @@ from sqlalchemy import desc, func, or_, select
 logger = logging.getLogger(__name__)
 
 from database.connection import Base, engine, get_db_session
-from database.models import ArticleModel, ArticleRevisionModel, AssetModel, TimeSeriesModel
+from database.models import (
+    ArticleModel,
+    ArticleRevisionModel,
+    AssetModel,
+    PublishedSnapshotModel,
+    TimeSeriesModel,
+)
 from schemas.article import (
     DEFAULT_LUKB_DISCLAIMER,
     LEGACY_LUKB_DISCLAIMER,
@@ -470,11 +476,16 @@ def restore_article(article_id: str, user: str = "Investment Office") -> bool:
     return True
 
 
-def publish_article_to_portal(article_id: str, user: str = "Investment Office") -> dict[str, Any]:
+def publish_article_to_portal(
+    article_id: str,
+    user: str = "Investment Office",
+    change_note: str = "",
+) -> dict[str, Any]:
     """
     Publiziert einen Artikel auf das statische Content-Portal:
     - Setzt status auf 'published'
     - Rendert HTML & druckreifes Typst-PDF
+    - Speichert einen versionierten Snapshot in MSSQL (io_published_snapshots)
     - Aktualisiert Portal-Übersicht & Volltext-Suchindex
     """
     doc = get_article(article_id)
@@ -482,9 +493,10 @@ def publish_article_to_portal(article_id: str, user: str = "Investment Office") 
         return {"success": False, "error": f"Artikel {article_id} nicht gefunden"}
 
     doc.status = "published"
-    save_article(doc, user=user, create_revision=True, revision_note="Auf statischem Portal publiziert")
+    rev_note = change_note or "Auf statischem Portal publiziert"
+    save_article(doc, user=user, create_revision=True, revision_note=rev_note)
     from services.portal_publisher import publish_article
-    return publish_article(doc)
+    return publish_article(doc, user=user, change_note=change_note)
 
 
 def unpublish_article_from_portal(
@@ -495,6 +507,7 @@ def unpublish_article_from_portal(
     """
     Zieht einen publizierten Artikel vom statischen Portal zurück:
     - Setzt den Datenbankstatus zurück auf 'draft' (oder 'review')
+    - Deaktiviert den aktiven Snapshot in MSSQL
     - Entfernt die statischen Dateien und aktualisiert Portal-Übersicht & Suchindex
     """
     doc = get_article(article_id)
@@ -503,6 +516,206 @@ def unpublish_article_from_portal(
         save_article(doc, user=user, create_revision=True, revision_note="Vom statischen Portal zurückgezogen")
     from services.portal_publisher import unpublish_article
     return unpublish_article(article_id)
+
+
+def save_published_snapshot(
+    article_id: str,
+    slug: str,
+    title: str,
+    publication_date: str,
+    metadata_dict: dict[str, Any],
+    html_content: str,
+    pdf_bytes: bytes | None = None,
+    user: str = "Investment Office",
+    change_note: str = "",
+) -> int:
+    """
+    Speichert einen unveränderlichen, versionierten Publikations-Snapshot in MSSQL (io_published_snapshots).
+    - Ermittelt die nächste Versionsnummer für diesen Artikel (1, 2, 3...)
+    - Deaktiviert bisherige aktive Snapshots dieses Artikels (is_active = False)
+    - Legt den neuen Snapshot als is_active = True an
+    Gibt die vergebene Versionsnummer zurück.
+    """
+    meta_json = json.dumps(metadata_dict, ensure_ascii=False)
+    with get_db_session() as session:
+        # Sicherstellen, dass der Artikel in io_articles existiert (auch bei isolierten Tests)
+        art = session.get(ArticleModel, article_id)
+        if not art:
+            art = ArticleModel(
+                id=article_id,
+                title=title,
+                publication_date=publication_date or "",
+                status="published",
+                updated_by=user or "Investment Office",
+            )
+            session.add(art)
+            session.flush()
+
+        # Höchste bisherige Version für diesen Artikel ermitteln
+        stmt = select(func.max(PublishedSnapshotModel.version)).where(
+            PublishedSnapshotModel.article_id == article_id
+        )
+        current_max = session.scalar(stmt) or 0
+        next_ver = int(current_max) + 1
+
+        # Bisherige aktive Versionen dieses Artikels deaktivieren
+        existing_active = session.scalars(
+            select(PublishedSnapshotModel).where(
+                PublishedSnapshotModel.article_id == article_id,
+                PublishedSnapshotModel.is_active == True,
+            )
+        ).all()
+        for s in existing_active:
+            s.is_active = False
+
+        # Neuen Snapshot anlegen
+        new_snap = PublishedSnapshotModel(
+            article_id=article_id,
+            version=next_ver,
+            is_active=True,
+            slug=slug,
+            title=title,
+            publication_date=publication_date or "",
+            metadata_json=meta_json,
+            html_content=html_content,
+            pdf_bytes=pdf_bytes,
+            published_by=user or "Investment Office",
+            change_note=change_note or ("Initialpublikation" if next_ver == 1 else "Aktualisierte Publikation"),
+        )
+        session.add(new_snap)
+        logger.info(
+            f"Published Snapshot für Artikel {article_id} gespeichert (Version {next_ver}, slug: {slug})."
+        )
+        return next_ver
+
+
+def deactivate_published_snapshot(article_id: str) -> bool:
+    """
+    Markiert alle Snapshots eines Artikels als inaktiv (z. B. beim Zurückziehen vom Portal).
+    Historische Versionen bleiben im Audit-Archiv erhalten.
+    """
+    with get_db_session() as session:
+        active_snaps = session.scalars(
+            select(PublishedSnapshotModel).where(
+                PublishedSnapshotModel.article_id == article_id,
+                PublishedSnapshotModel.is_active == True,
+            )
+        ).all()
+        for s in active_snaps:
+            s.is_active = False
+        return len(active_snaps) > 0
+
+
+def get_active_published_snapshots() -> list[dict[str, Any]]:
+    """
+    Liefert alle aktuell aktiven Snapshots für das Portal, sortiert nach Publikationsdatum absteigend.
+    """
+    with get_db_session() as session:
+        stmt = (
+            select(PublishedSnapshotModel)
+            .where(PublishedSnapshotModel.is_active == True)
+            .order_by(
+                desc(PublishedSnapshotModel.publication_date),
+                desc(PublishedSnapshotModel.published_at),
+            )
+        )
+        rows = session.scalars(stmt).all()
+        result: list[dict[str, Any]] = []
+        for r in rows:
+            try:
+                meta = json.loads(r.metadata_json or "{}")
+            except Exception:
+                meta = {}
+            result.append(
+                {
+                    "id": r.id,
+                    "article_id": r.article_id,
+                    "version": r.version,
+                    "slug": r.slug,
+                    "title": r.title,
+                    "publication_date": r.publication_date,
+                    "metadata": meta,
+                    "html_content": r.html_content,
+                    "pdf_bytes": r.pdf_bytes,
+                    "published_at": r.published_at.isoformat() if r.published_at else "",
+                    "published_by": r.published_by,
+                    "change_note": r.change_note,
+                }
+            )
+        return result
+
+
+def get_article_snapshot_history(article_id: str) -> list[dict[str, Any]]:
+    """
+    Liefert die lückenlose Versionen-Historie aller publizierten Snapshots eines Artikels.
+    """
+    with get_db_session() as session:
+        stmt = (
+            select(PublishedSnapshotModel)
+            .where(PublishedSnapshotModel.article_id == article_id)
+            .order_by(desc(PublishedSnapshotModel.version))
+        )
+        rows = session.scalars(stmt).all()
+        result: list[dict[str, Any]] = []
+        for r in rows:
+            result.append(
+                {
+                    "id": r.id,
+                    "article_id": r.article_id,
+                    "version": r.version,
+                    "is_active": r.is_active,
+                    "slug": r.slug,
+                    "title": r.title,
+                    "publication_date": r.publication_date,
+                    "published_at": r.published_at.strftime("%d.%m.%Y %H:%M") if r.published_at else "",
+                    "published_at_iso": r.published_at.isoformat() if r.published_at else "",
+                    "published_by": r.published_by,
+                    "change_note": r.change_note,
+                    "has_pdf": bool(r.pdf_bytes),
+                }
+            )
+        return result
+
+
+def rollback_to_snapshot(
+    article_id: str,
+    version: int,
+    user: str = "Investment Office",
+) -> dict[str, Any]:
+    """
+    Aktiviert eine frühere publizierte Version eines Artikels wieder als aktive Portal-Version.
+    """
+    slug: str = ""
+    with get_db_session() as session:
+        target = session.scalars(
+            select(PublishedSnapshotModel).where(
+                PublishedSnapshotModel.article_id == article_id,
+                PublishedSnapshotModel.version == version,
+            )
+        ).first()
+        if not target:
+            return {"success": False, "error": f"Version {version} für Artikel {article_id} nicht gefunden."}
+
+        all_snaps = session.scalars(
+            select(PublishedSnapshotModel).where(PublishedSnapshotModel.article_id == article_id)
+        ).all()
+        for s in all_snaps:
+            s.is_active = (s.version == version)
+
+        slug = target.slug
+        target.published_by = user
+        logger.info(f"Rollback für Artikel {article_id}: Version {version} (slug: {slug}) ist nun aktiv.")
+
+    # Portal auf der Festplatte synchronisieren
+    from services.portal_publisher import restore_portal_from_snapshots
+    res = restore_portal_from_snapshots()
+    return {
+        "success": True,
+        "article_id": article_id,
+        "version": version,
+        "slug": slug,
+        "restored_count": res.get("restored_count", 0),
+    }
 
 
 def save_asset(
@@ -672,11 +885,13 @@ def list_available_tickers(limit: int | None = None) -> list[dict[str, Any]]:
 def query_timeseries_data(
     tickers: list[str],
     start_date: str | date | None = None,
+    end_date: str | date | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
     Liest Zeitreihen aus `ts_db` (Spalten: ticker, date, name, value) im Long-Format.
     Gibt ein Dictionary zurück, indiziert über den angefragten Ticker (Case-Insensitive Match):
     `{ "SMI": {"ticker": "SMI", "name": "Swiss Market Index (SMI)", "points": [(date, float), ...]} }`
+    Unterstützt start_date und end_date zur exakten Stichtags-Begrenzung.
     """
     cleaned = [t.strip() for t in tickers if t and str(t).strip()]
     if not cleaned:
@@ -684,6 +899,7 @@ def query_timeseries_data(
 
     upper_map = {t.upper(): t for t in cleaned}
     start_dt = _coerce_to_date(start_date)
+    end_dt = _coerce_to_date(end_date)
 
     result: dict[str, dict[str, Any]] = {}
     with get_db_session() as session:
@@ -696,6 +912,8 @@ def query_timeseries_data(
 
         if start_dt is not None:
             stmt = stmt.where(TimeSeriesModel.date >= start_dt)
+        if end_dt is not None:
+            stmt = stmt.where(TimeSeriesModel.date <= end_dt)
 
         stmt = stmt.order_by(TimeSeriesModel.date.asc())
         rows = session.execute(stmt).all()
@@ -717,6 +935,8 @@ def query_timeseries_data(
             if dt is None:
                 continue
             if start_dt is not None and dt < start_dt:
+                continue
+            if end_dt is not None and dt > end_dt:
                 continue
 
             u_key = str(r.ticker).strip().upper()

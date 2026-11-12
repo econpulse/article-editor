@@ -33,7 +33,11 @@ from config import (
 )
 from database.repository import get_article, list_articles
 from services.connect_client import create_content_item, deploy_bundle_to_connect
-from services.portal_publisher import create_connect_bundle, publish_article
+from services.portal_publisher import (
+    create_connect_bundle,
+    publish_article,
+    restore_portal_from_snapshots,
+)
 
 
 def main() -> None:
@@ -53,19 +57,11 @@ def main() -> None:
     print("LUKB Investment Office — Statisches Portal Deployment für Posit Connect")
     print("=" * 70)
 
-    # 1. Sicherstellen, dass das Portal generiert ist
-    index_html = STATIC_PORTAL_DIR / "index.html"
-    if not index_html.exists():
-        print(f"⚠️  Kein lokaler Portal-Build unter {STATIC_PORTAL_DIR} gefunden.")
-        print("    Generiere Portal aus bestehenden Artikeln in der Datenbank...")
-        articles = list_articles()
-        published_count = 0
-        for art in articles:
-            doc = get_article(art["id"])
-            if doc:
-                publish_article(doc)
-                published_count += 1
-        print(f"    ✅ {published_count} Artikel ins Portal generiert.")
+    # 1. Sicherstellen, dass das Portal aus den MSSQL-Snapshots materialisiert ist
+    print("📥 Synchronisiere Portal-Stand aus MSSQL-Snapshots (io_published_snapshots)...")
+    res = restore_portal_from_snapshots()
+    published_count = res.get("restored_count", 0)
+    print(f"    ✅ {published_count} aktive Publikationen aus Datenbank bereitgestellt.")
 
     # 2. Bundle (.tar.gz) packen
     print("\n📦 Erzeuge Posit Connect Deployment-Bundle (.tar.gz)...")

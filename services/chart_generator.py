@@ -310,13 +310,18 @@ def _extract_series_chart_types(item: Any) -> list[str]:
     return cleaned
 
 
-def generate_db_chart_svg(block_data: dict[str, Any], embed_fonts: bool = True) -> str:
+def generate_db_chart_svg(
+    block_data: dict[str, Any],
+    embed_fonts: bool = True,
+    max_date: str | date | None = None,
+) -> str:
     """
     Zieht die konfigurierten Zeitreihen (bis zu 5 Ticker) ab `start_date` aus `ts_db`
     und rendert ein publikationsreifes SVG im LUKB Corporate Design.
     - Linke Kante der längsten Y-Achsen-Zahl schliesst exakt bei `x = 0` bündig mit Titel/Untertitel ab.
     - Schriftgrössen für Achsen und Legende passen sich an `layout` ('column' vs. 'full') an.
     - `embed_fonts=True` bettet optional Corporate-Fonts aus `www/fonts/` per `@font-face` für Web-`<img>`-Vorschauen ein.
+    - `max_date`: Begrenzt Zeitreihen auf den Stichtag der Publikation (keine Daten aus der Zukunft bei Zweit-Publikation).
     """
     raw_series = block_data.get("series") or []
     start_date_str = str(block_data.get("start_date") or "2022-01-01").strip()
@@ -354,7 +359,8 @@ def generate_db_chart_svg(block_data: dict[str, Any], embed_fonts: bool = True) 
         )
 
     requested_tickers = [it["ticker"] for it in configured_items]
-    db_data = query_timeseries_data(requested_tickers, start_date=start_date_str)
+    end_date_limit = max_date or block_data.get("end_date")
+    db_data = query_timeseries_data(requested_tickers, start_date=start_date_str, end_date=end_date_limit)
 
     resolved_series: list[dict[str, Any]] = []
     for it in configured_items:

@@ -1,0 +1,31 @@
+# Posit Connect Deployment Exclusions (.rscignore)
+# Verhindert das Hochladen lokaler Portal-Builds, temporärer Datenbanken und Entwicklungs-Dateien
+
+# Statische Portal-Dist (wird auf dem Server aus MSSQL-Snapshots wiederhergestellt)
+data/static_portal_dist/
+data/static_portal_dist/**
+*.tar.gz
+
+# Lokale Entwicklungs-Datenbanken & temporäre SQLite-Dateien
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Python Virtual Environments & Caches
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Tests
+tests/
+
+# IDE & OS
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

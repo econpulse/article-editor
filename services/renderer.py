@@ -260,7 +260,11 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
             bcopy["resolved_image"] = resolved_rel_path
 
         elif btype == "db_chart":
-            svg_markup = generate_db_chart_svg(blk, embed_fonts=False)
+            svg_markup = generate_db_chart_svg(
+                blk,
+                embed_fonts=False,
+                max_date=doc.metadata.publication_date,
+            )
             chart_filename = f"dbchart_{blk.get('id', 'chart')}.svg"
             (work_dir / chart_filename).write_bytes(svg_markup.encode("utf-8"))
             bcopy["resolved_image"] = chart_filename
@@ -428,7 +432,11 @@ def render_web_html(doc: ArticleDocument) -> str:
                     data_uri = f"data:{mime};base64,{b64}"
             blk["data_uri"] = data_uri
         elif blk.get("type") == "db_chart":
-            svg_markup = generate_db_chart_svg(blk, embed_fonts=True)
+            svg_markup = generate_db_chart_svg(
+                blk,
+                embed_fonts=True,
+                max_date=doc.metadata.publication_date,
+            )
             b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
             blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
         elif blk.get("type") == "glossary":
@@ -803,7 +811,11 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
 
             img_bytes = None
             if btype == "db_chart":
-                svg_code = generate_db_chart_svg(blk, embed_fonts=False)
+                svg_code = generate_db_chart_svg(
+                    blk,
+                    embed_fonts=False,
+                    max_date=doc_model.metadata.publication_date,
+                )
                 img_bytes = _svg_to_png_bytes(svg_code, ppi=144.0)
             else:
                 asset_id = blk.get("asset_id", "")

@@ -40,6 +40,18 @@ logger = logging.getLogger("lukb_cms")
 # Datenbank-Tabellen & initiale Beispiel-Publikationen beim Start sicherstellen
 init_db_and_seed()
 
+# Statisches Content-Portal bei Bedarf blitzschnell aus MSSQL-Snapshots materialisieren
+try:
+    from config import STATIC_PORTAL_DIR
+    from services.portal_publisher import restore_portal_from_snapshots
+
+    if not (STATIC_PORTAL_DIR / "index.html").exists():
+        logger.info("Kein lokaler Portal-Index gefunden — stelle aktive Publikationen aus MSSQL-Snapshots wieder her...")
+        _restore_res = restore_portal_from_snapshots(STATIC_PORTAL_DIR)
+        logger.info(f"Portal-Wiederherstellung abgeschlossen: {_restore_res.get('restored_count', 0)} Artikel online.")
+except Exception as exc:
+    logger.warning(f"Automatische Portal-Wiederherstellung beim Start übersprungen: {exc}")
+
 # Cache-Busting Version für statische Assets
 _ASSET_VER = get_asset_version()
 

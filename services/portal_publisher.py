@@ -197,11 +197,17 @@ def _inject_portal_nav(article_html: str, slug: str, has_pdf: bool) -> str:
     return article_html
 
 
-def publish_article(doc: ArticleDocument, output_dir: Path | None = None) -> dict[str, Any]:
+def publish_article(
+    doc: ArticleDocument,
+    output_dir: Path | None = None,
+    user: str = "Investment Office",
+    change_note: str = "",
+) -> dict[str, Any]:
     """
     Publiziert einen Artikel auf das statische Portal (oder überschreibt einen bestehenden).
     - Rendert die Web-HTML-Ansicht
     - Rendert das druckreife Typst-PDF
+    - Speichert den fertigen Snapshot versioniert in MSSQL (io_published_snapshots)
     - Schreibt Dateien in `dist/articles/<slug>/`
     - Aktualisiert `manifest.json`, `index.html` und `search-index.json`.
     """
@@ -227,6 +233,7 @@ def publish_article(doc: ArticleDocument, output_dir: Path | None = None) -> dic
     pdf_filename = f"{slug}.pdf"
     pdf_path = article_dir / pdf_filename
     has_pdf = False
+    pdf_bytes = None
     try:
         pdf_bytes = render_pdf_bytes(doc)
         pdf_path.write_bytes(pdf_bytes)
@@ -243,7 +250,7 @@ def publish_article(doc: ArticleDocument, output_dir: Path | None = None) -> dic
     date_display = format_publication_date(doc.metadata.publication_date) or doc.metadata.publication_date or "Aktuell"
     authors_str = " · ".join([a.name for a in doc.metadata.authors])
 
-    manifest["articles"][doc.id] = {
+    meta_entry = {
         "id": doc.id,
         "slug": slug,
         "title": doc.metadata.title,
@@ -259,17 +266,40 @@ def publish_article(doc: ArticleDocument, output_dir: Path | None = None) -> dic
         "published_at": datetime.now(timezone.utc).isoformat(),
         "has_pdf": has_pdf,
     }
+    manifest["articles"][doc.id] = meta_entry
+
+    # 3.5. Revisionssicheren Snapshot in MSSQL versioniert abspeichern
+    snapshot_version = 1
+    try:
+        from database.repository import save_published_snapshot
+
+        snapshot_version = save_published_snapshot(
+            article_id=doc.id,
+            slug=slug,
+            title=doc.metadata.title,
+            publication_date=doc.metadata.publication_date or "",
+            metadata_dict=meta_entry,
+            html_content=full_html,
+            pdf_bytes=pdf_bytes if has_pdf else None,
+            user=user,
+            change_note=change_note,
+        )
+    except Exception as exc:
+        logger.warning(f"Snapshot für Artikel {doc.id} konnte nicht in MSSQL gespeichert werden: {exc}")
 
     # 4. Manifest speichern & Portal-Index neu bauen
     _write_manifest(dist_dir, manifest)
     _render_portal_index(dist_dir, manifest)
 
-    logger.info(f"Artikel {doc.id} erfolgreich publiziert unter articles/{slug}/index.html")
+    logger.info(
+        f"Artikel {doc.id} erfolgreich publiziert unter articles/{slug}/index.html (Version {snapshot_version})"
+    )
 
     # 5. Optional: Automatisches Deployment auf Posit Connect (falls API konfiguriert)
     connect_deploy = None
     try:
         from services.connect_client import deploy_bundle_to_connect, is_connect_configured
+
         if is_connect_configured():
             bundle_path = create_connect_bundle(output_dir=dist_dir)
             connect_deploy = deploy_bundle_to_connect(bundle_path)
@@ -281,6 +311,7 @@ def publish_article(doc: ArticleDocument, output_dir: Path | None = None) -> dic
         "success": True,
         "action": "published",
         "article_id": doc.id,
+        "version": snapshot_version,
         "slug": slug,
         "article_url": f"articles/{slug}/index.html",
         "pdf_url": f"articles/{slug}/{pdf_filename}" if has_pdf else None,
@@ -318,6 +349,14 @@ def unpublish_article(article_id: str, output_dir: Path | None = None) -> dict[s
     _write_manifest(dist_dir, manifest)
     _render_portal_index(dist_dir, manifest)
 
+    # Snapshot in MSSQL deaktivieren (bleibt für Audit-Historie erhalten)
+    try:
+        from database.repository import deactivate_published_snapshot
+
+        deactivate_published_snapshot(article_id)
+    except Exception as exc:
+        logger.warning(f"Snapshot-Deaktivierung für {article_id} in MSSQL fehlgeschlagen: {exc}")
+
     logger.info(f"Artikel {article_id} (slug: {slug}) erfolgreich vom Portal entfernt.")
 
     # Automatisches Deployment auf Posit Connect nach Entfernen
@@ -338,6 +377,80 @@ def unpublish_article(article_id: str, output_dir: Path | None = None) -> dict[s
         "slug": slug,
         "total_published": len(manifest.get("articles", {})),
         "connect_deploy": connect_deploy,
+    }
+
+
+def restore_portal_from_snapshots(output_dir: Path | None = None) -> dict[str, Any]:
+    """
+    Stellt das gesamte Portal blitzschnell aus den in der MSSQL-Datenbank gespeicherten
+    Snapshots (io_published_snapshots) wieder her.
+    Es findet KEIN dynamisches Re-Rendering von Typst oder Charts statt!
+    Konserviert exakt die historischen HTML- und PDF-Dateien zum Veröffentlichungszeitpunkt.
+    """
+    dist_dir = output_dir or STATIC_PORTAL_DIR
+    dist_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_portal_assets(dist_dir)
+
+    from database.repository import get_active_published_snapshots
+
+    active_snaps = get_active_published_snapshots()
+
+    # Fallback/Migration: Falls noch keine Snapshots vorhanden sind, aber Artikel als 'published' markiert sind
+    if not active_snaps:
+        try:
+            from database.repository import get_article, list_articles
+
+            published_items = list_articles(status_filter="published")
+            if published_items:
+                logger.info(
+                    f"Keine Snapshots gefunden, initialisiere Snapshots für {len(published_items)} bestehende publizierte Artikel..."
+                )
+                for item in published_items:
+                    doc = get_article(item["id"])
+                    if doc:
+                        publish_article(doc, output_dir=dist_dir)
+                active_snaps = get_active_published_snapshots()
+        except Exception as exc:
+            logger.warning(f"Initial-Migration für Snapshots fehlgeschlagen: {exc}")
+
+    manifest: dict[str, Any] = {"articles": {}, "last_updated": datetime.now(timezone.utc).isoformat()}
+
+    for snap in active_snaps:
+        slug = snap.get("slug")
+        if not slug:
+            continue
+        article_dir = dist_dir / "articles" / slug
+        article_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Gespeichertes Original-HTML schreiben
+        (article_dir / "index.html").write_text(snap.get("html_content") or "", encoding="utf-8")
+
+        # 2. Gespeichertes Original-PDF schreiben
+        has_pdf = False
+        pdf_bytes = snap.get("pdf_bytes")
+        if pdf_bytes:
+            pdf_path = article_dir / f"{slug}.pdf"
+            pdf_path.write_bytes(pdf_bytes)
+            has_pdf = True
+
+        # 3. Metadaten für Manifest & Suchindex übernehmen
+        meta = dict(snap.get("metadata") or {})
+        meta["id"] = snap.get("article_id")
+        meta["slug"] = slug
+        meta["title"] = snap.get("title")
+        meta["has_pdf"] = has_pdf
+        manifest["articles"][snap["article_id"]] = meta
+
+    _write_manifest(dist_dir, manifest)
+    _render_portal_index(dist_dir, manifest)
+
+    logger.info(
+        f"Portal erfolgreich aus {len(manifest['articles'])} MSSQL-Snapshots wiederhergestellt (Verzeichnis: {dist_dir})."
+    )
+    return {
+        "success": True,
+        "restored_count": len(manifest["articles"]),
+        "dist_dir": str(dist_dir),
     }
 
 
@@ -375,26 +488,19 @@ def create_connect_bundle(
 ) -> Path:
     """
     Schnürt ein Posit-Connect-kompatibles .tar.gz Deployment-Archiv des statischen Portals.
-    Falls das Portal lokal noch nicht generiert wurde, wird es automatisch aufgebaut.
+    Stellt sicher, dass alle publizierten Artikel aus den MSSQL-Snapshots enthalten sind.
     """
     import tempfile
 
     dist_dir = output_dir or STATIC_PORTAL_DIR
     dist_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Sicherstellen, dass das Portal existiert (auch bei frischem Start oder im Deployment)
+    # 1. Sicherstellen, dass das Portal aus den aktiven MSSQL-Snapshots vollständig befüllt ist
     if not (dist_dir / "index.html").exists():
         try:
-            from database.repository import get_article, list_articles
-            articles_summary = list_articles()
-            docs = []
-            for item in articles_summary:
-                doc = get_article(item["id"])
-                if doc:
-                    docs.append(doc)
-            rebuild_full_portal(articles=docs, output_dir=dist_dir)
+            restore_portal_from_snapshots(output_dir=dist_dir)
         except Exception as exc:
-            logger.warning(f"Automatischer Portalaufbau vor Bundle-Erstellung fehlgeschlagen ({exc}), generiere Grundstruktur.")
+            logger.warning(f"Wiederherstellung aus MSSQL-Snapshots fehlgeschlagen ({exc}), erstelle leere Grundstruktur.")
             _ensure_portal_assets(dist_dir)
             manifest = _read_manifest(dist_dir)
             _render_portal_index(dist_dir, manifest)

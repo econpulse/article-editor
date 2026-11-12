@@ -192,5 +192,93 @@ def test_portal_publisher_flow() -> None:
         print("All portal publisher tests passed successfully!")
 
 
+def test_published_snapshots_and_recovery() -> None:
+    """
+    Testet das revisionssichere Versionierungs- und Snapshot-System in MSSQL:
+    1. Publikation von Version 1 (mit Tippfehler im Titel)
+    2. Publikation von Version 2 (Korrektur)
+    3. Überprüfung der Versionenhistorie (beide Versionen permanent gespeichert)
+    4. Simulation eines Posit-Connect-Redeployments (komplettes Löschen des lokalen Portalordners)
+    5. Bitgenaue Wiederherstellung aus den MSSQL-Snapshots ohne Neuberechnung
+    6. Rollback-Test auf Version 1
+    """
+    from datetime import date, datetime
+    from database.repository import (
+        get_active_published_snapshots,
+        get_article_snapshot_history,
+        query_timeseries_data,
+        rollback_to_snapshot,
+    )
+    from services.portal_publisher import restore_portal_from_snapshots
+
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
+        dist_dir = Path(tmp_dir_str) / "portal_dist"
+        dist_dir.mkdir()
+
+        import uuid
+        art_id = f"test-snap-{uuid.uuid4().hex[:8]}"
+        # 1. Version 1 publizieren (mit Typo: 'Merheit')
+        doc_v1 = _build_test_doc(art_id, "US-Midterms: Demokraten sichern Merheit")
+        res1 = publish_article(doc_v1, output_dir=dist_dir, user="Author A", change_note="Initialversion mit Typo")
+        assert res1["success"] is True
+        assert res1["version"] == 1
+        slug_v1 = res1["slug"]
+
+        # 2. Version 2 publizieren (Typo behoben: 'Mehrheit')
+        doc_v2 = _build_test_doc(art_id, "US-Midterms: Demokraten sichern Mehrheit")
+        res2 = publish_article(doc_v2, output_dir=dist_dir, user="Senior Editor B", change_note="Tippfehler behoben")
+        assert res2["success"] is True
+        assert res2["version"] == 2
+        slug_v2 = res2["slug"]
+
+        # 3. Revisionshistorie aus MSSQL prüfen
+        history = get_article_snapshot_history(art_id)
+        assert len(history) == 2, "Es müssen exakt 2 Versionen in der Historie liegen"
+        assert history[0]["version"] == 2
+        assert history[0]["is_active"] is True
+        assert history[0]["title"] == "US-Midterms: Demokraten sichern Mehrheit"
+        assert history[0]["change_note"] == "Tippfehler behoben"
+
+        assert history[1]["version"] == 1
+        assert history[1]["is_active"] is False
+        assert history[1]["title"] == "US-Midterms: Demokraten sichern Merheit"
+
+        # 4. Simulation eines Neu-Deployments auf Posit Connect:
+        # Lokaler dist_dir wird restlos gelöscht!
+        shutil.rmtree(dist_dir)
+        assert not dist_dir.exists(), "Portal-Verzeichnis ist nach Redeployment gelöscht"
+
+        # 5. Schnelle Wiederherstellung aus MSSQL-Snapshots
+        restore_res = restore_portal_from_snapshots(output_dir=dist_dir)
+        assert restore_res["success"] is True
+        assert restore_res["restored_count"] >= 1
+
+        # Prüfe ob Version 2 wiederhergestellt wurde
+        assert (dist_dir / "index.html").exists()
+        assert (dist_dir / "articles" / slug_v2 / "index.html").exists()
+        assert (dist_dir / "articles" / slug_v2 / f"{slug_v2}.pdf").exists()
+        restored_html = (dist_dir / "articles" / slug_v2 / "index.html").read_text(encoding="utf-8")
+        assert "US-Midterms: Demokraten sichern Mehrheit" in restored_html
+
+        # 6. Rollback auf Version 1 testen
+        rb_res = rollback_to_snapshot(art_id, version=1, user="Admin")
+        assert rb_res["success"] is True
+        assert rb_res["version"] == 1
+
+        # Historie nach Rollback prüfen
+        history_after_rb = get_article_snapshot_history(art_id)
+        assert history_after_rb[0]["is_active"] is False  # Version 2 ist jetzt inaktiv
+        assert history_after_rb[1]["is_active"] is True   # Version 1 ist jetzt aktiv
+
+        # 7. Zeitreihen-Stichtagsbegrenzung (end_date) prüfen
+        test_ts = query_timeseries_data(["SNB_RATE"], start_date="2022-01-01", end_date="2023-01-01")
+        if "SNB_RATE" in test_ts and test_ts["SNB_RATE"]["points"]:
+            pts = test_ts["SNB_RATE"]["points"]
+            assert all(d <= datetime(2023, 1, 1).date() for d, _ in pts), "Keine Punkte nach end_date erlaubt"
+
+        print("Published snapshots and recovery tests passed successfully!")
+
+
 if __name__ == "__main__":
     test_portal_publisher_flow()
+    test_published_snapshots_and_recovery()

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     Float,
@@ -57,6 +58,12 @@ class ArticleModel(Base):
         cascade="all, delete-orphan",
         order_by="desc(ArticleRevisionModel.saved_at)",
     )
+    published_snapshots: Mapped[list["PublishedSnapshotModel"]] = relationship(
+        "PublishedSnapshotModel",
+        back_populates="article",
+        cascade="all, delete-orphan",
+        order_by="desc(PublishedSnapshotModel.version)",
+    )
 
 
 class ArticleRevisionModel(Base):
@@ -74,6 +81,39 @@ class ArticleRevisionModel(Base):
     note: Mapped[str] = mapped_column(Unicode(255), nullable=False, default="")
 
     article: Mapped["ArticleModel"] = relationship("ArticleModel", back_populates="revisions")
+
+
+class PublishedSnapshotModel(Base):
+    """
+    Revisionssichere, versionierte Publikationshistorie für das Portal.
+    Konserviert das exakte HTML und PDF zum Veröffentlichungszeitpunkt (inkl. Charts & Bildern)
+    als VARBINARY(MAX) / NVARCHAR(MAX) in der Datenbank.
+    Ermöglicht blitzschnelle Wiederherstellung nach Posit Connect Deployments oder Server-Neuinstallationen
+    ohne dynamisches Re-Rendering.
+    """
+
+    __tablename__ = "io_published_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    article_id: Mapped[str] = mapped_column(
+        Unicode(64), ForeignKey("io_articles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+
+    slug: Mapped[str] = mapped_column(Unicode(255), nullable=False)
+    title: Mapped[str] = mapped_column(Unicode(500), nullable=False)
+    publication_date: Mapped[str] = mapped_column(Unicode(32), nullable=False)
+    metadata_json: Mapped[str] = mapped_column(UnicodeText, nullable=False)
+
+    html_content: Mapped[str] = mapped_column(UnicodeText, nullable=False)
+    pdf_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=True)
+
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)
+    published_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="Investment Office")
+    change_note: Mapped[str] = mapped_column(Unicode(255), nullable=False, default="")
+
+    article: Mapped["ArticleModel"] = relationship("ArticleModel", back_populates="published_snapshots")
 
 
 class AssetModel(Base):
