@@ -1,17 +1,25 @@
-# LUKB Investment Office — Publikations-Editor & CMS
+# Investment Office — Publikations-Editor & CMS bei einer Bank
 
-Modernes, webbasiertes Content-Management-System (CMS) für Publikationen des Investment Office der Luzerner Kantonalbank (LUKB), entwickelt für **Posit Connect** auf Basis von **Shiny for Python**, **SQLAlchemy (MS SQL Server)**, **Typst (0.15+)** und **Jinja2**.
+Modernes, webbasiertes Content-Management-System (CMS) für Publikationen des Investment Office bei einer Bank, entwickelt für **Posit Connect** auf Basis von **Shiny for Python**, **SQLAlchemy (MS SQL Server)**, **Typst (0.15+)** und **Jinja2**.
+
+## Dokumentation & Handbücher
+
+- 📖 **[Benutzer-Handbuch (User Manual)](docs/USER_MANUAL.md)**: Detaillierte Schritt-für-Schritt-Anleitung für Redakteure und Autoren mit Fokus auf den interaktiven Block-Editor, Typst-Live-Preview, Tabellenkalkulation, DB-Charts und Freigabeprozesse.
+- 🚀 **[Deployment-Handbuch (Deployment Manual)](docs/DEPLOYMENT_MANUAL.md)**: Vollständige Anleitung für Administratoren und DevOps zum Deployment auf Posit Connect inklusive aller Umgebungsvariablen, MSSQL-Konfiguration, SSL/CA-Handhabung und Rollensteuerung.
+
+---
 
 ## Hauptfunktionen
 
 1. **Interaktiver Drag-and-Drop Block-Editor (Zero-Build für Posit Connect)**
-   - **Dokumenten-Kopf**: Auswahl des Publikations-Templates (*LUKB Investment Fokus* 2-spaltig oder *LUKB Market Flash* 1-spaltig), Status (*Entwurf*, *In Review*, *Publiziert*), Rubrik, Datum, Gesamttitel, Untertitel/Dachzeile, Lead-Text und dynamische Autoren-Liste.
+   - **Dokumenten-Kopf**: Auswahl des Publikations-Templates (*Investment Fokus* 2-spaltig oder *Market Flash* 1-spaltig), Status (*Entwurf*, *In Review*, *Publiziert*), Rubrik, Datum, Gesamttitel, Untertitel/Dachzeile, Lead-Text und dynamische Autoren-Liste.
    - **Drag-and-Drop Content-Blöcke (SortableJS)**:
-     - **Überschriften (`H1`, `H2`, `H3`)** in `Yoga Sans for LUKB Medium`
-     - **Rich-Text-Absätze** mit Formatierungs-Toolbar (Fett, Kursiv, Unterstrichen, Aufzählungslisten, nummerierte Listen)
+     - **Überschriften (`H1`, `H2`, `H3`)** in Corporate Design Schriften
+     - **Rich-Text-Absätze** mit Formatierungs-Toolbar (Fett, Kursiv, Unterstrichen, Aufzählungslisten, nummerierte Listen, Textfarben)
      - **Grafik-Container**: Mit Grafik-Titel, Grafik-Untertitel, Quellenangabe, Satzbreite (1-spaltig oder 2-spaltig) sowie **Drag-and-Drop Datei-Upload (SVG, PNG, JPG)**
+     - **DB-Chart Container**: Zeitreihen-Visualisierung direkt aus der MSSQL-Datenbank (`ts_db`) mit flexiblen Diagrammtypen (Linien, Stufen, Balken, gestapelte Balken, Punkte, Flächen)
      - **Tabellen-Container**: Mit Tabellen-Titel, Tabellen-Untertitel, Quellenangabe, Satzbreite, Total-Zeilen-Hervorhebung sowie interaktivem Daten-Grid inkl. **Microsoft Excel Copy-Paste Support (`Ctrl+V`)**
-     - **Kernaussagen / Callout-Boxen**
+     - **Kernaussagen / Callout-Boxen**, Zitate, Textbox-Gruppierungen, Abstände, Spaltenumbrüche und Glossar
 2. **Redeployment-sichere MSSQL-Datenhaltung & Autosave**
    - Alle Artikel (`io_articles`), Revisions-Snapshots (`io_article_revisions`) und hochgeladenen Grafiken (`io_assets` als `VARBINARY(MAX)`) werden direkt in der **MS SQL Server Datenbank** gespeichert.
    - Dadurch gehen bei einem **App-Update oder Redeployment auf Posit Connect keinerlei Dokumente oder hochgeladene Grafiken verloren**.
@@ -22,14 +30,14 @@ Modernes, webbasiertes Content-Management-System (CMS) für Publikationen des In
 
 ---
 
-## Corporate Design & Schriften (`Yoga Sans for LUKB`)
+## Corporate Design & Schriften
 
-Die Typst-Templates (`templates/*/template.typ`), die Web-Templates (`templates/*/template.html.j2`) und der Editor (`www/css/editor.css`) verwenden standardmäßig:
-- **Standard-Schriftart (Fließtext, Lead, Tabellen, Quellen)**: `Yoga Sans for LUKB Light`
-- **Überschriften & Hervorhebungen (Gesamttitel, H1–H3, Grafik-/Tabellentitel, Tabellenköpfe, Fettdruck)**: `Yoga Sans for LUKB Medium`
+Die Typst-Templates (`templates/*/template.typ`), die Web-Templates (`templates/*/template.html.j2`) und der Editor (`www/css/editor.css`) verwenden standardmäßig die Typografie des Corporate Designs bei einer Bank:
+- **Standard-Schriftart (Fließtext, Lead, Tabellen, Quellen)**: Corporate Sans Light
+- **Überschriften & Hervorhebungen (Gesamttitel, H1–H3, Grafik-/Tabellentitel, Tabellenköpfe, Fettdruck)**: Corporate Sans Medium
 
 > **Tipp für Posit Connect Server ohne vorinstallierte System-Fonts:**
-> Legen Sie die `.ttf`- oder `.otf`-Dateien von *Yoga Sans for LUKB Light* und *Yoga Sans for LUKB Medium* einfach im Projektordner `www/fonts/` ab. Der Typst-Compiler bindet das Verzeichnis `www/fonts/` automatisch über `font_paths` ein.
+> Legen Sie die `.ttf`- oder `.otf`-Dateien der Corporate Fonts einfach im Projektordner `www/fonts/` ab. Der Typst-Compiler bindet das Verzeichnis `www/fonts/` automatisch über `font_paths` ein.
 
 ---
 
@@ -38,7 +46,7 @@ Die Typst-Templates (`templates/*/template.typ`), die Web-Templates (`templates/
 Hinterlegen Sie in den **Environment Variables** der Applikation auf Posit Connect (oder lokal in einer `.env`-Datei analog zu `.env.example`):
 
 ```ini
-MSSQL_SERVER=ihr-mssql-server.lukb.ch
+MSSQL_SERVER=ihr-mssql-server.bank.internal
 MSSQL_PORT=1433
 MSSQL_DATABASE=InvestmentOfficeCMS
 MSSQL_USER=svc_posit_cms
@@ -68,5 +76,5 @@ Alternativ kann auch direkt eine vollständige SQLAlchemy-URL über `DATABASE_UR
 ```powershell
 pip install rsconnect-python
 rsconnect write-manifest shiny .
-rsconnect deploy shiny . --server https://posit-connect.lukb.ch --api-key <API_KEY> --title "LUKB Investment Office CMS"
+rsconnect deploy shiny . --server https://posit-connect.bank.internal --api-key <API_KEY> --title "Investment Office CMS"
 ```
