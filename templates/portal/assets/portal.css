@@ -205,6 +205,10 @@ body {
   background: var(--lukb-gold);
 }
 
+.card-top-accent.investment_tufte {
+  background: var(--lukb-navy);
+}
+
 .card-body {
   padding: 1.5rem;
   display: flex;

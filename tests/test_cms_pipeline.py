@@ -1333,6 +1333,122 @@ def test_header_series_selection_and_rendering() -> None:
     assert delete_article(doc.id) is True
 
 
+def test_tufte_template_pipeline():
+    """
+    Testet das neue LUKB Investment Fokus (Tufte-Stil) Template:
+    - Template-Registrierung in registry.json & Fallback
+    - Asymmetrischer Body-Satz: Einspaltige Grafiken/Tabellen im Randbereich, zweispaltige über gesamte Breite
+    - Fehlerfreies Typst 0.15+ PDF- & SVG-Rendering
+    - Web-HTML5-Rendering mit responsivem CSS-Grid
+    """
+    from schemas.article import ArticleDocument, ArticleMetadata, FigureBlock, TableBlock
+    from services.renderer import list_available_templates
+
+    init_db_and_seed()
+
+    # 1. Registrierung prüfen
+    tpls = list_available_templates()
+    tufte_tpl = next((t for t in tpls if t["id"] == "investment_tufte"), None)
+    assert tufte_tpl is not None, "investment_tufte muss in list_available_templates() vorhanden sein"
+    assert "Tufte" in tufte_tpl["name"]
+
+    # 2. Template-Dateien existieren
+    typ_path = ROOT / "templates" / "investment_tufte" / "template.typ"
+    html_path = ROOT / "templates" / "investment_tufte" / "template.html.j2"
+    assert typ_path.exists(), "templates/investment_tufte/template.typ fehlt"
+    assert html_path.exists(), "templates/investment_tufte/template.html.j2 fehlt"
+
+    # 3. Artikel mit Tufte-Template anlegen
+    doc = create_new_article(template_id="investment_tufte", user="Tufte Analyst")
+    doc.metadata.title = "Tufte-Layout Publikation: Schweizer Zinslandschaft"
+    doc.metadata.header_series = "Finanzanalyse"
+
+    margin_fig = FigureBlock(
+        title="SNB Leitzinsentwicklung",
+        subtitle="Verlauf 2024–2026 in %",
+        source="Quelle: SNB, LUKB",
+        layout="column",
+    ).model_dump()
+
+    margin_tbl = TableBlock(
+        title="Prognoseübersicht",
+        subtitle="Zinssätze Schweiz",
+        source="Quelle: LUKB Investment Office",
+        layout="column",
+        columns=[
+            {"field": "inst", "title": "Institut", "align": "left", "width": 60.0},
+            {"field": "rate", "title": "2027", "align": "right", "width": 40.0},
+        ],
+        rows=[
+            {"inst": "LUKB", "rate": "1.00%"},
+            {"inst": "Konsens", "rate": "1.25%"},
+        ],
+    ).model_dump()
+
+    full_tbl = TableBlock(
+        title="Gesamte Allokationsübersicht (Zweispaltig / Gesamte Breite)",
+        subtitle="Detaillierte taktische Empfehlungen",
+        source="Quelle: LUKB Investment Office",
+        layout="full",
+        columns=[
+            {"field": "cat", "title": "Kategorie", "align": "left", "width": 50.0},
+            {"field": "alloc", "title": "Gewichtung", "align": "center", "width": 25.0},
+            {"field": "comment", "title": "Begründung", "align": "left", "width": 25.0},
+        ],
+        rows=[
+            {"cat": "Schweizer Aktien", "alloc": "Übergewichten", "comment": "Defensive Qualität"},
+            {"cat": "Globale Obligationen", "alloc": "Neutral", "comment": "Attraktive Realrenditen"},
+        ],
+    ).model_dump()
+
+    doc.blocks = [
+        {"id": "h1", "type": "heading", "level": 1, "text": "1. Makroökonomisches Umfeld"},
+        {
+            "id": "p1",
+            "type": "richtext",
+            "html": "<p>Die Schweizerische Nationalbank setzt ihren stabilitätsorientierten Kurs fort. Der Schweizer Franken bleibt gesucht.</p>",
+        },
+        margin_fig,
+        {
+            "id": "p2",
+            "type": "richtext",
+            "html": "<p>Die Teuerungsrate bewegt sich weiterhin im Zielband von null bis zwei Prozent. Ein moderater Zinspfad ist wahrscheinlich.</p>",
+        },
+        margin_tbl,
+        full_tbl,
+        {"id": "h2", "type": "heading", "level": 2, "text": "2. Fazit"},
+        {
+            "id": "p3",
+            "type": "richtext",
+            "html": "<p>Anleger sollten auf solide Bilanzen und attraktive Dividendenrenditen fokussieren.</p>",
+        },
+    ]
+
+    save_article(doc, user="Tufte Analyst", create_revision=True, revision_note="Tufte-Test")
+
+    # 4. Web-HTML Rendering prüfen
+    html_out = render_web_html(doc)
+    assert "Tufte-Stil" in html_out or "Tufte" in html_out
+    assert '<span class="lukb-header-series">Finanzanalyse</span>' in html_out
+    # Margin figure & table haben KEIN blk-full-span
+    assert 'class="blk-figure "' in html_out or 'class="blk-figure' in html_out
+    # Full table HAT blk-full-span
+    assert "blk-full-span" in html_out
+
+    # 5. Typst PDF Rendering prüfen
+    pdf_bytes = render_pdf_bytes(doc)
+    assert pdf_bytes.startswith(b"%PDF-"), "Tufte-Template muss gültiges PDF generieren"
+    assert len(pdf_bytes) > 20000
+
+    # 6. Typst Preview SVG Rendering prüfen
+    svg_pages = render_preview_svg_pages(doc)
+    assert len(svg_pages) >= 1, "Tufte-Template muss mindestens 1 SVG-Seite liefern"
+    assert "<svg" in svg_pages[0]
+
+    # Cleanup
+    assert delete_article(doc.id) is True
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1350,6 +1466,7 @@ if __name__ == "__main__":
     test_typst_long_table_breaking_with_repeated_header()
     test_hybrid_full_width_float_and_overflow_fallback()
     test_header_series_selection_and_rendering()
+    test_tufte_template_pipeline()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()

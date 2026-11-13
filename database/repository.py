@@ -429,26 +429,18 @@ def delete_article(
     if not doc:
         return False
 
-    # Schutz vor Löschung publizierter Dokumente
+    # Schutz vor Löschung publizierter Dokumente ohne force
     if doc.status == "published":
-        logger.warning(
-            f"Löschversuch für publizierten Artikel {article_id} abgelehnt. Artikel muss zuerst zurückgezogen werden."
-        )
-        return False
-
-    if force:
+        if not force:
+            logger.warning(
+                f"Löschversuch für publizierten Artikel {article_id} abgelehnt. Artikel muss zuerst zurückgezogen werden."
+            )
+            return False
         try:
             from services.portal_publisher import unpublish_article
             unpublish_article(article_id)
-        except Exception:
-            pass
-
-        with get_db_session() as session:
-            row = session.get(ArticleModel, article_id)
-            if not row:
-                return False
-            session.delete(row)
-            return True
+        except Exception as exc:
+            logger.warning(f"unpublish_article bei force-delete fehlgeschlagen: {exc}")
 
     # Standard: Soft-Delete (Status auf 'archived' setzen, Revision ablegen)
     doc.status = "archived"
@@ -458,6 +450,7 @@ def delete_article(
         create_revision=True,
         revision_note="Publikation archiviert (Soft-Delete / Papierkorb)",
     )
+    return True
     return True
 
 

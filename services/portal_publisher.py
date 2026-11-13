@@ -63,6 +63,42 @@ def _get_portal_jinja_env() -> Environment:
     )
 
 
+def _write_text_if_changed(path: Path, text: str, encoding: str = "utf-8") -> bool:
+    """Schreibt den Text nur, wenn die Zieldatei noch nicht existiert oder ihr Inhalt abweicht."""
+    if path.exists():
+        try:
+            if path.read_text(encoding=encoding) == text:
+                return False
+        except Exception:
+            pass
+    path.write_text(text, encoding=encoding)
+    return True
+
+
+def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
+    """Schreibt die Bytes nur, wenn die Zieldatei noch nicht existiert oder ihr Inhalt abweicht."""
+    if path.exists():
+        try:
+            if path.read_bytes() == data:
+                return False
+        except Exception:
+            pass
+    path.write_bytes(data)
+    return True
+
+
+def _copy_if_changed(src: Path, dest: Path) -> bool:
+    """Kopiert eine Datei nur, wenn die Zieldatei nicht existiert oder Inhalt/Grösse abweichen."""
+    if dest.exists():
+        try:
+            if src.stat().st_size == dest.stat().st_size and dest.read_bytes() == src.read_bytes():
+                return False
+        except Exception:
+            pass
+    shutil.copy2(src, dest)
+    return True
+
+
 def _ensure_portal_assets(dist_dir: Path) -> None:
     """Kopiert statische Assets (CSS, JS, Logo) in das Ausgabeverzeichnis."""
     assets_dist = dist_dir / "assets"
@@ -72,11 +108,11 @@ def _ensure_portal_assets(dist_dir: Path) -> None:
     if src_assets.exists():
         for asset_file in src_assets.glob("*"):
             if asset_file.is_file():
-                shutil.copy2(asset_file, assets_dist / asset_file.name)
+                _copy_if_changed(asset_file, assets_dist / asset_file.name)
 
     # Logo kopieren
     if LUKB_LOGO_SRC.exists():
-        shutil.copy2(LUKB_LOGO_SRC, assets_dist / "LUKB-Logo.svg")
+        _copy_if_changed(LUKB_LOGO_SRC, assets_dist / "LUKB-Logo.svg")
 
 
 def _write_connect_manifest(dist_dir: Path) -> None:
@@ -89,7 +125,11 @@ def _write_connect_manifest(dist_dir: Path) -> None:
             "primary_html": "index.html",
         },
     }
-    (dist_dir / "manifest.json").write_text(json.dumps(connect_manifest, indent=2), encoding="utf-8")
+    _write_text_if_changed(
+        dist_dir / "manifest.json",
+        json.dumps(connect_manifest, indent=2),
+        encoding="utf-8",
+    )
 
 
 def _read_manifest(dist_dir: Path) -> dict[str, Any]:
@@ -115,9 +155,18 @@ def _read_manifest(dist_dir: Path) -> dict[str, Any]:
 
 
 def _write_manifest(dist_dir: Path, manifest: dict[str, Any]) -> None:
-    manifest["last_updated"] = datetime.now(timezone.utc).isoformat()
-    (dist_dir / "portal-manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    old_manifest = _read_manifest(dist_dir)
+    old_articles = old_manifest.get("articles", {})
+    new_articles = manifest.get("articles", {})
+    if old_articles != new_articles or not (dist_dir / "portal-manifest.json").exists():
+        manifest["last_updated"] = datetime.now(timezone.utc).isoformat()
+    else:
+        manifest["last_updated"] = old_manifest.get("last_updated", datetime.now(timezone.utc).isoformat())
+
+    _write_text_if_changed(
+        dist_dir / "portal-manifest.json",
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
     _write_connect_manifest(dist_dir)
 
@@ -144,7 +193,7 @@ def _render_portal_index(dist_dir: Path, manifest: dict[str, Any]) -> None:
         build_date=build_date,
     )
 
-    (dist_dir / "index.html").write_text(rendered_html, encoding="utf-8")
+    _write_text_if_changed(dist_dir / "index.html", rendered_html, encoding="utf-8")
 
     # Such-Index für schnellen Client-Side-Download
     search_index = [
@@ -163,7 +212,8 @@ def _render_portal_index(dist_dir: Path, manifest: dict[str, Any]) -> None:
         }
         for a in articles_list
     ]
-    (dist_dir / "search-index.json").write_text(
+    _write_text_if_changed(
+        dist_dir / "search-index.json",
         json.dumps(search_index, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -237,7 +287,7 @@ def publish_article(
     pdf_bytes = None
     try:
         pdf_bytes = render_pdf_bytes(doc)
-        pdf_path.write_bytes(pdf_bytes)
+        _write_bytes_if_changed(pdf_path, pdf_bytes)
         has_pdf = True
     except Exception as exc:
         logger.error(f"Fehler beim Rendern des PDFs für {doc.id}: {exc}", exc_info=True)
@@ -245,7 +295,7 @@ def publish_article(
     # 2. Web HTML rendern & Portal-Navigation einbetten
     base_html = render_web_html(doc)
     full_html = _inject_portal_nav(base_html, slug, has_pdf)
-    (article_dir / "index.html").write_text(full_html, encoding="utf-8")
+    _write_text_if_changed(article_dir / "index.html", full_html, encoding="utf-8")
 
     # 3. Metadaten für das Portal aufbereiten
     date_display = format_publication_date(doc.metadata.publication_date) or doc.metadata.publication_date or "Aktuell"
@@ -470,14 +520,14 @@ def restore_portal_from_snapshots(output_dir: Path | None = None) -> dict[str, A
         article_dir.mkdir(parents=True, exist_ok=True)
 
         # 1. Gespeichertes Original-HTML schreiben
-        (article_dir / "index.html").write_text(snap.get("html_content") or "", encoding="utf-8")
+        _write_text_if_changed(article_dir / "index.html", snap.get("html_content") or "", encoding="utf-8")
 
         # 2. Gespeichertes Original-PDF schreiben
         has_pdf = False
         pdf_bytes = snap.get("pdf_bytes")
         if pdf_bytes:
             pdf_path = article_dir / f"{slug}.pdf"
-            pdf_path.write_bytes(pdf_bytes)
+            _write_bytes_if_changed(pdf_path, pdf_bytes)
             has_pdf = True
 
         # 3. Metadaten für Manifest & Suchindex übernehmen

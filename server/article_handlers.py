@@ -92,7 +92,7 @@ def register_article_handlers(
             )
             return
 
-        # Schutz: Publizierte Publikationen dürfen NICHT gelöscht werden
+        # Sicherheits-Bestätigungsdialog für Soft-Delete (inkl. automatischer Portal-Rücknahme falls publiziert)
         if doc.status == "published":
             ui.modal_show(
                 ui.modal(
@@ -102,13 +102,21 @@ def register_article_handlers(
                             style="font-weight:600;color:#c0392b;font-size:14.5px;margin-bottom:8px;",
                         ),
                         ui.p(
-                            "Online geschaltete Dokumente können nicht gelöscht werden, um tote Links und verwaiste PDFs im Intranet zu vermeiden. "
-                            "Bitte ziehen Sie die Publikation zuerst über das Menü «🌐 Portal ▾ -> Vom Portal zurückziehen» zurück.",
+                            "Möchten Sie diese Publikation vom statischen Portal zurückziehen und sicher in das Archiv verschieben (Soft-Delete)? "
+                            "Die Publikation wird aus dem Portal entfernt und die Intranet-Links werden sauber deaktiviert.",
                             style="color:#5A687C;font-size:13px;line-height:1.5;margin-bottom:0;",
                         ),
                     ),
-                    title="Löschen nicht möglich (Publiziert)",
-                    footer=ui.modal_button("Verstanden", class_="btn-lukb btn-lukb-primary"),
+                    title="Publikation zurückziehen & archivieren",
+                    footer=ui.div(
+                        ui.modal_button("Abbrechen", class_="btn-lukb btn-lukb-ghost"),
+                        ui.input_action_button(
+                            "btn_confirm_delete_article",
+                            "Vom Portal zurückziehen & archivieren",
+                            class_="btn-lukb btn-lukb-danger",
+                        ),
+                        style="display:flex;gap:10px;justify-content:flex-end;width:100%;",
+                    ),
                     size="m",
                     easy_close=True,
                 )
@@ -124,7 +132,7 @@ def register_article_handlers(
             )
             return
 
-        # Sicherheits-Bestätigungsdialog für Soft-Delete
+        # Sicherheits-Bestätigungsdialog für Soft-Delete eines Entwurfs/Reviews
         ui.modal_show(
             ui.modal(
                 ui.div(
@@ -161,7 +169,7 @@ def register_article_handlers(
         aid = state.current_article_id.get()
         if not aid:
             return
-        delete_article(aid, user=state.current_user)
+        delete_article(aid, user=state.current_user, force=True)
         remaining = list_articles()
         next_id = remaining[0]["id"] if remaining else ""
         if next_id:
@@ -216,8 +224,7 @@ def register_article_handlers(
                 ui.notification_show("Nur Administratoren oder Senior Editoren dürfen Publikationen löschen.", type="warning", duration=5)
                 return
             target_doc = get_article(target_id)
-            if target_doc and target_doc.status == "published":
-                ui.notification_show("Publizierte Artikel können nicht gelöscht werden. Bitte zuerst zurückziehen.", type="warning", duration=5)
+            if not target_doc:
                 return
             all_items = list_articles()
             if len(all_items) <= 1:
@@ -227,7 +234,7 @@ def register_article_handlers(
                     duration=4,
                 )
                 return
-            delete_article(target_id, user=user)
+            delete_article(target_id, user=user, force=True)
             if state.current_article_id.get() == target_id:
                 remaining = list_articles()
                 next_id = remaining[0]["id"] if remaining else ""

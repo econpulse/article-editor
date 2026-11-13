@@ -19,12 +19,42 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 WWW_DIR = BASE_DIR / "www"
 FONTS_DIR = WWW_DIR / "fonts"
 DATA_DIR = BASE_DIR / "data"
-STATIC_PORTAL_DIR = Path(os.getenv("STATIC_PORTAL_DIR", str(DATA_DIR / "static_portal_dist"))).resolve()
+
+
+def _resolve_portal_dist_dir() -> Path:
+    # 1. Explizit per Env gesetzt?
+    env_dir = os.getenv("STATIC_PORTAL_DIR")
+    if env_dir:
+        return Path(env_dir).resolve()
+
+    # 2. Auf Posit Connect / Workbench oder Server (MSSQL konfiguriert)?
+    # Hier läuft die App im Produktionsmodus ohne --reload / WatchFiles.
+    if os.getenv("RSTUDIO_CONNECT") or os.getenv("CONNECT_SERVER") or os.getenv("MSSQL_HOST"):
+        return (DATA_DIR / "static_portal_dist").resolve()
+
+    # 3. Lokale Entwicklung / lokales Testing:
+    # Liegt außerhalb des Watch-Trees (im OS Temp-Verzeichnis), damit WatchFiles (--reload)
+    # beim Publizieren oder Zurückziehen von Artikeln KEINEN Server-Reload auslöst
+    # und geöffnete Dialoge nicht unterbricht.
+    import tempfile
+    return (Path(tempfile.gettempdir()) / "lukb_static_portal_dist").resolve()
+
+
+STATIC_PORTAL_DIR = _resolve_portal_dist_dir()
 
 # Stelle sicher, dass Arbeitsverzeichnisse existieren
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 FONTS_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_PORTAL_DIR.mkdir(parents=True, exist_ok=True)
+
+# Initialisiere lokalen Temp-Portalordner mit bestehendem Portal-Stand (falls vorhanden und Temp-Ordner leer)
+if STATIC_PORTAL_DIR != (DATA_DIR / "static_portal_dist").resolve() and (DATA_DIR / "static_portal_dist").exists():
+    try:
+        if not any(STATIC_PORTAL_DIR.iterdir()):
+            import shutil
+            shutil.copytree(DATA_DIR / "static_portal_dist", STATIC_PORTAL_DIR, dirs_exist_ok=True)
+    except Exception:
+        pass
 
 
 def build_database_url() -> tuple[str, str]:
@@ -85,6 +115,49 @@ def build_database_url() -> tuple[str, str]:
 
 
 DATABASE_URL, DATABASE_BACKEND_LABEL = build_database_url()
+
+
+def is_mssql_configured() -> bool:
+    """
+    Prüft, ob ein echter MS SQL Server konfiguriert ist (Posit Connect / Workbench Produktion).
+    Liefert False bei lokaler Entwicklung/Testing mit SQLite-Fallback.
+    """
+    explicit = os.getenv("DATABASE_URL", "").lower()
+    if explicit:
+        return "mssql" in explicit
+    return bool(os.getenv("MSSQL_SERVER", "").strip())
+
+
+def is_connect_environment() -> bool:
+    """
+    Prüft, ob die Anwendung in Posit Connect oder Posit Workbench ausgeführt wird.
+    """
+    if os.getenv("RSTUDIO_PRODUCT", "").upper() == "CONNECT":
+        return True
+    if bool(os.getenv("CONNECT_SERVER", "").strip() or os.getenv("CONNECT_SERVER_URL", "").strip()):
+        return True
+    return is_mssql_configured()
+
+
+def should_sync_portal_on_startup() -> bool:
+    """
+    Entscheidet, ob beim Anwendungsstart Snapshots automatisch in STATIC_PORTAL_DIR
+    synchronisiert werden sollen:
+    - Ja (True): Auf Posit Connect / Posit Workbench oder wenn MSSQL konfiguriert ist
+          (ephemeres Container-Dateisystem muss initialisiert werden).
+    - Nein (False): Bei lokaler Entwicklung / lokalem Testing (ohne MSSQL / SQLite-Fallback),
+          sodass lokale Tests sofort starten und WatchFiles (--reload) nicht in eine
+          Reload-Schleife gerät.
+    - Kann über die Umgebungsvariable SYNC_PORTAL_ON_STARTUP ('true'/'false' / '1'/'0')
+      bei Bedarf explizit überschrieben werden.
+    """
+    forced = os.getenv("SYNC_PORTAL_ON_STARTUP", "").strip().lower()
+    if forced in ("1", "true", "yes"):
+        return True
+    if forced in ("0", "false", "no"):
+        return False
+    return is_connect_environment()
+
 
 # ============================================================================
 # Posit Connect API & Deployment Konfiguration

@@ -6072,6 +6072,7 @@
 
   const TPL_LABELS = {
     investment_focus: "Investment Fokus",
+    investment_tufte: "Investment Fokus (Tufte)",
     market_flash: "Market Flash",
   };
 
@@ -6611,17 +6612,19 @@
         delBtn.type = "button";
         delBtn.className = "btn-lukb btn-lukb-danger-ghost btn-lukb-sm";
         delBtn.style.padding = "3px 7px";
-        delBtn.title = "Publikation löschen";
+        delBtn.title = "Publikation löschen / archivieren";
         delBtn.textContent = "✕";
         delBtn.addEventListener("click", function (ev) {
           ev.stopPropagation();
-          if (
-            window.confirm(
-              'Möchten Sie die Publikation "' +
-                (item.title || "") +
-                '" wirklich löschen?'
-            )
-          ) {
+          const isPub = item.status === "published";
+          const promptMsg = isPub
+            ? 'Die Publikation "' +
+              (item.title || "") +
+              '" ist aktuell im Portal publiziert.\n\nMöchten Sie diese Publikation vom Portal zurückziehen und in das Archiv verschieben?'
+            : 'Möchten Sie die Publikation "' +
+              (item.title || "") +
+              '" wirklich in das Archiv verschieben?';
+          if (window.confirm(promptMsg)) {
             if (window.Shiny && window.Shiny.setInputValue) {
               window.Shiny.setInputValue(
                 "lukb_modal_article_action",

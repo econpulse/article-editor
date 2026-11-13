@@ -7,6 +7,12 @@
       "columns": 2
     },
     {
+      "id": "investment_tufte",
+      "name": "LUKB Investment Fokus (Tufte-Stil)",
+      "description": "Elegantes Tufte-Layout im Body mit asymmetrischem Satz: breiter Randbereich für einspaltige Grafiken und Tabellen sowie volle Seitenbreite für zweispaltige Elemente.",
+      "columns": 1
+    },
+    {
       "id": "market_flash",
       "name": "LUKB Market Flash (Kompakter Fokus-Bericht)",
       "description": "Kompaktes Fokus-Layout mit dunkelblauem Executive-Banner, zweispaltigem Satz für Text und Überschriften sowie wahlweise ein- oder zweispaltigen Grafiken und Tabellen.",

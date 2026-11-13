@@ -81,6 +81,7 @@ def search_modal_ui() -> ui.Tag:
                         ui.tags.select(
                             ui.tags.option("Alle Templates", value="all"),
                             ui.tags.option("Investment Fokus", value="investment_focus"),
+                            ui.tags.option("Investment Fokus (Tufte)", value="investment_tufte"),
                             ui.tags.option("Market Flash", value="market_flash"),
                             id="pub-modal-template-filter",
                             class_="cms-select pub-modal-select",

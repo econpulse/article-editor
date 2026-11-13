@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 from shiny import App, Inputs, Outputs, Session
 
-from config import WWW_DIR
+from config import WWW_DIR, should_sync_portal_on_startup
 from database.repository import init_db_and_seed
 from server import (
     ACTIVE_PEERS,
@@ -40,16 +40,24 @@ logger = logging.getLogger("lukb_cms")
 # Datenbank-Tabellen & initiale Beispiel-Publikationen beim Start sicherstellen
 init_db_and_seed()
 
-# Statisches Content-Portal beim Start immer blitzschnell aus MSSQL-Snapshots synchronisieren
-try:
-    from config import STATIC_PORTAL_DIR
-    from services.portal_publisher import restore_portal_from_snapshots
+# Statisches Content-Portal beim Start:
+# Auf Posit Connect / Workbench (MSSQL) werden alle veröffentlichten Snapshots
+# beim Hochfahren des Containers automatisch in das ephemere Dateisystem materialisiert.
+# Bei lokaler Entwicklung / lokalem Testing (ohne MSSQL) existiert die MSSQL-Datenbank nicht;
+# hier wird der Snapshot-Sync beim Start übersprungen, sodass WatchFiles (--reload) nicht in
+# eine Reload-Schleife gerät und lokale Tests sofort und reibungslos starten.
+if should_sync_portal_on_startup():
+    try:
+        from config import STATIC_PORTAL_DIR
+        from services.portal_publisher import restore_portal_from_snapshots
 
-    logger.info("Synchronisiere aktiven Portal-Stand aus MSSQL-Snapshots...")
-    _restore_res = restore_portal_from_snapshots(STATIC_PORTAL_DIR)
-    logger.info(f"Portal-Wiederherstellung abgeschlossen: {_restore_res.get('restored_count', 0)} Artikel online.")
-except Exception as exc:
-    logger.warning(f"Automatische Portal-Wiederherstellung beim Start übersprungen: {exc}")
+        logger.info("Synchronisiere aktiven Portal-Stand aus MSSQL-Snapshots...")
+        _restore_res = restore_portal_from_snapshots(STATIC_PORTAL_DIR)
+        logger.info(f"Portal-Wiederherstellung abgeschlossen: {_restore_res.get('restored_count', 0)} Artikel online.")
+    except Exception as exc:
+        logger.warning(f"Automatische Portal-Wiederherstellung beim Start übersprungen: {exc}")
+else:
+    logger.info("Lokale Entwicklungsumgebung aktiv (SQLite-Fallback) — MSSQL-Snapshot-Sync beim Start übersprungen.")
 
 # Cache-Busting Version für statische Assets
 _ASSET_VER = get_asset_version()

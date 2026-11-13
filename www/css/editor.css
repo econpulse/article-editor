@@ -2810,3 +2810,8 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
   animation: lukb-undo-pulse 1.8s ease-out;
   border-color: var(--lukb-cyan) !important;
 }
+
+#shiny-notification-panel {
+  z-index: 99999 !important;
+}
+

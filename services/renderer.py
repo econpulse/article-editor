@@ -50,6 +50,7 @@ def list_available_templates() -> list[dict[str, Any]]:
         return data.get("templates", [])
     return [
         {"id": "investment_focus", "name": "LUKB Investment Fokus (2-spaltig)", "columns": 2},
+        {"id": "investment_tufte", "name": "LUKB Investment Fokus (Tufte-Stil)", "columns": 1},
         {"id": "market_flash", "name": "LUKB Market Flash (1-spaltig)", "columns": 1},
     ]
 
