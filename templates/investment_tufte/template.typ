@@ -473,17 +473,40 @@
   } else if blk.type == "table" {
     render-table-box(blk, is-margin: is-margin)
   } else if blk.type == "textbox_group" {
+    let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "table"))
+    let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "table")))
+    let has-visuals = visual-children.len() > 0
+    let is-split = has-visuals and (text-children.len() > 0) and (not is-margin)
+
     block(
       width: 100%,
       fill: rgb("#EBF3FA"),
       stroke: 0.6pt + lukb-navy,
       inset: (x: 10pt, y: 9pt),
       radius: 2pt,
-      above: 1.05em,
-      below: 1.05em
+      above: 1.25em,
+      below: 1.25em
     )[
-      #for child in blk.children [
-        #render-single-block(child, is-margin: false)
+      #if is-split [
+        #grid(
+          columns: (1fr, 56mm),
+          column-gutter: 8mm,
+          [
+            #for child in text-children [
+              #render-single-block(child, is-margin: false)
+            ]
+          ],
+          [
+            #stack(
+              spacing: 8pt,
+              ..visual-children.map(child => render-single-block(child, is-margin: true))
+            )
+          ]
+        )
+      ] else [
+        #for child in blk.children [
+          #render-single-block(child, is-margin: is-margin)
+        ]
       ]
     ]
   } else if blk.type == "spacer" {
@@ -647,7 +670,8 @@
       }
       runs.push((kind: "break"))
     } else {
-      let is-full = (blk.type in ("figure", "db_chart", "table", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")
+      let has-box-visuals = (blk.type == "textbox_group") and blk.children.any(c => c.type in ("figure", "db_chart", "table"))
+      let is-full = ((blk.type in ("figure", "db_chart", "table", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")) or ((blk.type == "textbox_group") and (has-box-visuals or blk.at("layout", default: "column") == "full"))
       if is-full {
         if curr-grid-items.len() > 0 {
           runs.push((kind: "grid", items: curr-grid-items))

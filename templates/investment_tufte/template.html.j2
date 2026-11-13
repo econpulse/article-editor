@@ -236,6 +236,9 @@
         margin-left: 0;
         margin-right: 0;
       }
+      .blk-richtext-textbox-grid {
+        display: block !important;
+      }
     }
 
     h1.blk-h1, h2.blk-h2, h3.blk-h3 {
@@ -323,9 +326,36 @@
       background: #EBF3FA;
       border: 1px solid var(--lukb-navy);
       border-radius: 3px;
-      padding: 12px 14px;
-      margin: 0 0 1em 0;
+      padding: 14px 16px;
+      margin: 0 0 1.4em 0;
       break-inside: avoid;
+    }
+
+    .blk-richtext-textbox.blk-full-span {
+      grid-column: 1 / -1;
+      width: 100%;
+    }
+
+    .blk-richtext-textbox-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.8fr) minmax(260px, 1fr);
+      column-gap: 36px;
+      align-items: start;
+    }
+
+    .blk-textbox-col-main {
+      min-width: 0;
+    }
+
+    .blk-textbox-col-margin {
+      min-width: 0;
+    }
+
+    .blk-textbox-col-margin .blk-figure:not(.blk-full-span),
+    .blk-textbox-col-margin .blk-table-wrap:not(.blk-full-span) {
+      grid-column: auto;
+      margin-top: 0;
+      margin-bottom: 0.5rem;
     }
 
     .blk-richtext-textbox p:last-child {
@@ -924,10 +954,36 @@
 
       {% for blk in article.blocks %}
         {% if blk.type == "textbox_group" %}
-          <div class="blk-richtext-textbox">
-            {% for child in blk.children %}
-              {{ render_single_block(child, in_box=true) }}
-            {% endfor %}
+          {% set visual_children = [] %}
+          {% set text_children = [] %}
+          {% for child in blk.children %}
+            {% if child.type in ["figure", "db_chart", "table"] %}
+              {% set _ = visual_children.append(child) %}
+            {% else %}
+              {% set _ = text_children.append(child) %}
+            {% endif %}
+          {% endfor %}
+          {% set has_visuals = visual_children | length > 0 %}
+          {% set is_split = has_visuals and (text_children | length > 0) %}
+          <div class="blk-richtext-textbox {% if has_visuals or blk.layout == 'full' %}blk-full-span{% endif %}">
+            {% if is_split %}
+              <div class="blk-richtext-textbox-grid">
+                <div class="blk-textbox-col-main">
+                  {% for child in text_children %}
+                    {{ render_single_block(child, in_box=true) }}
+                  {% endfor %}
+                </div>
+                <div class="blk-textbox-col-margin">
+                  {% for child in visual_children %}
+                    {{ render_single_block(child, in_box=true) }}
+                  {% endfor %}
+                </div>
+              </div>
+            {% else %}
+              {% for child in blk.children %}
+                {{ render_single_block(child, in_box=true) }}
+              {% endfor %}
+            {% endif %}
           </div>
         {% else %}
           {{ render_single_block(blk, in_box=false) }}
