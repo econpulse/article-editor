@@ -202,6 +202,7 @@ def publish_article(
     output_dir: Path | None = None,
     user: str = "Investment Office",
     change_note: str = "",
+    sync_with_db: bool | None = None,
 ) -> dict[str, Any]:
     """
     Publiziert einen Artikel auf das statische Portal (oder überschreibt einen bestehenden).
@@ -287,6 +288,51 @@ def publish_article(
     except Exception as exc:
         logger.warning(f"Snapshot für Artikel {doc.id} konnte nicht in MSSQL gespeichert werden: {exc}")
 
+    # 3.6. Manifest und lokale Dateien mit allen aktiven MSSQL-Snapshots synchronisieren
+    # Schützt vor unvollständigen Portal-Builds, falls das lokale Verzeichnis z.B. durch ein
+    # Redeployment überschrieben wurde oder auf einem neuen Worker-Knoten läuft.
+    should_sync = (
+        (output_dir is None or output_dir.resolve() == STATIC_PORTAL_DIR.resolve())
+        if sync_with_db is None
+        else bool(sync_with_db)
+    )
+    if should_sync:
+        try:
+            from database.repository import get_active_published_snapshots
+
+            active_snaps = get_active_published_snapshots()
+            if active_snaps:
+                active_ids = {s["article_id"] for s in active_snaps if s.get("article_id")}
+                # Entferne Artikel, die in der Datenbank nicht mehr aktiv publiziert sind
+                for art_key in list(manifest["articles"].keys()):
+                    if art_key not in active_ids and art_key != doc.id:
+                        manifest["articles"].pop(art_key, None)
+
+                # Fehlende aktive Artikel aus der DB ins Manifest und auf die Platte nachziehen
+                for snap in active_snaps:
+                    snap_id = snap.get("article_id")
+                    if not snap_id:
+                        continue
+                    if snap_id not in manifest["articles"]:
+                        meta = dict(snap.get("metadata") or {})
+                        meta["id"] = snap_id
+                        meta["slug"] = snap.get("slug")
+                        meta["title"] = snap.get("title")
+                        meta["has_pdf"] = bool(snap.get("pdf_bytes"))
+                        manifest["articles"][snap_id] = meta
+
+                    # Sicherstellen, dass HTML und PDF auf der Festplatte vorhanden sind
+                    snap_slug = snap.get("slug")
+                    if snap_slug:
+                        snap_dir = dist_dir / "articles" / snap_slug
+                        if not (snap_dir / "index.html").exists():
+                            snap_dir.mkdir(parents=True, exist_ok=True)
+                            (snap_dir / "index.html").write_text(snap.get("html_content") or "", encoding="utf-8")
+                            if snap.get("pdf_bytes"):
+                                (snap_dir / f"{snap_slug}.pdf").write_bytes(snap["pdf_bytes"])
+        except Exception as exc:
+            logger.warning(f"Abgleich mit MSSQL-Snapshots während Publikation übersprungen: {exc}")
+
     # 4. Manifest speichern & Portal-Index neu bauen
     _write_manifest(dist_dir, manifest)
     _render_portal_index(dist_dir, manifest)
@@ -346,16 +392,17 @@ def unpublish_article(article_id: str, output_dir: Path | None = None) -> dict[s
         if article_dir.exists():
             shutil.rmtree(article_dir, ignore_errors=True)
 
-    _write_manifest(dist_dir, manifest)
-    _render_portal_index(dist_dir, manifest)
-
-    # Snapshot in MSSQL deaktivieren (bleibt für Audit-Historie erhalten)
+    # 1. Snapshot in MSSQL deaktivieren (bleibt für Audit-Historie erhalten)
     try:
         from database.repository import deactivate_published_snapshot
 
         deactivate_published_snapshot(article_id)
     except Exception as exc:
         logger.warning(f"Snapshot-Deaktivierung für {article_id} in MSSQL fehlgeschlagen: {exc}")
+
+    # 2. Manifest speichern & Portal-Index neu bauen
+    _write_manifest(dist_dir, manifest)
+    _render_portal_index(dist_dir, manifest)
 
     logger.info(f"Artikel {article_id} (slug: {slug}) erfolgreich vom Portal entfernt.")
 

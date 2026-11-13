@@ -142,15 +142,17 @@ pip install rsconnect-python
 ```
 
 #### Schritt 2: Deployment-Manifest generieren
-Das Manifest erfasst exakt alle Python-Abhängigkeiten aus `requirements.txt` sowie die Projektdateien unter Berücksichtigung von `.rscignore`:
+Das Manifest erfasst exakt alle Python-Abhängigkeiten aus `requirements.txt` sowie die Projektdateien. Da `rsconnect-python` keine `.rscignore`-Dateien auswertet (dies wird nur vom R-Paket unterstützt), müssen Entwicklungsdatenbanken und der lokale Portal-Build via `--exclude` explizit ausgeschlossen werden:
 ```powershell
-rsconnect write-manifest shiny .
+rsconnect write-manifest shiny . --exclude "data/static_portal_dist" --exclude "data/*.db*"
 ```
-*(Es wird eine Datei `manifest.json` erzeugt. Diese schließt temporäre SQLite-Dateien, Caches und `.venv` dank `.rscignore` automatisch aus).*
+*(Es wird eine Datei `manifest.json` erzeugt. Das statische Portal materialisiert sich auf dem Server dank Snapshot-Synchronisation vollautomatisch direkt aus MSSQL).*
 
 #### Schritt 3: Erst-Deployment auf Posit Connect durchführen
 ```powershell
 rsconnect deploy shiny . `
+  --exclude "data/static_portal_dist" `
+  --exclude "data/*.db*" `
   --server https://posit-connect.bank.internal `
   --api-key <IHR_POSIT_CONNECT_API_KEY> `
   --title "Investment Office CMS"

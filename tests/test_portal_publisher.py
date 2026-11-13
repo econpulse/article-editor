@@ -16,6 +16,8 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Projektwurzel in den Suchpfad aufnehmen
@@ -275,6 +277,23 @@ def test_published_snapshots_and_recovery() -> None:
         if "SNB_RATE" in test_ts and test_ts["SNB_RATE"]["points"]:
             pts = test_ts["SNB_RATE"]["points"]
             assert all(d <= datetime(2023, 1, 1).date() for d, _ in pts), "Keine Punkte nach end_date erlaubt"
+
+        # 8. Schutz vor Überschreiben durch fehlerhaften lokalen Deployment-Ordner testen:
+        # Simuliere, dass ein Deployment dist_dir mit einem unvollständigen/leeren Manifest überschreibt
+        stale_manifest = {"articles": {}, "last_updated": datetime.now(timezone.utc).isoformat()}
+        (dist_dir / "portal-manifest.json").write_text(json.dumps(stale_manifest), encoding="utf-8")
+        
+        # Publizieren eines neuen Artikels mit sync_with_db=True
+        art_id_new = f"test-snap-resync-{uuid.uuid4().hex[:8]}"
+        doc_new = _build_test_doc(art_id_new, "Neuer Artikel nach Deployment")
+        res_sync = publish_article(doc_new, output_dir=dist_dir, user="Editor C", sync_with_db=True)
+        assert res_sync["success"] is True
+
+        # Prüfe, dass das Portal jetzt BEIDE aktiven Artikel enthält (den neuen und art_id)
+        final_manifest = json.loads((dist_dir / "portal-manifest.json").read_text(encoding="utf-8"))
+        assert art_id_new in final_manifest["articles"], "Neuer Artikel muss im Manifest sein"
+        assert art_id in final_manifest["articles"], "Bestehende Datenbank-Publikation darf nicht gelöscht worden sein"
+        assert (dist_dir / "articles" / slug_v1 / "index.html").exists(), "Bestehende HTML-Datei muss auf Platte existieren"
 
         print("Published snapshots and recovery tests passed successfully!")
 
