@@ -459,6 +459,34 @@
   ]
 }
 
+#let build-tufte-grid-rows(items) = {
+  let rows = ()
+  let curr-left = ()
+  let pending-right = ()
+
+  for it in items {
+    let is-margin = (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "column")
+    if is-margin {
+      // Wenn bereits Text VOR diesem Rand-Element existiert, schließen wir
+      // die vorherige Zeile ab, damit das Rand-Element genau auf Höhe des
+      // DANACH im Editor folgenden Absatzes platziert wird.
+      if curr-left.len() > 0 {
+        rows.push((left: curr-left, right: pending-right))
+        curr-left = ()
+        pending-right = ()
+      }
+      pending-right.push(it)
+    } else {
+      curr-left.push(it)
+    }
+  }
+
+  if curr-left.len() > 0 or pending-right.len() > 0 {
+    rows.push((left: curr-left, right: pending-right))
+  }
+  return rows
+}
+
 // Einzelner Block-Renderer
 #let render-single-block(blk, is-margin: false) = {
   if blk.type == "heading" {
@@ -476,7 +504,8 @@
     let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "table"))
     let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "table")))
     let has-visuals = visual-children.len() > 0
-    let is-split = has-visuals and (text-children.len() > 0) and (not is-margin)
+    let has-text = text-children.len() > 0
+    let is-split = has-visuals and has-text and (not is-margin)
 
     block(
       width: 100%,
@@ -488,20 +517,46 @@
       below: 1.25em
     )[
       #if is-split [
+        #let box-rows = build-tufte-grid-rows(blk.children)
+        #let box-gutters = if box-rows.len() > 1 {
+          box-rows.slice(1).map(r => {
+            if r.left.len() > 0 {
+              let first-it = r.left.at(0)
+              if first-it.type == "heading" {
+                let lvl = first-it.at("level", default: 2)
+                if lvl == 1 { 2.1em } else { 1.85em }
+              } else if first-it.type == "richtext" {
+                1.6em
+              } else {
+                1.6em
+              }
+            } else {
+              1.6em
+            }
+          })
+        } else {
+          1.6em
+        }
+
         #grid(
           columns: (1fr, 56mm),
           column-gutter: 8mm,
-          [
-            #for child in text-children [
-              #render-single-block(child, is-margin: false)
+          row-gutter: box-gutters,
+          ..box-rows.map(r => (
+            [
+              #for l-it in r.left [
+                #render-single-block(l-it, is-margin: false)
+              ]
+            ],
+            [
+              #if r.right.len() > 0 [
+                #stack(
+                  spacing: 8pt,
+                  ..r.right.map(r-it => render-single-block(r-it, is-margin: true))
+                )
+              ]
             ]
-          ],
-          [
-            #stack(
-              spacing: 8pt,
-              ..visual-children.map(child => render-single-block(child, is-margin: true))
-            )
-          ]
+          )).flatten()
         )
       ] else [
         #for child in blk.children [
@@ -688,34 +743,6 @@
     runs.push((kind: "grid", items: curr-grid-items))
   }
   return runs
-}
-
-#let build-tufte-grid-rows(items) = {
-  let rows = ()
-  let curr-left = ()
-  let pending-right = ()
-
-  for it in items {
-    let is-margin = (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "column")
-    if is-margin {
-      // Wenn bereits Text VOR diesem Rand-Element existiert, schließen wir
-      // die vorherige Zeile ab, damit das Rand-Element genau auf Höhe des
-      // DANACH im Editor folgenden Absatzes platziert wird.
-      if curr-left.len() > 0 {
-        rows.push((left: curr-left, right: pending-right))
-        curr-left = ()
-        pending-right = ()
-      }
-      pending-right.push(it)
-    } else {
-      curr-left.push(it)
-    }
-  }
-
-  if curr-left.len() > 0 or pending-right.len() > 0 {
-    rows.push((left: curr-left, right: pending-right))
-  }
-  return rows
 }
 
 #let runs = build-tufte-runs(blocks)

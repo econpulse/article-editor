@@ -968,16 +968,9 @@
           <div class="blk-richtext-textbox {% if has_visuals or blk.layout == 'full' %}blk-full-span{% endif %}">
             {% if is_split %}
               <div class="blk-richtext-textbox-grid">
-                <div class="blk-textbox-col-main">
-                  {% for child in text_children %}
-                    {{ render_single_block(child, in_box=true) }}
-                  {% endfor %}
-                </div>
-                <div class="blk-textbox-col-margin">
-                  {% for child in visual_children %}
-                    {{ render_single_block(child, in_box=true) }}
-                  {% endfor %}
-                </div>
+                {% for child in blk.children %}
+                  {{ render_single_block(child, in_box=true) }}
+                {% endfor %}
               </div>
             {% else %}
               {% for child in blk.children %}
