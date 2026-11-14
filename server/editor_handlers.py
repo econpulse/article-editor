@@ -98,13 +98,14 @@ def register_editor_handlers(
             state.current_article_id.set(merged_doc.id)
             state.current_doc.set(merged_doc)
 
-            save_info["assets"] = collect_article_assets_map(merged_doc)
+            assets_map = collect_article_assets_map(merged_doc)
+            save_info["assets"] = assets_map
             await session.send_custom_message("lukb_autosave_ack", save_info)
             await state.send_article_list(merged_doc.id)
 
             auto_preview = bool(payload.get("auto_preview", is_peer_auto_preview(state.session_id, default=True)))
             set_peer_auto_preview(state.session_id, auto_preview)
-            await state.send_preview(merged_doc, include_typst=auto_preview)
+            svg_pages, web_html = await state.send_preview(merged_doc, include_typst=auto_preview)
 
             # Synchronisiere alle Co-Autoren (und bei erfolgtem DB-Merge auch den Sender selbst)
             await broadcast_article_sync(
@@ -113,9 +114,15 @@ def register_editor_handlers(
                 sender_session_id=state.session_id,
                 author_name=user_label,
                 include_sender=bool(save_info.get("merged", False)),
+                assets_map=assets_map,
             )
             # Aktualisiere auch die Live-Vorschau bei allen Co-Autoren im selben Artikel
-            await broadcast_preview_to_coauthors(state.session_id, merged_doc)
+            await broadcast_preview_to_coauthors(
+                state.session_id,
+                merged_doc,
+                pre_rendered_svg=svg_pages,
+                pre_rendered_html=web_html,
+            )
         except Exception as exc:
             logger.exception("Fehler beim Speichern des Artikels")
             ui.notification_show(f"Speicherfehler: {exc}", type="error")

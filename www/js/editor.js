@@ -3496,9 +3496,7 @@
     titleWrap.appendChild(titleLbl);
     titleWrap.appendChild(titleInp);
 
-    const layoutWrap = createFullLayoutControl(blk, function () {
-      requestDbChartPreview(blk, true);
-    });
+    const layoutWrap = createFullLayoutControl(blk);
 
     topGrid.appendChild(titleWrap);
     topGrid.appendChild(layoutWrap);
@@ -4998,9 +4996,7 @@
     titleWrap.appendChild(titleLbl);
     titleWrap.appendChild(titleInp);
 
-    const layoutWrap = createFullLayoutControl(blk, function () {
-      requestDbChartPreview(blk, true);
-    });
+    const layoutWrap = createFullLayoutControl(blk);
 
     topGrid.appendChild(titleWrap);
     topGrid.appendChild(layoutWrap);
@@ -6993,6 +6989,9 @@
       });
       if (!activeEl || !activeEl.closest("#meta-authors-container")) {
         state.article.metadata.authors = deepClone(incoming.metadata.authors || []);
+      }
+      if (!activeEl || activeEl.id !== "meta-tag-input") {
+        state.article.metadata.tags = deepClone(incoming.metadata.tags || []);
       }
       renderMetadataForm();
 

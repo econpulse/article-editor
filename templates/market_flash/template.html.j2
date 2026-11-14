@@ -1,1 +1,113 @@
-{% include "investment_focus/template.html.j2" %}
+{% extends "_common/base_article.html.j2" %}
+
+{% block page_title %}{{ article.metadata.title }} — LUKB Market Flash{% endblock %}
+
+{% block extra_css %}
+    :root {
+      --callout-accent: var(--lukb-gold);
+    }
+
+    .lukb-executive-banner {
+      background: var(--lukb-navy);
+      color: #FFFFFF;
+      padding: 20px 24px;
+      border-radius: 4px;
+      margin-bottom: 24px;
+    }
+
+    .lukb-executive-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .lukb-executive-kicker {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      font-size: 0.82rem;
+      letter-spacing: 0.08em;
+      color: var(--lukb-cyan);
+      text-transform: uppercase;
+    }
+
+    .lukb-executive-date {
+      font-family: var(--font-body);
+      font-weight: 300;
+      font-size: 0.95rem;
+      color: #D6DEE8;
+    }
+
+    .lukb-executive-subtitle {
+      font-family: var(--font-body);
+      font-weight: 300;
+      font-size: 0.95rem;
+      color: #B8C7D9;
+      margin: 0 0 4px 0;
+    }
+
+    .lukb-executive-banner .lukb-title {
+      color: #FFFFFF;
+      font-size: 2rem;
+      margin: 0;
+    }
+
+    .lukb-executive-lead {
+      border-left: 4px solid var(--lukb-cyan);
+      padding: 4px 0 4px 16px;
+      margin: 0 0 22px 0;
+      font-family: var(--font-heading);
+      font-weight: 500;
+      font-size: 1.1rem;
+      line-height: 1.55;
+      color: var(--lukb-navy);
+    }
+
+    .lukb-executive-authors {
+      font-size: 0.86rem;
+      color: var(--lukb-muted);
+      margin-bottom: 8px;
+    }
+
+    .lukb-executive-authors strong {
+      color: var(--lukb-text);
+    }
+{% endblock %}
+
+{% block header_banner %}
+  {{ render_brand_row() }}
+
+  {% set pub_date = article.metadata.publication_date_formatted or article.metadata.publication_date %}
+  <div class="lukb-executive-banner">
+    <div class="lukb-executive-top">
+      <span class="lukb-executive-kicker">
+        LUKB INVESTMENT OFFICE{% if article.metadata.category %} · {{ article.metadata.category | upper }}{% endif %}
+      </span>
+      {% if pub_date %}
+      <span class="lukb-executive-date">{{ pub_date }}</span>
+      {% endif %}
+    </div>
+    {% if article.metadata.subtitle %}
+    <p class="lukb-executive-subtitle">{{ article.metadata.subtitle }}</p>
+    {% endif %}
+    <h1 class="lukb-title">{{ article.metadata.title }}</h1>
+  </div>
+
+  {% if article.metadata.lead %}
+  <div class="lukb-executive-lead">{{ article.metadata.lead }}</div>
+  {% endif %}
+
+  {% if article.metadata.authors %}
+  <div class="lukb-executive-authors">
+    Verfasst von:
+    {% for author in article.metadata.authors %}
+      {% if not loop.first %} · {% endif %}
+      <strong>{{ author.name }}</strong>{% if author.role %} ({{ author.role }}){% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {{ render_tags_bar() }}
+{% endblock %}

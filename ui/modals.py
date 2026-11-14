@@ -2,6 +2,20 @@ from __future__ import annotations
 
 from shiny import ui
 
+from services.renderer import list_available_templates
+
+
+def _short_template_label(tpl: dict) -> str:
+    raw = str(tpl.get("name") or tpl.get("id") or "").strip()
+    if raw.startswith("LUKB "):
+        raw = raw[5:]
+    # Kompaktes Label für das Filter-Dropdown
+    if "(" in raw and "Tufte" not in raw:
+        raw = raw.split("(")[0].strip()
+    elif "Tufte" in raw:
+        raw = "Investment Fokus (Tufte)"
+    return raw
+
 
 def search_modal_ui() -> ui.Tag:
     """Rendert den Such- & Publikations-Dialog (Command Palette, Ctrl+K)."""
@@ -80,9 +94,10 @@ def search_modal_ui() -> ui.Tag:
                     ui.div(
                         ui.tags.select(
                             ui.tags.option("Alle Templates", value="all"),
-                            ui.tags.option("Investment Fokus", value="investment_focus"),
-                            ui.tags.option("Investment Fokus (Tufte)", value="investment_tufte"),
-                            ui.tags.option("Market Flash", value="market_flash"),
+                            *[
+                                ui.tags.option(_short_template_label(tpl), value=tpl["id"])
+                                for tpl in list_available_templates()
+                            ],
                             id="pub-modal-template-filter",
                             class_="cms-select pub-modal-select",
                         ),

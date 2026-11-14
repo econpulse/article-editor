@@ -62,15 +62,6 @@ else:
 # Cache-Busting Version für statische Assets
 _ASSET_VER = get_asset_version()
 
-# Abwärtskompatible Aliase für etwaige externe Zugriffe
-_slugify_filename = slugify_filename
-_collect_article_assets_map = collect_article_assets_map
-_ACTIVE_PEERS = ACTIVE_PEERS
-_PEER_COLORS = PEER_COLORS
-_get_article_peers = get_article_peers
-_broadcast_presence = broadcast_presence
-_broadcast_article_sync = broadcast_article_sync
-
 
 def server(input: Inputs, output: Outputs, session: Session) -> None:
     """

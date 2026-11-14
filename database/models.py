@@ -41,6 +41,7 @@ class ArticleModel(Base):
     header_series: Mapped[str] = mapped_column(Unicode(200), nullable=False, default="Investment Office News")
     publication_date: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="")
     authors_json: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="[]")
+    tags_json: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="[]")
     disclaimer: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="")
     template_id: Mapped[str] = mapped_column(Unicode(100), nullable=False, default="investment_focus")
     status: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="draft")

@@ -44,6 +44,13 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
         authors_raw = []
 
     try:
+        tags_raw = json.loads(getattr(row, "tags_json", "[]") or "[]")
+        if not isinstance(tags_raw, list):
+            tags_raw = []
+    except Exception:
+        tags_raw = []
+
+    try:
         blocks_raw = json.loads(row.blocks_json or "[]")
     except Exception:
         blocks_raw = []
@@ -62,6 +69,7 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
         category=row.category or "Anlagepolitik & Märkte",
         header_series=getattr(row, "header_series", None) or "Investment Office News",
         authors=[AuthorItem.model_validate(a) for a in authors_raw if isinstance(a, dict)],
+        tags=[str(t).strip() for t in tags_raw if str(t).strip()],
         disclaimer=resolved_disclaimer,
     )
     return ArticleDocument(
@@ -91,6 +99,7 @@ def list_articles(
             ArticleModel.template_id,
             ArticleModel.status,
             ArticleModel.authors_json,
+            ArticleModel.tags_json,
             ArticleModel.publication_date,
             ArticleModel.updated_at,
             ArticleModel.created_at,
@@ -115,6 +124,7 @@ def list_articles(
                     ArticleModel.subtitle.ilike(q),
                     ArticleModel.lead.ilike(q),
                     ArticleModel.authors_json.ilike(q),
+                    ArticleModel.tags_json.ilike(q),
                     ArticleModel.category.ilike(q),
                 )
             )
@@ -126,6 +136,12 @@ def list_articles(
                 author_names = ", ".join(a.get("name", "") for a in authors if a.get("name"))
             except Exception:
                 author_names = ""
+            try:
+                tags_list = json.loads(getattr(r, "tags_json", "[]") or "[]")
+                if not isinstance(tags_list, list):
+                    tags_list = []
+            except Exception:
+                tags_list = []
             updated_dt = r.updated_at or r.created_at
             updated_str = updated_dt.strftime("%d.%m.%Y %H:%M") if updated_dt else ""
             updated_iso = updated_dt.isoformat() if updated_dt else ""
@@ -138,6 +154,7 @@ def list_articles(
                     "template_id": r.template_id,
                     "status": r.status,
                     "authors_summary": author_names or "Investment Office",
+                    "tags": tags_list,
                     "publication_date": r.publication_date or "",
                     "updated_at": updated_str,
                     "updated_iso": updated_iso,
@@ -190,7 +207,9 @@ def _merge_concurrent_documents(
         "lead",
         "publication_date",
         "category",
+        "header_series",
         "authors",
+        "tags",
         "disclaimer",
     ):
         if inc_d["metadata"].get(k) != base_d["metadata"].get(k):
@@ -308,6 +327,10 @@ def save_article(
         authors_serialized = json.dumps(
             [a.model_dump() for a in doc.metadata.authors], ensure_ascii=False
         )
+        tags_serialized = json.dumps(
+            [str(t).strip() for t in (doc.metadata.tags or []) if str(t).strip()],
+            ensure_ascii=False,
+        )
         blocks_serialized = json.dumps(doc.blocks, ensure_ascii=False)
 
         if row is None:
@@ -320,6 +343,7 @@ def save_article(
                 header_series=doc.metadata.header_series or "Investment Office News",
                 publication_date=doc.metadata.publication_date,
                 authors_json=authors_serialized,
+                tags_json=tags_serialized,
                 disclaimer=doc.metadata.disclaimer,
                 template_id=doc.template_id,
                 status=doc.status,
@@ -337,6 +361,7 @@ def save_article(
             row.header_series = doc.metadata.header_series or "Investment Office News"
             row.publication_date = doc.metadata.publication_date
             row.authors_json = authors_serialized
+            row.tags_json = tags_serialized
             row.disclaimer = doc.metadata.disclaimer
             row.template_id = doc.template_id
             row.status = doc.status
@@ -450,7 +475,6 @@ def delete_article(
         create_revision=True,
         revision_note="Publikation archiviert (Soft-Delete / Papierkorb)",
     )
-    return True
     return True
 
 
@@ -1248,8 +1272,22 @@ def _ensure_schema_columns() -> None:
                             )
                         )
                     conn.commit()
+                if "tags_json" not in cols:
+                    if engine.dialect.name == "sqlite":
+                        conn.execute(
+                            text(
+                                "ALTER TABLE io_articles ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "ALTER TABLE io_articles ADD tags_json NVARCHAR(MAX) NOT NULL DEFAULT '[]'"
+                            )
+                        )
+                    conn.commit()
     except Exception as exc:
-        logger.warning("Schema-Migration io_articles.header_series übersprungen: %s", exc)
+        logger.warning("Schema-Migration io_articles übersprungen: %s", exc)
 
 
 def init_db_and_seed() -> None:

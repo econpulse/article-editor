@@ -981,8 +981,11 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     assert "text-decoration: none !important;" in html_out
 
     # Typst PDF & SVG (beide Templates) & 'top' Zellenausrichtung in render-table-box
-    typ_focus_tbl = (ROOT / "templates" / "investment_focus" / "template.typ").read_text(encoding="utf-8").split("#let render-table-box")[1].split("#let render-quote-box")[0]
-    typ_flash_tbl = (ROOT / "templates" / "market_flash" / "template.typ").read_text(encoding="utf-8").split("#let render-table-box")[1].split("#let render-quote-box")[0]
+    base_typ_src = (ROOT / "templates" / "_common" / "lukb_base.typ").read_text(encoding="utf-8")
+    typ_focus_src = (ROOT / "templates" / "investment_focus" / "template.typ").read_text(encoding="utf-8") + "\n" + base_typ_src
+    typ_flash_src = (ROOT / "templates" / "market_flash" / "template.typ").read_text(encoding="utf-8") + "\n" + base_typ_src
+    typ_focus_tbl = typ_focus_src.split("#let render-table-box")[1].split("#let render-quote-box")[0]
+    typ_flash_tbl = typ_flash_src.split("#let render-table-box")[1].split("#let render-quote-box")[0]
     assert "left + top" in typ_focus_tbl and "left + horizon" not in typ_focus_tbl
     assert "left + top" in typ_flash_tbl and "left + horizon" not in typ_flash_tbl
 
@@ -1054,7 +1057,11 @@ def test_typst_long_table_breaking_with_repeated_header():
             assert len(svgs) >= 2, f"Lange Tabelle muss bei {tpl_id}/{layout_mode} über mindestens 2 Seiten umbrechen"
             # Kopfzeile muss auf Folgeseiten / -spalten wiederholt worden sein (im SVG als Text bzw. Glyphen-Elemente)
             # Prüfe zusätzlich im Template, dass table.header(repeat: true) und table.cell(breakable: false) genutzt werden:
-            tpl_src = (ROOT / "templates" / tpl_id / "template.typ").read_text(encoding="utf-8")
+            tpl_src = (
+                (ROOT / "templates" / tpl_id / "template.typ").read_text(encoding="utf-8")
+                + "\n"
+                + (ROOT / "templates" / "_common" / "lukb_base.typ").read_text(encoding="utf-8")
+            )
             assert "table.header(" in tpl_src
             assert "repeat: true" in tpl_src
             assert "set table.cell(breakable: false)" in tpl_src
@@ -1113,7 +1120,11 @@ def test_hybrid_full_width_float_and_overflow_fallback():
             svgs = render_preview_svg_pages(doc)
             assert len(svgs) == 1, f"Kompakte Tabelle + Text ({tpl_id}/{pos_mode}) muss auf 1 Seite passen"
 
-            tpl_src = (ROOT / "templates" / tpl_id / "template.typ").read_text(encoding="utf-8")
+            tpl_src = (
+                (ROOT / "templates" / tpl_id / "template.typ").read_text(encoding="utf-8")
+                + "\n"
+                + (ROOT / "templates" / "_common" / "lukb_base.typ").read_text(encoding="utf-8")
+            )
             assert "place-full-float" in tpl_src
             assert "max-float-h = 520pt" in tpl_src
 
@@ -1449,6 +1460,193 @@ def test_tufte_template_pipeline():
     assert delete_article(doc.id) is True
 
 
+def test_priority_1_template_consolidation_and_layout():
+    """
+    Prüft die Verbesserungen aus Priorität 1:
+    1. Gemeinsames Typst-Basismodul (`templates/_common/lukb_base.typ`) und schlanke Template-Dateien.
+    2. Gemeinsames Jinja2-Basis-Template (`templates/_common/base_article.html.j2`) inkl. eigenem
+       Executive-Banner und Gold-Callout für `market_flash` im Web-HTML.
+    3. Überlappungsfreier Seite-1-Footer im 2-Spalten-Grid (statt `#move(dy: -0.5cm)`) und kein `#eval` für Plaintext-Lead.
+    4. Höhenbewusste Entkopplung der Tufte-Randspalte (`build-tufte-grid-rows`) und gepunktete Trennlinien (`dots`).
+    """
+    from schemas.article import ArticleDocument, ArticleMetadata, DividerBlock, FigureBlock, TableBlock
+
+    base_typ = ROOT / "templates" / "_common" / "lukb_base.typ"
+    base_html = ROOT / "templates" / "_common" / "base_article.html.j2"
+    assert base_typ.exists(), "Gemeinsames Typst-Basismodul fehlt"
+    assert base_html.exists(), "Gemeinsames Jinja2-Basis-Template fehlt"
+
+    base_typ_text = base_typ.read_text(encoding="utf-8")
+    assert "#move(dy: -0.5cm)" not in base_typ_text, "Überlappendes #move(dy: -0.5cm) im Footer darf nicht mehr verwendet werden"
+    assert "meta.lead_typst" not in base_typ_text, "Unnötiges #eval(meta.lead_typst) darf nicht mehr verwendet werden"
+
+    for tpl_id in ("investment_focus", "market_flash", "investment_tufte"):
+        typ_file = ROOT / "templates" / tpl_id / "template.typ"
+        html_file = ROOT / "templates" / tpl_id / "template.html.j2"
+        typ_lines = typ_file.read_text(encoding="utf-8").splitlines()
+        assert len(typ_lines) < 90, f"{tpl_id}/template.typ sollte schlank sein (<90 Zeilen), hat {len(typ_lines)}"
+        assert '#import "../_common/lukb_base.typ": *' in typ_file.read_text(encoding="utf-8")
+        assert '{% extends "_common/base_article.html.j2" %}' in html_file.read_text(encoding="utf-8")
+
+    # Market Flash Web-HTML Executive-Banner & Gold-Callout prüfen
+    flash_doc = ArticleDocument(
+        id="art-p1-flash-html",
+        template_id="market_flash",
+        metadata=ArticleMetadata(
+            title="SNB Zinsentscheid Q4",
+            subtitle="Geldpolitische Lagebeurteilung",
+            category="Makroökonomie",
+            lead="Die Nationalbank senkt den Leitzins um 25 Basispunkte.",
+            authors=[{"name": "Dr. Reto Krähenbühl", "role": "Chefökonom"}],
+        ),
+        blocks=[
+            {"id": "c1", "type": "callout", "title": "Kernaussage", "html": "<p>Zinssenkung stützt Exportwirtschaft.</p>"},
+        ],
+    )
+    flash_html = render_web_html(flash_doc)
+    assert "lukb-executive-banner" in flash_html
+    assert "LUKB INVESTMENT OFFICE" in flash_html
+    assert "MAKROÖKONOMIE" in flash_html
+    assert "--callout-accent: var(--lukb-gold);" in flash_html
+    assert "Verfasst von:" in flash_html
+
+    # Tufte: Gepunktete Trennlinie (`dots`) + lückenloser Textfluss neben hoher Randgrafik
+    tufte_doc = ArticleDocument(
+        id="art-p1-tufte-flow",
+        template_id="investment_tufte",
+        metadata=ArticleMetadata(
+            title="Tufte Randspalten-Entkopplung",
+            lead="Mehrere kurze Absätze fliessen lückenlos links neben hohen Randgrafiken.",
+        ),
+        blocks=[
+            {"id": "h1", "type": "heading", "level": 1, "text": "Analyse"},
+            {"id": "p1", "type": "richtext", "html": "<p>Erster kurzer Absatz im Haupttext.</p>"},
+            FigureBlock(id="m_fig", title="Hohe Randgrafik", layout="column").model_dump(),
+            {"id": "p2", "type": "richtext", "html": "<p>Zweiter kurzer Absatz direkt unter dem ersten Absatz.</p>"},
+            TableBlock(id="m_tbl", title="Randtabelle", layout="column").model_dump(),
+            {"id": "p3", "type": "richtext", "html": "<p>Dritter kurzer Absatz ohne weisses Loch in der linken Spalte.</p>"},
+            DividerBlock(id="d1", style="dots").model_dump(),
+        ],
+    )
+    tufte_svgs = render_preview_svg_pages(tufte_doc)
+    assert len(tufte_svgs) == 1
+    assert "stroke-dasharray" in tufte_svgs[0], "Gepunktete Trennlinie (dots) muss in Tufte-SVG als dashed/dotted Stroke erscheinen"
+    tufte_pdf = render_pdf_bytes(tufte_doc)
+    assert tufte_pdf.startswith(b"%PDF-")
+
+
+def test_priority_2_tags_caching_and_deduplication():
+    """
+    Prüft alle Verbesserungen aus Priorität 2:
+    1. Schlagworte (`tags`) werden in `io_articles.tags_json` gespeichert, geladen, in `list_articles`
+       durchsucht, beim 3-Wege-Merge (inkl. `header_series`) zusammengeführt und ins statische Portal
+       als `tags` / `tags_str` exportiert.
+    2. `generate_db_chart_svg` nutzt den Content-Hash-Cache (`_DB_CHART_SVG_CACHE`), liefert bei
+       unveränderten Parametern sofort einen Cache-Hit und berechnet bei Parameteränderung neu.
+    3. `ui/modals.py` liest die verfügbaren Templates dynamisch aus `list_available_templates()`.
+    """
+    import tempfile
+    from database.repository import _ensure_schema_columns, get_article, list_articles, save_article
+    from schemas.article import ArticleDocument, ArticleMetadata
+    from services.chart_generator import (
+        _DB_CHART_SVG_CACHE,
+        clear_db_chart_cache,
+        generate_db_chart_svg,
+    )
+    from services.portal_publisher import _read_manifest, publish_article
+    from services.renderer import _prepare_common_article_payload
+    from ui.modals import search_modal_ui
+
+    _ensure_schema_columns()
+
+    # 1. Tags Persistenz + Suche + 3-Wege-Merge (tags & header_series)
+    base_doc = ArticleDocument(
+        id="art-p2-tags-test",
+        template_id="investment_focus",
+        metadata=ArticleMetadata(
+            title="Schlagwort-Persistenz Test",
+            header_series="Investment Office News",
+            tags=["SNB", "Zinsen"],
+        ),
+        blocks=[{"id": "b1", "type": "richtext", "html": "<p>Basis</p>"}],
+    )
+    save_article(base_doc, user="Autor A")
+
+    loaded = get_article("art-p2-tags-test")
+    assert loaded is not None
+    assert loaded.metadata.tags == ["SNB", "Zinsen"]
+
+    # Suche nach Tag in list_articles
+    found = list_articles(search_query="Zinsen")
+    assert any(item["id"] == "art-p2-tags-test" and "Zinsen" in item.get("tags", []) for item in found)
+
+    # 3-Wege-Merge: Autor A ändert header_series, Autor B ändert tags
+    doc_a = base_doc.model_copy(deep=True)
+    doc_a.metadata.header_series = "Fokus"
+    save_article(doc_a, user="Autor A", base_doc=base_doc)
+
+    doc_b = base_doc.model_copy(deep=True)
+    doc_b.metadata.tags = ["SNB", "Zinsen", "Schweizer Aktien"]
+    merge_res = save_article(doc_b, user="Autor B", base_doc=base_doc)
+    assert merge_res["merged"] is True
+
+    merged_loaded = get_article("art-p2-tags-test")
+    assert merged_loaded is not None
+    assert merged_loaded.metadata.header_series == "Fokus"
+    assert merged_loaded.metadata.tags == ["SNB", "Zinsen", "Schweizer Aktien"]
+
+    # Portal-Publikation übernimmt tags & tags_str
+    with tempfile.TemporaryDirectory() as tmp_portal:
+        pub_res = publish_article(
+            merged_loaded,
+            output_dir=Path(tmp_portal),
+            user="Autor B",
+            sync_with_db=False,
+        )
+        assert pub_res["success"] is True
+        manifest = _read_manifest(Path(tmp_portal))
+        assert manifest["articles"]["art-p2-tags-test"]["tags"] == [
+            "SNB",
+            "Zinsen",
+            "Schweizer Aktien",
+        ]
+        assert (
+            manifest["articles"]["art-p2-tags-test"]["tags_str"]
+            == "SNB, Zinsen, Schweizer Aktien"
+        )
+
+    # 2. DB-Chart Content-Hash-Cache
+    clear_db_chart_cache()
+    assert len(_DB_CHART_SVG_CACHE) == 0
+    chart_cfg = {
+        "id": "blk_cache_test",
+        "type": "db_chart",
+        "series": [{"ticker": "SMI", "chart_type": "line", "label": "SMI Index"}],
+        "start_date": "2023-01-01",
+        "rebasing": "index_100",
+        "layout": "column",
+    }
+    svg1 = generate_db_chart_svg(chart_cfg, embed_fonts=False, max_date="2026-11-05")
+    assert len(_DB_CHART_SVG_CACHE) == 1
+    svg2 = generate_db_chart_svg(chart_cfg, embed_fonts=False, max_date="2026-11-05")
+    assert svg1 is svg2  # Identisches String-Objekt aus dem In-Memory-Cache
+    assert len(_DB_CHART_SVG_CACHE) == 1
+
+    # Parameteränderung (layout='full') erzeugt neuen Cache-Eintrag
+    chart_cfg_full = dict(chart_cfg, layout="full")
+    svg3 = generate_db_chart_svg(chart_cfg_full, embed_fonts=False, max_date="2026-11-05")
+    assert len(_DB_CHART_SVG_CACHE) == 2
+    assert svg3 != svg1
+
+    # 3. Gemeinsame Payload-Voraufbereitung & dynamische Modal-Optionen
+    common = _prepare_common_article_payload(merged_loaded)
+    assert common["metadata"]["tags"] == ["SNB", "Zinsen", "Schweizer Aktien"]
+    modal_html = str(search_modal_ui())
+    assert 'value="investment_focus"' in modal_html
+    assert 'value="investment_tufte"' in modal_html
+    assert 'value="market_flash"' in modal_html
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1467,6 +1665,8 @@ if __name__ == "__main__":
     test_hybrid_full_width_float_and_overflow_fallback()
     test_header_series_selection_and_rendering()
     test_tufte_template_pipeline()
+    test_priority_1_template_consolidation_and_layout()
+    test_priority_2_tags_caching_and_deduplication()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()

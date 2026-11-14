@@ -1,197 +1,69 @@
-<!DOCTYPE html>
-<html lang="de-CH">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>{{ article.metadata.title }} — LUKB Investment Office (Tufte-Stil)</title>
-  <style>
+{% extends "_common/base_article.html.j2" %}
+
+{% block page_title %}{{ article.metadata.title }} — LUKB Investment Office (Tufte-Stil){% endblock %}
+
+{% block extra_css %}
     :root {
-      --lukb-navy: #002855;
-      --lukb-blue: #005A9C;
-      --lukb-cyan: #009FE3;
-      --lukb-gold: #C59B27;
-      --lukb-text: #1A2433;
-      --lukb-muted: #5A687C;
-      --lukb-surface: #F4F7FA;
-      --lukb-border: #D6DEE8;
-      --font-body: "Yoga Sans for LUKB Light", "Yoga Sans for LUKB", "Calibri Light", "Segoe UI", Arial, sans-serif;
-      --font-heading: "Yoga Sans for LUKB Medium", "Yoga Sans for LUKB", "Calibri", "Segoe UI Semibold", Arial, sans-serif;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      padding: 0;
-      background-color: #EEF2F6;
-      color: var(--lukb-text);
-      font-family: var(--font-body);
-      font-weight: 300;
-      line-height: 1.65;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    strong, b {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-navy);
-    }
-
-    .lukb-article-shell {
-      max-width: 1040px;
-      margin: 28px auto;
-      background: #FFFFFF;
-      border-radius: 6px;
-      box-shadow: 0 8px 30px rgba(0, 40, 85, 0.08);
-      overflow: hidden;
-      border-top: 5px solid var(--lukb-navy);
-    }
-
-    .lukb-header {
-      padding: 36px 44px 28px 44px;
-      border-bottom: 2px solid var(--lukb-navy);
-      background: linear-gradient(180deg, #FFFFFF 0%, #FAFCFF 100%);
-    }
-
-    .lukb-brand-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      flex-wrap: wrap;
-      gap: 12px;
-      margin-bottom: 22px;
-    }
-
-    .lukb-brand-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .lukb-logo-img {
-      height: 40px;
-      width: auto;
-      display: block;
-    }
-
-    .lukb-header-series {
-      color: #0093D1;
-      font-family: var(--font-heading);
-      font-weight: 500;
-      font-size: 1.2rem;
-      line-height: 1.2;
-      padding-top: 4px;
-    }
-
-    .lukb-subtitle {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-blue);
-      font-size: 1rem;
-      margin: 0 0 6px 0;
+      --shell-max-width: 1040px;
+      --quote-accent: var(--lukb-gold);
     }
 
     .lukb-title {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-navy);
-      font-size: 2.25rem;
-      line-height: 1.22;
       margin: 0 0 1.5em 0;
-      text-align: left;
-      hyphens: none;
     }
 
     .lukb-lead {
-      font-size: 1.12rem;
-      line-height: 1.6;
-      color: var(--lukb-text);
       margin: 0 0 1.8em 0;
-      text-align: left;
-    }
-
-    .lukb-authors-bar {
-      background: var(--lukb-surface);
-      padding: 10px 16px;
-      border-radius: 4px;
-      font-size: 0.86rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 18px;
-      align-items: center;
-    }
-
-    .lukb-authors-label {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-navy);
-    }
-
-    .lukb-author-item strong {
-      color: var(--lukb-text);
-    }
-
-    .lukb-author-role {
-      color: var(--lukb-muted);
-    }
-
-    .article-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 10px;
-    }
-
-    .article-tag {
-      display: inline-block;
-      background: #F1F5F9;
-      color: var(--lukb-navy);
-      border: 1px solid #CBD5E1;
-      border-radius: 3px;
-      font-size: 0.75rem;
-      font-weight: 500;
-      padding: 2px 8px;
-      letter-spacing: 0.02em;
     }
 
     /* ========================================================================
-       Tufte-Layout im Body
-       Asymmetrisches CSS Grid: Hauptspalte + Randbereich (Sidenote-Spalte)
+       Tufte-Layout im Body:
+       Entkoppelte Randspalte (float: right; clear: right), sodass der
+       linke Haupttext ohne weisse Lücken neben hohen Randgrafiken weiterfliesst.
        ======================================================================== */
     .lukb-body {
       padding: 34px 44px;
       max-width: 980px;
       margin: 0 auto;
-      display: grid;
-      grid-template-columns: minmax(0, 1.8fr) minmax(260px, 1fr);
-      column-gap: 36px;
-      row-gap: 1.25rem;
-      align-items: start;
     }
 
-    /* Fliesstext, Überschriften, Callouts und Textboxen in die Hauptlesespalte (Spalte 1) */
-    .blk-h1, .blk-h2, .blk-h3, .blk-richtext, .blk-callout, .blk-richtext-textbox, .blk-quote:not(.blk-full-span) {
-      grid-column: 1;
+    .lukb-body::after {
+      content: "";
+      display: table;
+      clear: both;
     }
 
-    /* Einspaltige Grafiken und Tabellen im Randbereich (Spalte 2) */
+    /* Fliesstext, Überschriften, Callouts und Textboxen in die Hauptlesespalte (links) */
+    .blk-h1,
+    .blk-h2,
+    .blk-h3,
+    .blk-richtext,
+    .blk-callout,
+    .blk-richtext-textbox:not(.blk-full-span),
+    .blk-quote:not(.blk-full-span) {
+      width: calc(64.5% - 20px);
+    }
+
+    /* Einspaltige Grafiken und Tabellen im Randbereich (rechts, gestapelt ohne Textlücken) */
     .blk-figure:not(.blk-full-span),
     .blk-table-wrap:not(.blk-full-span) {
-      grid-column: 2;
-      margin-top: 0;
-      margin-bottom: 0.5rem;
+      float: right;
+      clear: right;
+      width: calc(35.5% - 16px);
+      margin: 0 0 1.1rem 36px;
+      padding: 10px 0 8px 0;
     }
 
     .blk-figure:not(.blk-full-span) .blk-box-title,
     .blk-table-wrap:not(.blk-full-span) .blk-box-title {
       font-size: 0.88rem;
+      margin-bottom: 4px;
     }
 
     .blk-figure:not(.blk-full-span) .blk-box-subtitle,
     .blk-table-wrap:not(.blk-full-span) .blk-box-subtitle {
       font-size: 0.76rem;
+      margin-bottom: 6px;
     }
 
     .blk-table-wrap:not(.blk-full-span) .lukb-data-table th,
@@ -200,15 +72,47 @@
       font-size: 0.76rem;
     }
 
-    /* Zweispaltige Elemente spannen über die gesamte Breite (Spalte 1 bis 2) */
+    /* Zweispaltige Elemente spannen über die gesamte Breite */
     .blk-full-span,
     .blk-footnotes,
     .blk-glossary,
     .blk-publications,
     .blk-divider,
     .blk-spacer {
-      grid-column: 1 / -1;
+      clear: both;
       width: 100%;
+    }
+
+    h1.blk-h1 {
+      margin-top: 1.6em;
+    }
+
+    h2.blk-h2 {
+      margin-top: 1.5em;
+    }
+
+    h3.blk-h3 {
+      margin-top: 1.4em;
+    }
+
+    .blk-richtext p {
+      margin: 0 0 1.4em 0;
+    }
+
+    .blk-richtext-textbox {
+      padding: 14px 16px;
+      margin: 0 0 1.4em 0;
+    }
+
+    .blk-richtext-textbox.blk-full-span {
+      clear: both;
+      width: 100%;
+    }
+
+    .blk-richtext-textbox-grid::after {
+      content: "";
+      display: table;
+      clear: both;
     }
 
     @media (max-width: 860px) {
@@ -218,7 +122,6 @@
         border-top-width: 4px;
       }
       .lukb-body {
-        display: block;
         padding: 24px 20px;
       }
       .lukb-header {
@@ -230,766 +133,45 @@
       .blk-figure:not(.blk-full-span),
       .blk-table-wrap:not(.blk-full-span),
       .blk-full-span,
-      .blk-h1, .blk-h2, .blk-h3, .blk-richtext, .blk-callout, .blk-richtext-textbox {
-        grid-column: 1 !important;
+      .blk-h1, .blk-h2, .blk-h3, .blk-richtext, .blk-callout, .blk-richtext-textbox, .blk-quote {
+        float: none !important;
+        clear: both !important;
         width: 100% !important;
-        margin-left: 0;
-        margin-right: 0;
-      }
-      .blk-richtext-textbox-grid {
-        display: block !important;
+        margin-left: 0 !important;
+        margin-right: 0 !important;
       }
     }
-
-    h1.blk-h1, h2.blk-h2, h3.blk-h3 {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      line-height: 1.15;
-      break-after: avoid;
-      break-inside: avoid;
-      margin-top: 1.65rem;
-      margin-bottom: 0.65rem;
-    }
-
-    h1.blk-h1:first-child, h2.blk-h2:first-child, h3.blk-h3:first-child {
-      margin-top: 0;
-    }
-
-    h1.blk-h1 {
-      font-size: 1.48rem;
-      color: var(--lukb-navy);
-      margin-top: 1.6em;
-      border-bottom: 1.5px solid var(--lukb-navy);
-      padding-bottom: 0.25rem;
-      margin-bottom: 0.45rem;
-      width: 100%;
-    }
-
-    h2.blk-h2 {
-      font-size: 1.1rem;
-      color: var(--lukb-blue);
-      margin-top: 1.5em;
-      margin-bottom: 0.68rem;
-      line-height: 1.38;
-    }
-
-    h3.blk-h3 {
-      font-size: 0.98rem;
-      color: var(--lukb-text);
-      margin-top: 1.4em;
-      margin-bottom: 0.68rem;
-      line-height: 1.34;
-    }
-
-    .blk-richtext p {
-      margin: 0 0 1.4em 0;
-      text-align: justify;
-      orphans: 2;
-      widows: 2;
-    }
-
-    .blk-richtext a,
-    .blk-callout a {
-      color: var(--lukb-navy);
-      text-decoration: none !important;
-      transition: color 0.15s ease;
-    }
-
-    .blk-richtext a:hover,
-    .blk-richtext a:focus,
-    .blk-richtext a:visited,
-    .blk-callout a:hover,
-    .blk-callout a:focus,
-    .blk-callout a:visited {
-      text-decoration: none !important;
-    }
-
-    .blk-richtext a:hover,
-    .blk-callout a:hover {
-      color: var(--lukb-blue);
-    }
-
-    .blk-richtext a::after,
-    .blk-callout a::after {
-      content: "";
-      display: inline-block;
-      width: 11px;
-      height: 11px;
-      margin-left: 3px;
-      vertical-align: middle;
-      position: relative;
-      top: -1px;
-      background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23005A9C' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3Cpolyline points='15 3 21 3 21 9'/%3E%3Cline x1='10' y1='14' x2='21' y2='3'/%3E%3C/svg%3E") no-repeat center / contain;
-    }
-
-    .blk-richtext-textbox {
-      background: #EBF3FA;
-      border: 1px solid var(--lukb-navy);
-      border-radius: 3px;
-      padding: 14px 16px;
-      margin: 0 0 1.4em 0;
-      break-inside: avoid;
-    }
-
-    .blk-richtext-textbox.blk-full-span {
-      grid-column: 1 / -1;
-      width: 100%;
-    }
-
-    .blk-richtext-textbox-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.8fr) minmax(260px, 1fr);
-      column-gap: 36px;
-      align-items: start;
-    }
-
-    .blk-textbox-col-main {
-      min-width: 0;
-    }
-
-    .blk-textbox-col-margin {
-      min-width: 0;
-    }
-
-    .blk-textbox-col-margin .blk-figure:not(.blk-full-span),
-    .blk-textbox-col-margin .blk-table-wrap:not(.blk-full-span) {
-      grid-column: auto;
-      margin-top: 0;
-      margin-bottom: 0.5rem;
-    }
-
-    .blk-richtext-textbox p:last-child {
-      margin-bottom: 0;
-    }
-
-    .blk-callout {
-      break-inside: avoid;
-      background: var(--lukb-surface);
-      border: 1px solid var(--lukb-border);
-      border-left: 4px solid var(--lukb-cyan);
-      border-radius: 0 4px 4px 0;
-      padding: 16px 18px;
-      margin: 1.2em 0;
-    }
-
-    .blk-callout-title {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-navy);
-      font-size: 1.02rem;
-      margin: 0 0 1em 0;
-    }
-
-    .blk-callout ul, .blk-callout ol {
-      margin: 0;
-      padding-left: 20px;
-    }
-
-    .blk-callout li {
-      margin-bottom: 6px;
-    }
-
-    .blk-quote {
-      margin: 1.4em 0;
-      padding: 14px 20px;
-      background: #F8FAFC;
-      border-left: 4px solid var(--lukb-gold);
-      border-radius: 0 4px 4px 0;
-      break-inside: avoid;
-    }
-
-    .quote-text {
-      font-family: var(--font-heading);
-      font-style: italic;
-      font-size: 1.05rem;
-      color: var(--lukb-navy);
-      line-height: 1.45;
-      margin: 0;
-    }
-
-    .quote-footer {
-      margin-top: 8px;
-      font-size: 0.82rem;
-      color: var(--lukb-muted);
-    }
-
-    .quote-author {
-      color: var(--lukb-navy);
-    }
-
-    .blk-divider {
-      border: 0;
-      margin: 1.6em 0;
-    }
-
-    .blk-divider-solid {
-      border-top: 1px solid var(--lukb-border);
-    }
-
-    .blk-divider-dashed {
-      border-top: 1.5px dashed var(--lukb-border);
-    }
-
-    .blk-divider-dots {
-      border-top: 2px dotted var(--lukb-border);
-    }
-
-    .blk-footnotes {
-      border-top: 1px solid var(--lukb-border);
-      padding-top: 10px;
-      margin: 1.6em 0;
-      font-size: 0.78rem;
-      color: var(--lukb-muted);
-      break-inside: avoid;
-    }
-
-    .footnotes-title {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-blue);
-      margin-top: 0;
-      margin-bottom: 8px;
-      font-size: 1.1rem;
-      line-height: 1.25;
-    }
-
-    .footnotes-list {
-      list-style: none;
-      padding-left: 0;
-      margin: 0;
-    }
-
-    .footnotes-list li {
-      margin-bottom: 4px;
-      line-height: 1.35;
-    }
-
-    .footnote-num {
-      font-weight: 600;
-      color: var(--lukb-cyan);
-      margin-right: 4px;
-    }
-
-    .glossary-term {
-      position: relative;
-      border-bottom: 1.5px dotted var(--lukb-cyan);
-      cursor: help;
-      color: inherit;
-    }
-
-    .blk-glossary {
-      border-top: 1px solid var(--lukb-border);
-      padding-top: 12px;
-      margin: 1.6em 0;
-      font-size: 0.82rem;
-      break-inside: avoid;
-    }
-
-    .glossary-title {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-blue);
-      margin-top: 0;
-      margin-bottom: 8px;
-      font-size: 1.1rem;
-      line-height: 1.25;
-    }
-
-    .glossary-list {
-      margin: 0;
-      padding: 0;
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 6px;
-    }
-
-    .glossary-item-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      line-height: 1.35;
-    }
-
-    .glossary-term-name {
-      font-family: var(--font-heading);
-      font-weight: 600;
-      color: var(--lukb-navy);
-    }
-
-    .glossary-term-name::after {
-      content: " — ";
-      color: var(--lukb-muted);
-      font-weight: normal;
-    }
-
-    .glossary-term-desc {
-      color: var(--lukb-text);
-    }
-
-    .blk-publications {
-      border-top: 2px solid var(--lukb-blue);
-      border-bottom: 1px solid var(--lukb-border);
-      padding: 12px 0 10px 0;
-      margin: 1.8em 0 1.4em 0;
-      break-inside: avoid;
-    }
-
-    .publications-title {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-navy);
-      margin-top: 0;
-      margin-bottom: 10px;
-      font-size: 1.1rem;
-      line-height: 1.25;
-    }
-
-    .publications-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .publication-item {
-      padding: 3px 0;
-      font-size: 0.88rem;
-      line-height: 1.4;
-      color: var(--lukb-navy);
-    }
-
-    .pub-item-link {
-      color: var(--lukb-navy);
-      text-decoration: none !important;
-      transition: color 0.15s ease;
-    }
-
-    .pub-item-link:hover,
-    .pub-item-link:focus,
-    .pub-item-link:visited {
-      text-decoration: none !important;
-      color: var(--lukb-blue);
-    }
-
-    .pub-link-icon {
-      display: inline-block;
-      margin-left: 4px;
-      color: var(--lukb-blue);
-      vertical-align: middle;
-      position: relative;
-      top: -1px;
-    }
-
-    .pub-title-quote {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: inherit;
-    }
-
-    .pub-date-text {
-      font-family: var(--font-body);
-      font-weight: 300;
-      color: inherit;
-    }
-
-    .blk-figure, .blk-table-wrap {
-      break-inside: avoid;
-      border-top: 2px solid var(--lukb-navy);
-      border-bottom: 1px solid var(--lukb-border);
-      padding: 10px 0 8px 0;
-      margin: 1.4em 0 1.2em 0;
-    }
-
-    .blk-box-title {
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-navy);
-      font-size: 1.02rem;
-      line-height: 1.25;
-      margin: 0 0 4px 0;
-    }
-
-    .blk-box-subtitle {
-      font-family: var(--font-body);
-      font-weight: 300;
-      color: var(--lukb-muted);
-      font-size: 0.85rem;
-      line-height: 1.3;
-      margin: 0 0 6px 0;
-    }
-
-    .blk-figure-img-container {
-      text-align: center;
-      margin: 6px 0 2px 0;
-    }
-
-    .blk-figure-img-container img {
-      max-width: 100%;
-      height: auto;
-      display: inline-block;
-    }
-
-    .blk-figure-placeholder {
-      background: var(--lukb-surface);
-      border: 1px dashed var(--lukb-border);
-      padding: 30px 14px;
-      text-align: center;
-      color: var(--lukb-muted);
-      font-size: 0.82rem;
-    }
-
-    .blk-box-source {
-      font-family: var(--font-body);
-      font-weight: 300;
-      color: var(--lukb-muted);
-      font-size: 0.76rem;
-      margin: 4px 0 0 0;
-    }
-
-    table.lukb-data-table {
-      width: 100%;
-      table-layout: fixed;
-      border-collapse: collapse;
-      font-size: 0.86rem;
-    }
-
-    table.lukb-data-table th,
-    table.lukb-data-table td {
-      overflow-wrap: break-word;
-      word-wrap: break-word;
-      vertical-align: top;
-    }
-
-    table.lukb-data-table thead th {
-      background: var(--lukb-navy);
-      color: #FFFFFF;
-      font-family: var(--font-heading);
-      font-weight: 500;
-      padding: 7px 9px;
-      border-top: 1px solid var(--lukb-navy);
-      border-bottom: 1px solid var(--lukb-navy);
-    }
-
-    table.lukb-data-table tbody td {
-      padding: 6px 9px;
-      border-bottom: 1px solid var(--lukb-border);
-      color: var(--lukb-text);
-    }
-
-    table.lukb-data-table tbody tr:nth-child(even) {
-      background: var(--lukb-surface);
-    }
-
-    table.lukb-data-table tbody tr.row-total td {
-      background: #E6EEF7;
-      font-family: var(--font-heading);
-      font-weight: 500;
-      color: var(--lukb-navy);
-      border-top: 1px solid var(--lukb-navy);
-      border-bottom: 2px solid var(--lukb-navy);
-    }
-
-    .lukb-footer {
-      margin: 0 44px 24px 44px;
-      padding: 10px 0 0 0;
-      border-top: 1px solid #000000;
-      font-size: 0.72rem;
-      line-height: 1.35;
-      color: #000000;
-    }
-
-    @media print {
-      @page {
-        margin: 1.5cm;
-        margin-top: 2cm;
-        margin-bottom: 2.4cm;
-        @bottom-right {
-          content: counter(page) "/" counter(pages);
-          font-size: 9.5pt;
-          font-family: var(--font-body);
-          color: #5A687C;
-        }
-      }
-      @page :first {
-        margin-top: 1.25cm;
-      }
-    }
-  </style>
-</head>
-<body>
-  <article class="lukb-article-shell">
-    <header class="lukb-header">
-      <div class="lukb-brand-row">
-        <div class="lukb-brand-badge">
-          {% if logo_data_uri %}
-          <img src="{{ logo_data_uri }}" alt="Luzerner Kantonalbank" class="lukb-logo-img" />
-          {% else %}
-          <strong>Luzerner Kantonalbank</strong>
-          {% endif %}
-        </div>
-        <span class="lukb-header-series">{{ article.metadata.header_series or "Investment Office News" }}</span>
-      </div>
-
-      {% set pub_date = article.metadata.publication_date_formatted or article.metadata.publication_date %}
-      {% if article.metadata.subtitle or article.metadata.category or pub_date %}
-      <div class="lukb-subtitle-row" style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
-        {% if article.metadata.subtitle %}
-        <p class="lukb-subtitle" style="margin: 0;">{{ article.metadata.subtitle }}</p>
-        {% elif article.metadata.category %}
-        <p class="lukb-subtitle" style="margin: 0;">{{ article.metadata.category }}</p>
+{% endblock %}
+
+{% block body_content %}
+  {% for blk in article.blocks %}
+    {% if blk.type == "textbox_group" %}
+      {% set visual_children = [] %}
+      {% set text_children = [] %}
+      {% for child in blk.children %}
+        {% if child.type in ["figure", "db_chart", "table"] %}
+          {% set _ = visual_children.append(child) %}
         {% else %}
-        <div></div>
-        {% endif %}
-        {% if pub_date %}
-        <span class="lukb-pub-date" style="font-size: 1.05rem; color: var(--lukb-muted);">{{ pub_date }}</span>
-        {% endif %}
-      </div>
-      {% endif %}
-
-      <h1 class="lukb-title">{{ article.metadata.title }}</h1>
-
-      {% if article.metadata.lead %}
-      <div class="lukb-lead">{{ article.metadata.lead }}</div>
-      {% endif %}
-
-      {% if article.metadata.authors %}
-      <div class="lukb-authors-bar">
-        <span class="lukb-authors-label">Autoren:</span>
-        {% for author in article.metadata.authors %}
-        <span class="lukb-author-item">
-          <strong>{{ author.name }}</strong>
-          {% if author.role %}<span class="lukb-author-role">({{ author.role }})</span>{% endif %}
-        </span>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      {% if article.metadata.tags and article.metadata.tags|length > 0 %}
-      <div class="article-tags">
-        {% for tag in article.metadata.tags %}
-        <span class="article-tag">{{ tag }}</span>
-        {% endfor %}
-      </div>
-      {% endif %}
-    </header>
-
-    <section class="lukb-body">
-      {% macro render_single_block(blk, in_box=false) %}
-        {% if blk.type == "heading" %}
-          {% if blk.level == 1 %}
-            <h1 class="blk-h1">{{ blk.text }}</h1>
-          {% elif blk.level == 2 %}
-            <h2 class="blk-h2">{{ blk.text }}</h2>
-          {% else %}
-            <h3 class="blk-h3">{{ blk.text }}</h3>
-          {% endif %}
-
-        {% elif blk.type == "richtext" %}
-          <div class="blk-richtext">{{ blk.html | safe }}</div>
-
-        {% elif blk.type == "callout" %}
-          <aside class="blk-callout">
-            {% if blk.title %}
-              <div class="blk-callout-title">{{ blk.title }}</div>
-            {% endif %}
-            <div class="blk-callout-content">{{ blk.html | safe }}</div>
-          </aside>
-
-        {% elif blk.type in ("figure", "db_chart") %}
-          <figure class="blk-figure {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
-            {% if blk.title %}
-              <div class="blk-box-title">{{ blk.title }}</div>
-            {% endif %}
-            {% if blk.subtitle %}
-              <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
-            {% endif %}
-            {% if blk.data_uri %}
-              <div class="blk-figure-img-container">
-                <img src="{{ blk.data_uri }}" alt="{{ blk.title }}" />
-              </div>
-            {% else %}
-              <div class="blk-figure-placeholder">
-                Grafik-Platzhalter (Bitte SVG oder PNG im Grafik-Block hochladen)
-              </div>
-            {% endif %}
-            {% if blk.source %}
-              <figcaption class="blk-box-source">{{ blk.source }}</figcaption>
-            {% endif %}
-          </figure>
-
-        {% elif blk.type == "table" %}
-          <div class="blk-table-wrap {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
-            {% if blk.title %}
-              <div class="blk-box-title">{{ blk.title }}</div>
-            {% endif %}
-            {% if blk.subtitle %}
-              <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
-            {% endif %}
-            {% set col_ns = namespace(total=0.0) %}
-            {% set col_count = blk.columns|length if blk.columns|length > 0 else 1 %}
-            {% set fallback_w = 100.0 / col_count %}
-            {% for col in blk.columns %}
-              {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}
-              {% set col_ns.total = col_ns.total + (cw if cw > 0 else fallback_w) %}
-            {% endfor %}
-            <table class="lukb-data-table">
-              <colgroup>
-                {% for col in blk.columns %}
-                  {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}
-                  {% set pct = ((cw if cw > 0 else fallback_w) / (col_ns.total if col_ns.total > 0 else 100.0)) * 100.0 %}
-                  <col style="width: {{ '%.2f'|format(pct) }}%;" />
-                {% endfor %}
-              </colgroup>
-              {% if blk.show_header is not defined or blk.show_header %}
-              <thead>
-                <tr>
-                  {% for col in blk.columns %}
-                  <th style="text-align: {{ col.align }};">{{ col.title }}</th>
-                  {% endfor %}
-                </tr>
-              </thead>
-              {% endif %}
-              <tbody>
-                {% for row in blk.rows %}
-                <tr class="{% if blk.highlight_last_row and loop.last %}row-total{% endif %}">
-                  {% for col in blk.columns %}
-                  <td style="text-align: {{ col.align }};">{{ row.get(col.field, "") }}</td>
-                  {% endfor %}
-                </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-            {% if blk.source %}
-              <div class="blk-box-source">{{ blk.source }}</div>
-            {% endif %}
-          </div>
-
-        {% elif blk.type == "spacer" %}
-          <div class="blk-spacer" style="height: {{ blk.height_mm or 8 }}mm; width: 100%;"></div>
-
-        {% elif blk.type == "colbreak" %}
-          <div class="blk-colbreak" style="display: none;"></div>
-
-        {% elif blk.type == "quote" %}
-          <blockquote class="blk-quote {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
-            <p class="quote-text">«{{ blk.quote }}»</p>
-            {% if blk.author or blk.source %}
-            <footer class="quote-footer">
-              {% if blk.author %}<strong class="quote-author">{{ blk.author }}</strong>{% endif %}
-              {% if blk.author and blk.source %} · {% endif %}
-              {% if blk.source %}<span class="quote-source">{{ blk.source }}</span>{% endif %}
-            </footer>
-            {% endif %}
-          </blockquote>
-
-        {% elif blk.type == "divider" %}
-          <hr class="blk-divider blk-divider-{{ blk.style or 'solid' }}" />
-
-        {% elif blk.type == "footnotes" %}
-          <div class="blk-footnotes {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
-            {% if blk.title %}
-              <h2 class="blk-h2 footnotes-title">{{ blk.title }}</h2>
-            {% endif %}
-            <ol class="footnotes-list">
-              {% for item in blk['items'] %}
-                <li value="{{ item.num or loop.index }}">
-                  {% if item.num %}<span class="footnote-num">[{{ item.num }}]</span>{% endif %}
-                  <span class="footnote-text">{{ item.text }}</span>
-                </li>
-              {% endfor %}
-            </ol>
-          </div>
-
-        {% elif blk.type == "glossary" %}
-          {% set items = blk['all_items'] or blk['custom_items'] or [] %}
-          {% if items and items|length > 0 %}
-          <div class="blk-glossary {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
-            {% if blk.title %}
-              <h2 class="blk-h2 glossary-title">{{ blk.title }}</h2>
-            {% endif %}
-            <div class="glossary-list">
-              {% for item in items %}
-                <div class="glossary-item-row">
-                  <span class="glossary-term-name">{{ item.term }}</span>
-                  <span class="glossary-term-desc">{{ item.definition }}</span>
-                </div>
-              {% endfor %}
-            </div>
-          </div>
-          {% endif %}
-
-        {% elif blk.type == "publications" %}
-          <div class="blk-publications {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
-            {% if blk.title %}
-              <h2 class="blk-h2 publications-title">{{ blk.title }}</h2>
-            {% endif %}
-            <div class="publications-list">
-              {% for item in blk['items'] %}
-                {% if item.enabled is not defined or item.enabled %}
-                <div class="publication-item">
-                  {% set item_url = (item.url or '')|trim %}
-                  {% set p_date = item.formatted_date or item.date %}
-                  {% set p_title = (item.clean_title or item.title or '')|trim %}
-                  {% if p_title.startswith('"') and p_title.endswith('"') and p_title|length >= 2 %}
-                    {% set p_title = p_title[1:-1] %}
-                  {% elif p_title.startswith('«') and p_title.endswith('»') and p_title|length >= 2 %}
-                    {% set p_title = p_title[1:-1] %}
-                  {% endif %}
-                  {% if item_url %}
-                    <a href="{{ item_url }}" target="_blank" rel="noopener noreferrer" class="pub-item-link" title="{{ p_title }}">
-                      <span class="pub-title-quote">"{{ p_title }}"</span>{% if p_date %} vom <span class="pub-date-text">{{ p_date }}</span>{% endif %}
-                      <svg class="pub-link-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                    </a>
-                  {% else %}
-                    <span class="pub-item-text">
-                      <span class="pub-title-quote">"{{ p_title }}"</span>{% if p_date %} vom <span class="pub-date-text">{{ p_date }}</span>{% endif %}
-                    </span>
-                  {% endif %}
-                </div>
-                {% endif %}
-              {% endfor %}
-            </div>
-          </div>
-        {% endif %}
-      {% endmacro %}
-
-      {% for blk in article.blocks %}
-        {% if blk.type == "textbox_group" %}
-          {% set visual_children = [] %}
-          {% set text_children = [] %}
-          {% for child in blk.children %}
-            {% if child.type in ["figure", "db_chart", "table"] %}
-              {% set _ = visual_children.append(child) %}
-            {% else %}
-              {% set _ = text_children.append(child) %}
-            {% endif %}
-          {% endfor %}
-          {% set has_visuals = visual_children | length > 0 %}
-          {% set is_split = has_visuals and (text_children | length > 0) %}
-          <div class="blk-richtext-textbox {% if has_visuals or blk.layout == 'full' %}blk-full-span{% endif %}">
-            {% if is_split %}
-              <div class="blk-richtext-textbox-grid">
-                {% for child in blk.children %}
-                  {{ render_single_block(child, in_box=true) }}
-                {% endfor %}
-              </div>
-            {% else %}
-              {% for child in blk.children %}
-                {{ render_single_block(child, in_box=true) }}
-              {% endfor %}
-            {% endif %}
-          </div>
-        {% else %}
-          {{ render_single_block(blk, in_box=false) }}
+          {% set _ = text_children.append(child) %}
         {% endif %}
       {% endfor %}
-    </section>
-
-    <footer class="lukb-footer">
-      <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 16px;">
-        <div style="flex: 1;">{{ article.metadata.disclaimer or "" }}</div>
-        <div style="white-space: nowrap; font-size: 0.95rem; color: var(--lukb-muted);">1/1</div>
+      {% set has_visuals = visual_children | length > 0 %}
+      {% set is_split = has_visuals and (text_children | length > 0) %}
+      <div class="blk-richtext-textbox {% if has_visuals or blk.layout == 'full' %}blk-full-span{% endif %}">
+        {% if is_split %}
+          <div class="blk-richtext-textbox-grid">
+            {% for child in blk.children %}
+              {{ render_single_block(child, in_box=true) }}
+            {% endfor %}
+          </div>
+        {% else %}
+          {% for child in blk.children %}
+            {{ render_single_block(child, in_box=true) }}
+          {% endfor %}
+        {% endif %}
       </div>
-    </footer>
-  </article>
-</body>
-</html>
+    {% else %}
+      {{ render_single_block(blk, in_box=false) }}
+    {% endif %}
+  {% endfor %}
+{% endblock %}

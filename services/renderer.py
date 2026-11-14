@@ -49,9 +49,9 @@ def list_available_templates() -> list[dict[str, Any]]:
         data = json.loads(registry_path.read_text(encoding="utf-8"))
         return data.get("templates", [])
     return [
-        {"id": "investment_focus", "name": "LUKB Investment Fokus (2-spaltig)", "columns": 2},
+        {"id": "investment_focus", "name": "LUKB Investment Fokus (2-spaltiger Report)", "columns": 2},
         {"id": "investment_tufte", "name": "LUKB Investment Fokus (Tufte-Stil)", "columns": 1},
-        {"id": "market_flash", "name": "LUKB Market Flash (1-spaltig)", "columns": 1},
+        {"id": "market_flash", "name": "LUKB Market Flash (Kompakter Fokus-Bericht)", "columns": 2},
     ]
 
 
@@ -216,6 +216,36 @@ def _resolve_glossary_items(blk: dict[str, Any], all_blocks: list[dict[str, Any]
     return result
 
 
+def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
+    """
+    Zentrale Voraufbereitung des Artikel-Payloads für alle Ausgabekanäle (Typst-PDF/SVG, Web-HTML, Word-DOCX):
+    - Formatiert das Publikationsdatum einheitlich im LUKB-Standardformat.
+    - Löst Glossar-Begriffe (`all_items`) und Querverweise (`publications`) zentral einmalig auf.
+    """
+    payload = doc.model_dump()
+    raw_date = doc.metadata.publication_date
+    formatted_date = format_publication_date(raw_date)
+    payload["metadata"]["publication_date_raw"] = raw_date
+    payload["metadata"]["publication_date_formatted"] = formatted_date
+    payload["metadata"]["publication_date"] = formatted_date or raw_date
+    payload["metadata"]["lead_typst"] = escape_typst_text(doc.metadata.lead or "")
+
+    raw_blocks = payload.get("blocks", [])
+    for blk in raw_blocks:
+        btype = blk.get("type")
+        if btype == "glossary":
+            blk["all_items"] = _resolve_glossary_items(blk, raw_blocks)
+        elif btype == "publications":
+            for it in blk.get("items", []):
+                raw_d = it.get("date", "")
+                fmt_d = format_publication_date(raw_d)
+                it["formatted_date"] = fmt_d or raw_d
+                raw_t = it.get("title", "").strip()
+                it["clean_title"] = raw_t.strip('"').strip('«').strip('»')
+                it["url"] = str(it.get("url", "")).strip()
+    return payload
+
+
 def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, Any]:
     """
     Bereitet das Artikel-Dictionary für Typst auf:
@@ -228,13 +258,8 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
     if LUKB_LOGO_SVG_PATH.exists():
         (work_dir / "LUKB-Logo.svg").write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
 
-    payload = doc.model_dump()
-    raw_date = doc.metadata.publication_date
-    formatted_date = format_publication_date(raw_date)
-    payload["metadata"]["publication_date_raw"] = raw_date
-    payload["metadata"]["publication_date_formatted"] = formatted_date
-    payload["metadata"]["publication_date"] = formatted_date or raw_date
-    payload["metadata"]["lead_typst"] = escape_typst_text(doc.metadata.lead or "")
+    payload = _prepare_common_article_payload(doc)
+    asset_cache: dict[str, dict[str, Any] | None] = {}
 
     enriched_blocks: list[dict[str, Any]] = []
     for blk in payload.get("blocks", []):
@@ -248,7 +273,9 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
             asset_id = blk.get("asset_id", "")
             resolved_rel_path = ""
             if asset_id:
-                asset_record = get_asset(asset_id)
+                if asset_id not in asset_cache:
+                    asset_cache[asset_id] = get_asset(asset_id)
+                asset_record = asset_cache[asset_id]
                 if asset_record and asset_record.get("data"):
                     ext = _extension_for_mime(
                         asset_record.get("mime_type", ""),
@@ -256,7 +283,8 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                     )
                     asset_filename = f"{asset_id}{ext}"
                     asset_file_path = work_dir / asset_filename
-                    asset_file_path.write_bytes(asset_record["data"])
+                    if not asset_file_path.exists():
+                        asset_file_path.write_bytes(asset_record["data"])
                     resolved_rel_path = asset_filename
             bcopy["resolved_image"] = resolved_rel_path
 
@@ -286,7 +314,7 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
             ]
 
         elif btype == "glossary":
-            all_items = _resolve_glossary_items(blk, payload.get("blocks", []))
+            all_items = bcopy.get("all_items") or []
             bcopy["title_typst"] = escape_typst_text(blk.get("title", "Glossar & Begriffserklärungen"))
             bcopy["items_typst"] = [
                 {
@@ -295,21 +323,18 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                 }
                 for it in all_items
             ]
-            bcopy["all_items"] = all_items
 
         elif btype == "publications":
             bcopy["title_typst"] = escape_typst_text(blk.get("title", "Weitere Publikationen"))
             items_typst = []
             for it in blk.get("items", []):
-                raw_d = it.get("date", "")
-                fmt_d = format_publication_date(raw_d)
-                raw_t = it.get("title", "").strip()
-                clean_t = raw_t.strip('"').strip('«').strip('»')
+                fmt_d = it.get("formatted_date") or it.get("date", "")
+                clean_t = it.get("clean_title") or it.get("title", "").strip().strip('"').strip('«').strip('»')
                 items_typst.append({
                     "title": escape_typst_text(clean_t),
                     "subtitle": escape_typst_text(it.get("subtitle", "")),
-                    "date": escape_typst_text(fmt_d or raw_d),
-                    "formatted_date": escape_typst_text(fmt_d or raw_d),
+                    "date": escape_typst_text(fmt_d),
+                    "formatted_date": escape_typst_text(fmt_d),
                     "category": escape_typst_text(it.get("category", "")),
                     "url": str(it.get("url", "")).strip(),
                     "enabled": bool(it.get("enabled", True)),
@@ -329,6 +354,29 @@ def _get_template_typ_path(template_id: str) -> Path:
     return TEMPLATES_DIR / "investment_focus" / "template.typ"
 
 
+def _stage_typst_workspace(template_id: str, tmp_dir: Path) -> Path:
+    """
+    Kopiert gemeinsame Typst-Basismodule (`templates/_common/*.typ`) sowie das
+    angeforderte Template in das temporäre Arbeitsverzeichnis `tmp_dir`, sodass
+    relative `#import "../_common/lukb_base.typ": *`-Direktiven innerhalb von
+    `root=tmp_dir` sauber aufgelöst werden.
+    """
+    common_src = TEMPLATES_DIR / "_common"
+    if common_src.exists():
+        common_dst = tmp_dir / "_common"
+        common_dst.mkdir(parents=True, exist_ok=True)
+        for typ_file in common_src.glob("*.typ"):
+            (common_dst / typ_file.name).write_bytes(typ_file.read_bytes())
+
+    template_path = _get_template_typ_path(template_id)
+    tpl_folder_name = template_path.parent.name
+    tpl_dst_dir = tmp_dir / tpl_folder_name
+    tpl_dst_dir.mkdir(parents=True, exist_ok=True)
+    work_typ = tpl_dst_dir / "document.typ"
+    work_typ.write_bytes(template_path.read_bytes())
+    return work_typ
+
+
 def _get_font_paths() -> list[Path]:
     paths: list[Path] = []
     if FONTS_DIR.exists():
@@ -338,13 +386,9 @@ def _get_font_paths() -> list[Path]:
 
 def render_pdf_bytes(doc: ArticleDocument) -> bytes:
     """Kompiliert ein ArticleDocument mit der aktuellsten Typst-Engine zu einem PDF (bytes)."""
-    template_path = _get_template_typ_path(doc.template_id)
-    template_code = template_path.read_text(encoding="utf-8")
-
     with tempfile.TemporaryDirectory(prefix="lukb_typst_") as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
-        work_typ = tmp_dir / "document.typ"
-        work_typ.write_text(template_code, encoding="utf-8")
+        work_typ = _stage_typst_workspace(doc.template_id, tmp_dir)
 
         payload = _prepare_typst_payload(doc, tmp_dir)
         pdf_bytes = typst.compile(
@@ -363,13 +407,9 @@ def render_preview_svg_pages(doc: ArticleDocument) -> list[str]:
     Kompiliert ein ArticleDocument in-memory zu einer Liste von SVG-Strings (eine SVG pro PDF-Seite).
     Dadurch kann die PDF-Vorschau im Browser verzögerungsfrei und gestochen scharf gerendert werden.
     """
-    template_path = _get_template_typ_path(doc.template_id)
-    template_code = template_path.read_text(encoding="utf-8")
-
     with tempfile.TemporaryDirectory(prefix="lukb_typst_svg_") as tmp_dir_str:
         tmp_dir = Path(tmp_dir_str)
-        work_typ = tmp_dir / "document.typ"
-        work_typ.write_text(template_code, encoding="utf-8")
+        work_typ = _stage_typst_workspace(doc.template_id, tmp_dir)
 
         payload = _prepare_typst_payload(doc, tmp_dir)
         compiled = typst.compile(
@@ -413,12 +453,8 @@ def render_web_html(doc: ArticleDocument) -> str:
     Rendert ein ArticleDocument als eigenständiges, responsives HTML5-Dokument
     inkl. eingebetteter Data-URI-Grafiken aus der MSSQL-Datenbank.
     """
-    payload = doc.model_dump()
-    raw_date = doc.metadata.publication_date
-    formatted_date = format_publication_date(raw_date)
-    payload["metadata"]["publication_date_raw"] = raw_date
-    payload["metadata"]["publication_date_formatted"] = formatted_date
-    payload["metadata"]["publication_date"] = formatted_date or raw_date
+    payload = _prepare_common_article_payload(doc)
+    asset_uri_cache: dict[str, str] = {}
     for blk in payload.get("blocks", []):
         if blk.get("type") in ("richtext", "callout"):
             blk["html"] = _normalize_inline_links_html(blk.get("html", ""))
@@ -426,11 +462,15 @@ def render_web_html(doc: ArticleDocument) -> str:
             asset_id = blk.get("asset_id", "")
             data_uri = ""
             if asset_id:
-                asset_record = get_asset(asset_id)
-                if asset_record and asset_record.get("data"):
-                    b64 = base64.b64encode(asset_record["data"]).decode("ascii")
-                    mime = asset_record.get("mime_type", "image/svg+xml")
-                    data_uri = f"data:{mime};base64,{b64}"
+                if asset_id not in asset_uri_cache:
+                    asset_record = get_asset(asset_id)
+                    if asset_record and asset_record.get("data"):
+                        b64 = base64.b64encode(asset_record["data"]).decode("ascii")
+                        mime = asset_record.get("mime_type", "image/svg+xml")
+                        asset_uri_cache[asset_id] = f"data:{mime};base64,{b64}"
+                    else:
+                        asset_uri_cache[asset_id] = ""
+                data_uri = asset_uri_cache[asset_id]
             blk["data_uri"] = data_uri
         elif blk.get("type") == "db_chart":
             svg_markup = generate_db_chart_svg(
@@ -440,15 +480,6 @@ def render_web_html(doc: ArticleDocument) -> str:
             )
             b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
             blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
-        elif blk.get("type") == "glossary":
-            blk["all_items"] = _resolve_glossary_items(blk, payload.get("blocks", []))
-        elif blk.get("type") == "publications":
-            for it in blk.get("items", []):
-                raw_d = it.get("date", "")
-                it["formatted_date"] = format_publication_date(raw_d) or raw_d
-                raw_t = it.get("title", "").strip()
-                it["clean_title"] = raw_t.strip('"').strip('«').strip('»')
-                it["url"] = str(it.get("url", "")).strip()
 
     payload["blocks"] = _group_blocks_into_render_items(payload.get("blocks", []))
 
@@ -739,7 +770,8 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             rtag.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
 
     # 5. Inhaltsblöcke rendern
-    grouped_blocks = _group_blocks_into_render_items(doc_model.model_dump().get("blocks", []))
+    common_payload = _prepare_common_article_payload(doc_model)
+    grouped_blocks = _group_blocks_into_render_items(common_payload.get("blocks", []))
 
     def _render_block(container, blk):
         btype = blk.get("type")
@@ -1028,7 +1060,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 rtxt.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
 
         elif btype == "glossary":
-            all_items = _resolve_glossary_items(blk, doc_model.model_dump().get("blocks", []))
+            all_items = blk.get("all_items") or _resolve_glossary_items(blk, common_payload.get("blocks", []))
             if all_items:
                 title = blk.get("title", "").strip() or "Glossar & Begriffserklärungen"
                 p = container.add_paragraph()
@@ -1067,10 +1099,8 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 pi = container.add_paragraph()
                 pi.paragraph_format.space_before = Pt(1)
                 pi.paragraph_format.space_after = Pt(2)
-                raw_title = item.get("title", "").strip()
-                clean_title = raw_title.strip('"').strip('«').strip('»')
-                raw_d = item.get("date", "")
-                fmt_d = format_publication_date(raw_d) or raw_d
+                clean_title = item.get("clean_title") or item.get("title", "").strip().strip('"').strip('«').strip('»')
+                fmt_d = item.get("formatted_date") or format_publication_date(item.get("date", "")) or item.get("date", "")
                 text_content = f'"{clean_title}"'
                 if fmt_d:
                     text_content += f" vom {fmt_d}"

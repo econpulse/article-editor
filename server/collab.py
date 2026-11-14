@@ -127,14 +127,20 @@ async def broadcast_article_sync(
     sender_session_id: str,
     author_name: str,
     include_sender: bool = False,
+    assets_map: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Synchronisiert den Dokumenteninhalt mit anderen aktiven Co-Autoren im selben Artikel."""
-    assets_map = collect_article_assets_map(doc)
-    for sid, info in list(ACTIVE_PEERS.items()):
-        if info.get("article_id") != article_id:
-            continue
-        if sid == sender_session_id and not include_sender:
-            continue
+    targets = [
+        (sid, info)
+        for sid, info in list(ACTIVE_PEERS.items())
+        if info.get("article_id") == article_id and (sid != sender_session_id or include_sender)
+    ]
+    if not targets:
+        return
+
+    resolved_assets = assets_map if assets_map is not None else collect_article_assets_map(doc)
+    doc_payload = doc.model_dump()
+    for sid, info in targets:
         sess: Session | None = info.get("session")
         sync_cb = info.get("sync_doc_cb")
         if callable(sync_cb):
@@ -147,8 +153,8 @@ async def broadcast_article_sync(
                 await sess.send_custom_message(
                     "lukb_remote_sync",
                     {
-                        "article": doc.model_dump(),
-                        "assets": assets_map,
+                        "article": doc_payload,
+                        "assets": resolved_assets,
                         "updated_by": author_name,
                         "sender_session_id": sender_session_id,
                     },
@@ -160,26 +166,54 @@ async def broadcast_article_sync(
 async def broadcast_preview_to_coauthors(
     sender_session_id: str,
     doc: ArticleDocument,
+    pre_rendered_svg: list[str] | None = None,
+    pre_rendered_html: str | None = None,
 ) -> None:
-    """Aktualisiert die Live-Vorschau bei allen anderen Co-Autoren im selben Artikel."""
-    for sid, info in list(ACTIVE_PEERS.items()):
-        if sid != sender_session_id and info.get("article_id") == doc.id:
-            peer_sess: Session | None = info.get("session")
-            if peer_sess is not None:
-                try:
-                    peer_auto = bool(info.get("auto_preview", True))
-                    svg_pages = render_preview_svg_pages(doc) if peer_auto else None
-                    web_html = render_web_html(doc)
-                    await peer_sess.send_custom_message(
-                        "lukb_update_preview",
-                        {
-                            "svg_pages": svg_pages,
-                            "web_html": web_html,
-                            "typst_skipped": not peer_auto,
-                        },
-                    )
-                except Exception:
-                    pass
+    """
+    Aktualisiert die Live-Vorschau bei allen anderen Co-Autoren im selben Artikel.
+    Wiederverwendet bereits berechnete `pre_rendered_svg`- und `pre_rendered_html`-Ergebnisse
+    bzw. berechnet sie höchstens einmal pro Speichervorgang für alle Co-Autoren gemeinsam.
+    """
+    coauthor_targets = [
+        (sid, info)
+        for sid, info in list(ACTIVE_PEERS.items())
+        if sid != sender_session_id
+        and info.get("article_id") == doc.id
+        and info.get("session") is not None
+    ]
+    if not coauthor_targets:
+        return
+
+    shared_html = pre_rendered_html
+    if shared_html is None:
+        try:
+            shared_html = render_web_html(doc)
+        except Exception as exc:
+            shared_html = f"<pre>Fehler beim HTML-Rendering: {exc}</pre>"
+
+    any_peer_needs_typst = any(bool(info.get("auto_preview", True)) for _, info in coauthor_targets)
+    shared_svg = pre_rendered_svg
+    if any_peer_needs_typst and shared_svg is None:
+        try:
+            shared_svg = render_preview_svg_pages(doc)
+        except Exception:
+            shared_svg = None
+
+    for _sid, info in coauthor_targets:
+        peer_sess: Session | None = info.get("session")
+        if peer_sess is not None:
+            try:
+                peer_auto = bool(info.get("auto_preview", True))
+                await peer_sess.send_custom_message(
+                    "lukb_update_preview",
+                    {
+                        "svg_pages": shared_svg if peer_auto else None,
+                        "web_html": shared_html,
+                        "typst_skipped": not peer_auto,
+                    },
+                )
+            except Exception:
+                pass
 
 
 def set_peer_article(session_id: str, article_id: str) -> str:

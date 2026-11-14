@@ -300,6 +300,7 @@ def publish_article(
     # 3. Metadaten für das Portal aufbereiten
     date_display = format_publication_date(doc.metadata.publication_date) or doc.metadata.publication_date or "Aktuell"
     authors_str = " · ".join([a.name for a in doc.metadata.authors])
+    tags_list = [str(t).strip() for t in (doc.metadata.tags or []) if str(t).strip()]
 
     meta_entry = {
         "id": doc.id,
@@ -313,7 +314,8 @@ def publish_article(
         "date_display": date_display,
         "authors": [a.model_dump() for a in doc.metadata.authors],
         "authors_str": authors_str,
-        "tags_str": "",
+        "tags": tags_list,
+        "tags_str": ", ".join(tags_list),
         "published_at": datetime.now(timezone.utc).isoformat(),
         "has_pdf": has_pdf,
     }

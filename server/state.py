@@ -96,12 +96,16 @@ class SessionState:
             },
         )
 
-    async def send_preview(self, doc: ArticleDocument | None = None, include_typst: bool = True) -> None:
-        """Rendert die SVG- und HTML-Vorschau und sendet sie an den Client."""
+    async def send_preview(
+        self,
+        doc: ArticleDocument | None = None,
+        include_typst: bool = True,
+    ) -> tuple[list[str] | None, str | None]:
+        """Rendert die SVG- und HTML-Vorschau, sendet sie an den Client und gibt (svg_pages, web_html) zurück."""
         if doc is None:
             doc = self.current_doc.get()
         if doc is None:
-            return
+            return None, None
 
         svg_pages: list[str] | None = None
         if include_typst:
@@ -131,6 +135,7 @@ class SessionState:
                 "typst_skipped": not include_typst,
             },
         )
+        return svg_pages, web_html
 
     async def load_and_broadcast_article(self, article_id: str) -> None:
         """Lädt einen Artikel, setzt den Session-Zustand und informiert andere Co-Autoren."""

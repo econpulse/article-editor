@@ -16,7 +16,9 @@ oder `step` + `area`, sowie über bis zu 5 Zeitreihen hinweg):
 from __future__ import annotations
 
 import base64
+import hashlib
 import html
+import json
 import math
 from datetime import date
 from pathlib import Path
@@ -310,6 +312,52 @@ def _extract_series_chart_types(item: Any) -> list[str]:
     return cleaned
 
 
+_DB_CHART_SVG_CACHE: dict[str, str] = {}
+_DB_CHART_CACHE_MAX_SIZE = 256
+
+
+def clear_db_chart_cache() -> None:
+    """Leert den In-Memory-SVG-Cache für DB-Charts."""
+    _DB_CHART_SVG_CACHE.clear()
+
+
+def _compute_db_chart_cache_key(
+    block_data: dict[str, Any],
+    embed_fonts: bool,
+    max_date: str | date | None,
+) -> str:
+    raw_series = block_data.get("series") or []
+    normalized_series = []
+    for item in list(raw_series)[:5]:
+        if isinstance(item, dict):
+            t_str = str(item.get("ticker") or "").strip()
+            lbl = str(item.get("label") or "").strip()
+        else:
+            t_str = str(getattr(item, "ticker", "") or "").strip()
+            lbl = str(getattr(item, "label", "") or "").strip()
+        normalized_series.append(
+            {
+                "ticker": t_str,
+                "label": lbl,
+                "chart_types": _extract_series_chart_types(item),
+            }
+        )
+
+    key_payload = {
+        "series": normalized_series,
+        "start_date": str(block_data.get("start_date") or "2022-01-01").strip(),
+        "end_date": str(block_data.get("end_date") or "").strip(),
+        "rebasing": str(block_data.get("rebasing") or "none").strip(),
+        "layout": str(block_data.get("layout") or "column").strip(),
+        "chart_height_mm": str(block_data.get("chart_height_mm") or "36").strip(),
+        "palette": resolve_chart_palette(block_data),
+        "embed_fonts": bool(embed_fonts),
+        "max_date": str(max_date or "").strip(),
+    }
+    raw_json = json.dumps(key_payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
+
+
 def generate_db_chart_svg(
     block_data: dict[str, Any],
     embed_fonts: bool = True,
@@ -322,7 +370,13 @@ def generate_db_chart_svg(
     - Schriftgrössen für Achsen und Legende passen sich an `layout` ('column' vs. 'full') an.
     - `embed_fonts=True` bettet optional Corporate-Fonts aus `www/fonts/` per `@font-face` für Web-`<img>`-Vorschauen ein.
     - `max_date`: Begrenzt Zeitreihen auf den Stichtag der Publikation (keine Daten aus der Zukunft bei Zweit-Publikation).
+    - Nutzt einen Content-Hash-Cache (`_DB_CHART_SVG_CACHE`), sodass unveränderte `db_chart`-Blöcke bei Autosave
+      und Live-Vorschau in 0 ms ohne erneute SQL-Abfrage oder SVG-Pfadberechnung bedient werden.
     """
+    cache_key = _compute_db_chart_cache_key(block_data, embed_fonts, max_date)
+    cached_svg = _DB_CHART_SVG_CACHE.get(cache_key)
+    if cached_svg is not None:
+        return cached_svg
     raw_series = block_data.get("series") or []
     start_date_str = str(block_data.get("start_date") or "2022-01-01").strip()
     rebasing = str(block_data.get("rebasing") or "none").strip()
@@ -820,4 +874,10 @@ def generate_db_chart_svg(
     svg_parts.append("  </g>")
 
     svg_parts.append("</svg>")
-    return "\n".join(svg_parts)
+    result_svg = "\n".join(svg_parts)
+    if len(_DB_CHART_SVG_CACHE) >= _DB_CHART_CACHE_MAX_SIZE:
+        # Entferne ältesten Eintrag (FIFO/LRU light)
+        oldest_key = next(iter(_DB_CHART_SVG_CACHE))
+        _DB_CHART_SVG_CACHE.pop(oldest_key, None)
+    _DB_CHART_SVG_CACHE[cache_key] = result_svg
+    return result_svg

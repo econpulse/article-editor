@@ -125,10 +125,6 @@ class FigureBlock(BaseModel):
         default="auto",
         description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
     )
-    full_position: FullPositionMode = Field(
-        default="auto",
-        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
-    )
 
     @field_validator("full_position", mode="before")
     @classmethod
