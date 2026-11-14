@@ -272,11 +272,109 @@ def _estimate_label_width_px(label: str, font_size: float) -> float:
 
 
 def _format_date_tick(dt: date, total_days: int) -> str:
-    if total_days > 365 * 3:
-        return dt.strftime("%m.%Y") if total_days < 365 * 5 else dt.strftime("%Y")
-    if total_days > 120:
+    if total_days >= 650:
+        return dt.strftime("%Y")
+    if total_days >= 90:
         return dt.strftime("%m.%Y")
     return dt.strftime("%d.%m.%y")
+
+
+def _compute_pretty_x_axis_ticks(
+    min_date: date,
+    max_date: date,
+    is_column_layout: bool = True,
+) -> list[tuple[date, str]]:
+    """
+    Berechnet kalenderbasierte, regelmässige Ticks (inspiriert von R scales::breaks_pretty),
+    damit Zeitreihen-Achsen gleichmässige, lesbare Kalenderintervalle (Jahre, Quartale, Monate, Tage)
+    aufweisen und keine Kalenderjahre oder -monate übersprungen werden.
+    """
+    total_days = max(1, (max_date - min_date).days)
+    span_years = total_days / 365.25
+
+    # 1. Mehrjahres-Charts (>= ~1.8 Jahre / 650 Tage) -> Jahres-Ticks (YYYY)
+    if total_days >= 650:
+        if span_years <= 6.5:
+            step_years = 1
+        elif span_years <= 14.0:
+            step_years = 2
+        elif span_years <= 30.0:
+            step_years = 5
+        else:
+            step_years = 10
+
+        start_y = (min_date.year // step_years) * step_years
+        ticks = [
+            (date(y, 1, 1), str(y))
+            for y in range(start_y, max_date.year + 2, step_years)
+            if min_date <= date(y, 1, 1) <= max_date
+        ]
+        if len(ticks) >= 3 or (len(ticks) >= 2 and span_years < 3.0):
+            return ticks
+        if step_years > 1:
+            ticks = [
+                (date(y, 1, 1), str(y))
+                for y in range(min_date.year, max_date.year + 2, 1)
+                if min_date <= date(y, 1, 1) <= max_date
+            ]
+            if len(ticks) >= 2:
+                return ticks
+
+    # 2. 1 bis ~2 Jahre (330 <= total_days < 650 Tage) -> Quartale oder Halbjahre (%m.%Y)
+    if total_days >= 330:
+        step_months = 6 if (total_days >= 500 or (is_column_layout and total_days >= 450)) else 3
+        candidate_months = [1, 7] if step_months == 6 else [1, 4, 7, 10]
+        ticks = []
+        for y in range(min_date.year, max_date.year + 1):
+            for m in candidate_months:
+                dt = date(y, m, 1)
+                if min_date <= dt <= max_date:
+                    ticks.append((dt, dt.strftime("%m.%Y")))
+        if len(ticks) >= 2:
+            return ticks
+
+    # 3. 3 Monate bis ~1 Jahr (90 <= total_days < 330 Tage) -> Monatlich oder 2-monatlich (%m.%Y)
+    if total_days >= 90:
+        step_m = 2 if (total_days >= 180 or (is_column_layout and total_days >= 140)) else 1
+        ticks = []
+        for y in range(min_date.year, max_date.year + 1):
+            for m in range(1, 13, step_m):
+                dt = date(y, m, 1)
+                if min_date <= dt <= max_date:
+                    ticks.append((dt, dt.strftime("%m.%Y")))
+        if len(ticks) >= 2:
+            return ticks
+
+    # 4. 25 bis 90 Tage -> Halbmonatlich (1. und 15. jedes Monats, %d.%m.%y)
+    if total_days >= 25:
+        ticks = []
+        for y in range(min_date.year, max_date.year + 1):
+            for m in range(1, 13):
+                for d in (1, 15):
+                    try:
+                        dt = date(y, m, d)
+                        if min_date <= dt <= max_date:
+                            ticks.append((dt, dt.strftime("%d.%m.%y")))
+                    except ValueError:
+                        pass
+        if len(ticks) >= 2:
+            return ticks
+
+    # 5. Sehr kurze Zeiträume (< 25 Tage) -> 1-, 2- oder Mehrtages-Schritte (%d.%m.%y)
+    step_d = max(1, total_days // (3 if is_column_layout else 5))
+    ticks = []
+    curr = min_date
+    while curr <= max_date:
+        ticks.append((curr, curr.strftime("%d.%m.%y")))
+        curr += timedelta(days=step_d)
+    if len(ticks) >= 2:
+        return ticks
+
+    # Fallback für minimale Datenpunkte
+    return [
+        (min_date, _format_date_tick(min_date, total_days)),
+        (max_date, _format_date_tick(max_date, total_days)),
+    ]
 
 
 def _render_empty_state_svg(message: str, detail: str = "", embed_fonts: bool = True) -> str:
@@ -558,8 +656,8 @@ def generate_db_chart_svg(
 
     x_axis_label_y = plot_bottom + (31.0 if is_column_layout else 24.0)
     legend_start_y = x_axis_label_y + (34.0 if is_column_layout else 27.0)
-    # Abstand unterhalb der Legende um weitere 25% gestrafft (7.0 px) für kompakten Anschluss der Quelle
-    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + 7.0))
+    # Abstand unterhalb der Legende halbiert (3.5 px) für noch kompakteren Anschluss der Quelle
+    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + 3.5))
 
     def x_px(dt: date) -> float:
         return plot_left + ((float(dt.toordinal()) - min_ord) / span_ord) * plot_w
@@ -611,30 +709,21 @@ def generate_db_chart_svg(
         )
     svg_parts.append("  </g>")
 
-    # 5. X-Achsen-Labels (letztes Label rechtsbündig am rechten Chart-Rand, damit nichts abgeschnitten wird)
-    total_days = max(1, (max_date - min_date).days)
-    max_x_ticks = 5 if is_column_layout else 6
-    num_x_ticks = min(max_x_ticks, len(all_dates)) if len(all_dates) <= max_x_ticks else max_x_ticks
-    x_tick_dates: list[date] = []
-    if len(all_dates) <= max_x_ticks:
-        x_tick_dates = all_dates
-    else:
-        for i in range(num_x_ticks):
-            t_ord = int(round(min_date.toordinal() + (i / (num_x_ticks - 1)) * total_days))
-            x_tick_dates.append(date.fromordinal(t_ord))
+    # 5. X-Achsen-Labels (kalenderbasiert & gleichmässige Abstände à la scales::breaks_pretty)
+    x_ticks_data = _compute_pretty_x_axis_ticks(min_date, max_date, is_column_layout)
 
     svg_parts.append(
         f'  <g font-family="{FONT_BODY}" font-weight="{FONT_WEIGHT_BODY}" font-size="{axis_font_size}" fill="#5A687C">'
     )
-    for idx_t, dt in enumerate(x_tick_dates):
+    for idx_t, (dt, lbl_raw) in enumerate(x_ticks_data):
         tx = x_px(dt)
-        lbl = html.escape(_format_date_tick(dt, total_days))
+        lbl = html.escape(lbl_raw)
         half_lbl_w = _estimate_label_width_px(lbl, axis_font_size) * 0.5
         if idx_t == 0 and tx - half_lbl_w < 0.0:
             svg_parts.append(
                 f'    <text x="{max(0.0, tx - half_lbl_w):.1f}" y="{x_axis_label_y:.1f}" text-anchor="start">{lbl}</text>'
             )
-        elif idx_t == len(x_tick_dates) - 1 and tx + half_lbl_w > plot_right:
+        elif idx_t == len(x_ticks_data) - 1 and tx + half_lbl_w > plot_right:
             svg_parts.append(
                 f'    <text x="{plot_right:.1f}" y="{x_axis_label_y:.1f}" text-anchor="end">{lbl}</text>'
             )

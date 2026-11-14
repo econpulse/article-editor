@@ -441,8 +441,9 @@
       ]
     ]
     #if blk.source != "" [
-      #v(2pt)
-      #text(font: font-body, weight: "light", size: src-sz, fill: lukb-muted)[#blk.source]
+      #block(width: 100%, breakable: false, above: if is-margin { 1.5pt } else { 2pt }, below: 0pt)[
+        #text(font: font-body, weight: "light", size: src-sz, fill: lukb-muted)[#blk.source]
+      ]
     ]
   ]
 
