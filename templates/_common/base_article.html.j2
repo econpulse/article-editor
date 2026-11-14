@@ -383,6 +383,32 @@
       margin-right: 4px;
     }
 
+    sup.lukb-fn-ref {
+      font-size: 0.72em;
+      line-height: 0;
+      vertical-align: super;
+      margin-left: 1px;
+    }
+
+    sup.lukb-fn-ref a {
+      color: var(--lukb-cyan);
+      font-family: var(--font-heading);
+      font-weight: 600;
+      text-decoration: none !important;
+      padding: 0 1px;
+    }
+
+    sup.lukb-fn-ref a:hover {
+      color: var(--lukb-navy);
+    }
+
+    .lukb-fn-backref {
+      color: var(--lukb-cyan);
+      text-decoration: none !important;
+      margin-left: 4px;
+      font-size: 0.75rem;
+    }
+
     .glossary-term {
       position: relative;
       border-bottom: 1.5px dotted var(--lukb-cyan);
@@ -806,9 +832,11 @@
         {% endif %}
         <ol class="footnotes-list">
           {% for item in blk['items'] %}
-            <li value="{{ item.num or loop.index }}">
+            {% set fn_num = item.num or loop.index %}
+            <li id="fn-{{ fn_num }}" value="{{ fn_num }}">
               {% if item.num %}<span class="footnote-num">[{{ item.num }}]</span>{% endif %}
               <span class="footnote-text">{{ item.text }}</span>
+              <a href="#fnref-{{ fn_num }}" class="lukb-fn-backref" title="Zurück zur Textstelle">↩</a>
             </li>
           {% endfor %}
         </ol>
@@ -919,6 +947,21 @@
           {% endif %}
         {% endfor %}
       {% endblock %}
+      {% if article.auto_footnotes and article.auto_footnotes|length > 0 %}
+        <div class="blk-footnotes blk-full-span">
+          <h2 class="blk-h2 footnotes-title">Anmerkungen &amp; Fussnoten</h2>
+          <ol class="footnotes-list">
+            {% for item in article.auto_footnotes %}
+              {% set fn_num = item.num or loop.index %}
+              <li id="fn-{{ fn_num }}" value="{{ fn_num }}">
+                <span class="footnote-num">[{{ fn_num }}]</span>
+                <span class="footnote-text">{{ item.text }}</span>
+                <a href="#fnref-{{ fn_num }}" class="lukb-fn-backref" title="Zurück zur Textstelle">↩</a>
+              </li>
+            {% endfor %}
+          </ol>
+        </div>
+      {% endif %}
     </section>
 
     <footer class="lukb-footer">

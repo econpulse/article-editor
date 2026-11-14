@@ -1647,6 +1647,92 @@ def test_priority_2_tags_caching_and_deduplication():
     assert 'value="market_flash"' in modal_html
 
 
+def test_priority_3_modular_js_footnotes_and_html_hardening():
+    """
+    Prüft alle Verbesserungen aus Priorität 3:
+    1. Modularisierung des Frontends (`www/js/modules/*.js` + `www/js/editor.js`) und Einbindung in `build_app_ui()`.
+    2. Vereinheitlichtes Fussnoten-System über PDF, Web-HTML (`<sup class="lukb-fn-ref">` + Auto-Fussnotenverzeichnis)
+       und Word-DOCX.
+    3. Härtung von `sanitize_richtext_html` und klammerbalanciertem `html_to_typst` bei defektem/verschachteltem
+       Copy-Paste-HTML (verhindert jegliche `#eval(mode: "markup")`-Kompilierungsabbrüche in Typst).
+    """
+    from schemas.article import ArticleDocument, ArticleMetadata
+    from services.html_to_typst import html_to_typst, sanitize_richtext_html
+    from ui import JS_MODULES, build_app_ui
+
+    # 1. Frontend-Modularisierung prüfen
+    assert len(JS_MODULES) == 6
+    ui_tag = build_app_ui()
+    head_deps_html = "".join(str(d.head or "") for d in ui_tag.get_dependencies())
+    for rel_mod in JS_MODULES:
+        mod_file = ROOT / "www" / rel_mod
+        assert mod_file.exists(), f"JS-Modul fehlt: {mod_file}"
+        mod_src = mod_file.read_text(encoding="utf-8")
+        assert "window.LUKBEditor" in mod_src
+        assert "Object.assign(E," in mod_src
+        assert rel_mod in head_deps_html
+
+    editor_main = (ROOT / "www" / "js" / "editor.js").read_text(encoding="utf-8")
+    assert len(editor_main.splitlines()) < 3000, "editor.js sollte durch die Modularisierung < 3000 Zeilen umfassen"
+    assert "sanitizeRichTextHtml" in (ROOT / "www" / "js" / "modules" / "state.js").read_text(encoding="utf-8")
+    assert "sanitizeRichTextHtml" in (ROOT / "www" / "js" / "modules" / "richtext.js").read_text(encoding="utf-8")
+
+    # 2. Vereinheitlichtes Fussnoten-System (PDF, Web-HTML, Word-DOCX)
+    fn_doc = ArticleDocument(
+        id="art-p3-footnotes",
+        template_id="investment_focus",
+        metadata=ArticleMetadata(title="Fussnoten-Konsistenz Test"),
+        blocks=[
+            {
+                "id": "p_fn",
+                "type": "richtext",
+                "html": (
+                    "<p>Die SNB belässt den Leitzins unverändert"
+                    "<footnote>Quelle: SNB Geldpolitische Lagebeurteilung Q4 2026</footnote> "
+                    "und bestätigt die Preisstabilität"
+                    "<footnote>Teuerungsprognose 2027 bei 0.6 Prozent</footnote>.</p>"
+                ),
+            }
+        ],
+    )
+    web_html = render_web_html(fn_doc)
+    assert '<sup class="lukb-fn-ref" id="fnref-1"><a href="#fn-1"' in web_html
+    assert '<sup class="lukb-fn-ref" id="fnref-2"><a href="#fn-2"' in web_html
+    assert 'id="fn-1"' in web_html
+    assert "SNB Geldpolitische Lagebeurteilung Q4 2026" in web_html
+    assert "Teuerungsprognose 2027 bei 0.6 Prozent" in web_html
+    assert "<footnote>" not in web_html
+
+    pdf_bytes = render_pdf_bytes(fn_doc)
+    assert pdf_bytes.startswith(b"%PDF-")
+    docx_bytes = render_docx_bytes(fn_doc)
+    assert docx_bytes.startswith(b"PK\x03\x04")
+
+    # 3. HTML-Sanitisierung & klammerbalancierte Typst-Konvertierung bei defektem Copy-Paste-HTML
+    dirty_html = (
+        "<div><p>Text mit <b>ungeschlossenem Bold und <i>verschachteltem Italic</b> "
+        "sowie verwaistem End-Tag </u></em></span></a></footnote> "
+        "<script>alert('xss')</script><div>Zweiter Absatz aus contentEditable</div></p></div>"
+    )
+    cleaned_html = sanitize_richtext_html(dirty_html)
+    assert "<script" not in cleaned_html.lower()
+    assert "<div" not in cleaned_html.lower()
+
+    typ_markup = html_to_typst(dirty_html)
+    assert typ_markup.count("[") == typ_markup.count("]"), (
+        f"Klammern in Typst-Markup müssen exakt balanciert sein: {typ_markup!r}"
+    )
+
+    broken_doc = ArticleDocument(
+        id="art-p3-dirty-html",
+        template_id="investment_focus",
+        metadata=ArticleMetadata(title="Dirty HTML Resilienz Test"),
+        blocks=[{"id": "p_dirty", "type": "richtext", "html": dirty_html}],
+    )
+    resilient_pdf = render_pdf_bytes(broken_doc)
+    assert resilient_pdf.startswith(b"%PDF-")
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1667,6 +1753,7 @@ if __name__ == "__main__":
     test_tufte_template_pipeline()
     test_priority_1_template_consolidation_and_layout()
     test_priority_2_tags_caching_and_deduplication()
+    test_priority_3_modular_js_footnotes_and_html_hardening()
     test_full_cms_workflow()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()

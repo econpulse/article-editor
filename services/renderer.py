@@ -33,7 +33,7 @@ from config import FONTS_DIR, TEMPLATES_DIR, WWW_DIR
 from database.repository import get_asset
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
-from services.html_to_typst import escape_typst_text, html_to_typst
+from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html
 
 LUKB_LOGO_SVG_PATH = WWW_DIR / "img" / "LUKB-Logo.svg"
 
@@ -428,6 +428,7 @@ def render_preview_svg_pages(doc: ArticleDocument) -> list[str]:
 
 
 _ANCHOR_TAG_RE = re.compile(r"<a\b([^>]*)>", re.IGNORECASE)
+_INLINE_FOOTNOTE_RE = re.compile(r"<footnote\b[^>]*>(.*?)</footnote\s*>", re.IGNORECASE | re.DOTALL)
 
 
 def _normalize_inline_links_html(html_str: str) -> str:
@@ -448,14 +449,75 @@ def _normalize_inline_links_html(html_str: str) -> str:
     return _ANCHOR_TAG_RE.sub(_repl, html_str)
 
 
+def _transform_web_inline_footnotes(blocks: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """
+    Ersetzt Inline-`<footnote>...</footnote>`-Tags in RichText- und Callout-Blöcken durch
+    nummerierte, klickbare Hochzahlen (`<sup class="lukb-fn-ref" id="fnref-1"><a href="#fn-1">[1]</a></sup>`)
+    und sammelt die Fussnotentexte chronologisch ein.
+    Falls ein `footnotes`-Block im Artikel existiert, werden die Inline-Fussnoten dort ergänzt;
+    andernfalls werden sie als `auto_footnotes` am Artikelende ausgegeben.
+    """
+    collected: list[dict[str, str]] = []
+    counter = 0
+
+    def _replace_in_html(raw_html: str) -> str:
+        nonlocal counter
+        if not raw_html or "<footnote" not in raw_html.lower():
+            return raw_html
+
+        def _fn_repl(m: re.Match[str]) -> str:
+            nonlocal counter
+            counter += 1
+            inner_raw = m.group(1) or ""
+            plain_text = html.unescape(re.sub(r"<[^>]+>", " ", inner_raw)).strip()
+            num_str = str(counter)
+            collected.append({"num": num_str, "text": plain_text})
+            esc_title = html.escape(plain_text, quote=True)
+            return (
+                f'<sup class="lukb-fn-ref" id="fnref-{num_str}">'
+                f'<a href="#fn-{num_str}" title="{esc_title}">[{num_str}]</a>'
+                f"</sup>"
+            )
+
+        return _INLINE_FOOTNOTE_RE.sub(_fn_repl, raw_html)
+
+    has_footnotes_block = False
+    for blk in blocks:
+        btype = blk.get("type")
+        if btype in ("richtext", "callout"):
+            blk["html"] = _replace_in_html(sanitize_richtext_html(blk.get("html", "")))
+        elif btype == "footnotes":
+            has_footnotes_block = True
+
+    if not collected:
+        return []
+
+    if has_footnotes_block:
+        for blk in blocks:
+            if blk.get("type") == "footnotes":
+                existing_items = list(blk.get("items") or [])
+                existing_texts = {str(it.get("text") or "").strip() for it in existing_items}
+                for fn in collected:
+                    if fn["text"] and fn["text"] not in existing_texts:
+                        existing_items.append(fn)
+                        existing_texts.add(fn["text"])
+                blk["items"] = existing_items
+                break
+        return []
+
+    return collected
+
+
 def render_web_html(doc: ArticleDocument) -> str:
     """
     Rendert ein ArticleDocument als eigenständiges, responsives HTML5-Dokument
     inkl. eingebetteter Data-URI-Grafiken aus der MSSQL-Datenbank.
     """
     payload = _prepare_common_article_payload(doc)
+    raw_blocks = payload.get("blocks", [])
+    payload["auto_footnotes"] = _transform_web_inline_footnotes(raw_blocks)
     asset_uri_cache: dict[str, str] = {}
-    for blk in payload.get("blocks", []):
+    for blk in raw_blocks:
         if blk.get("type") in ("richtext", "callout"):
             blk["html"] = _normalize_inline_links_html(blk.get("html", ""))
         elif blk.get("type") == "figure":
@@ -544,12 +606,15 @@ def _svg_to_png_bytes(svg_markup: str, ppi: float = 144.0) -> bytes | None:
 
 
 class _DocxHtmlRunParser(HTMLParser):
-    def __init__(self, paragraph) -> None:
+    def __init__(self, paragraph, footnote_collector: list[dict[str, str]] | None = None) -> None:
         super().__init__(convert_charrefs=True)
         self.paragraph = paragraph
+        self.footnote_collector = footnote_collector
         self.is_bold = False
         self.is_italic = False
         self.is_underline = False
+        self.in_footnote = False
+        self.current_footnote_parts: list[str] = []
         self.link_stack: list[str] = []
         self.tooltip_stack: list[str | None] = []
 
@@ -562,7 +627,8 @@ class _DocxHtmlRunParser(HTMLParser):
         elif t == "u":
             self.is_underline = True
         elif t == "br":
-            self.paragraph.add_run().add_break()
+            if not self.in_footnote:
+                self.paragraph.add_run().add_break()
         elif t == "a":
             href = ""
             for k, v in attrs:
@@ -576,9 +642,8 @@ class _DocxHtmlRunParser(HTMLParser):
                     tip = v.strip()
             self.tooltip_stack.append(tip if tip else None)
         elif t == "footnote":
-            r = self.paragraph.add_run(" [")
-            r.font.size = Pt(8.0)
-            r.font.color.rgb = RGBColor(0x00, 0x9F, 0xE3)
+            self.in_footnote = True
+            self.current_footnote_parts = []
 
     def handle_endtag(self, tag: str) -> None:
         t = tag.lower()
@@ -590,20 +655,35 @@ class _DocxHtmlRunParser(HTMLParser):
             self.is_underline = False
         elif t == "a":
             href = self.link_stack.pop() if self.link_stack else ""
-            if href:
+            if href and not self.in_footnote:
                 r = self.paragraph.add_run(" ↗")
                 r.font.size = Pt(8.5)
                 r.font.color.rgb = RGBColor(0x00, 0x5A, 0x9C)
         elif t == "span":
             if self.tooltip_stack:
-                tip = self.tooltip_stack.pop()
+                self.tooltip_stack.pop()
         elif t == "footnote":
-            r = self.paragraph.add_run("]")
-            r.font.size = Pt(8.0)
-            r.font.color.rgb = RGBColor(0x00, 0x9F, 0xE3)
+            self.in_footnote = False
+            fn_text = "".join(self.current_footnote_parts).strip()
+            self.current_footnote_parts = []
+            if self.footnote_collector is not None:
+                fn_num = len(self.footnote_collector) + 1
+                self.footnote_collector.append({"num": str(fn_num), "text": fn_text})
+                r = self.paragraph.add_run(f"[{fn_num}]")
+                r.font.superscript = True
+                r.font.bold = True
+                r.font.size = Pt(8.5)
+                r.font.color.rgb = RGBColor(0x00, 0x9F, 0xE3)
+            elif fn_text:
+                r = self.paragraph.add_run(f" [{fn_text}]")
+                r.font.size = Pt(8.0)
+                r.font.color.rgb = RGBColor(0x00, 0x9F, 0xE3)
 
     def handle_data(self, data: str) -> None:
         if not data:
+            return
+        if self.in_footnote:
+            self.current_footnote_parts.append(data)
             return
         run = self.paragraph.add_run(data)
         run.bold = self.is_bold
@@ -613,12 +693,16 @@ class _DocxHtmlRunParser(HTMLParser):
             run.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
 
 
-def _add_html_runs_to_paragraph(paragraph, html_fragment: str) -> None:
+def _add_html_runs_to_paragraph(
+    paragraph,
+    html_fragment: str,
+    footnote_collector: list[dict[str, str]] | None = None,
+) -> None:
     if not html_fragment:
         return
-    parser = _DocxHtmlRunParser(paragraph)
+    parser = _DocxHtmlRunParser(paragraph, footnote_collector=footnote_collector)
     try:
-        parser.feed(html_fragment)
+        parser.feed(sanitize_richtext_html(html_fragment))
         parser.close()
     except Exception:
         # Fallback auf einfaches unescaping falls fehlerhaftes HTML
@@ -626,18 +710,23 @@ def _add_html_runs_to_paragraph(paragraph, html_fragment: str) -> None:
         paragraph.add_run(html.unescape(plain))
 
 
-def _render_richtext_into_docx(doc_or_cell, html_content: str) -> None:
-    if "<p" not in html_content and "<li" not in html_content:
+def _render_richtext_into_docx(
+    doc_or_cell,
+    html_content: str,
+    footnote_collector: list[dict[str, str]] | None = None,
+) -> None:
+    sanitized = sanitize_richtext_html(html_content)
+    if "<p" not in sanitized and "<li" not in sanitized:
         p = doc_or_cell.add_paragraph()
         p.paragraph_format.space_after = Pt(6)
         p.paragraph_format.line_spacing = 1.15
-        _add_html_runs_to_paragraph(p, html_content)
+        _add_html_runs_to_paragraph(p, sanitized, footnote_collector=footnote_collector)
         return
 
     pattern = re.compile(r"<(p|li)([^>]*)>(.*?)</\1>", re.DOTALL | re.IGNORECASE)
-    matches = list(pattern.finditer(html_content))
+    matches = list(pattern.finditer(sanitized))
     if not matches:
-        plain = re.sub(r"<[^>]+>", " ", html_content).strip()
+        plain = re.sub(r"<[^>]+>", " ", sanitized).strip()
         p = doc_or_cell.add_paragraph()
         p.paragraph_format.space_after = Pt(6)
         p.add_run(html.unescape(plain))
@@ -650,12 +739,12 @@ def _render_richtext_into_docx(doc_or_cell, html_content: str) -> None:
             p = doc_or_cell.add_paragraph(style="List Bullet")
             p.paragraph_format.space_after = Pt(3)
             p.paragraph_format.line_spacing = 1.15
-            _add_html_runs_to_paragraph(p, inner)
+            _add_html_runs_to_paragraph(p, inner, footnote_collector=footnote_collector)
         else:
             p = doc_or_cell.add_paragraph()
             p.paragraph_format.space_after = Pt(6)
             p.paragraph_format.line_spacing = 1.15
-            _add_html_runs_to_paragraph(p, inner)
+            _add_html_runs_to_paragraph(p, inner, footnote_collector=footnote_collector)
 
 
 def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
@@ -772,8 +861,11 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
     # 5. Inhaltsblöcke rendern
     common_payload = _prepare_common_article_payload(doc_model)
     grouped_blocks = _group_blocks_into_render_items(common_payload.get("blocks", []))
+    docx_inline_footnotes: list[dict[str, str]] = []
+    docx_has_footnotes_block = False
 
     def _render_block(container, blk):
+        nonlocal docx_has_footnotes_block
         btype = blk.get("type")
         if btype == "heading":
             lvl = int(blk.get("level") or 1)
@@ -793,7 +885,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 r.font.color.rgb = RGBColor(0x1A, 0x24, 0x33)
 
         elif btype == "richtext":
-            _render_richtext_into_docx(container, blk.get("html", ""))
+            _render_richtext_into_docx(container, blk.get("html", ""), footnote_collector=docx_inline_footnotes)
 
         elif btype == "callout":
             tbl = container.add_table(rows=1, cols=1)
@@ -819,7 +911,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 cr.bold = True
                 cr.font.size = Pt(10)
                 cr.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
-            _render_richtext_into_docx(cell, blk.get("html", ""))
+            _render_richtext_into_docx(cell, blk.get("html", ""), footnote_collector=docx_inline_footnotes)
             container.add_paragraph().paragraph_format.space_after = Pt(4)
 
         elif btype in ("figure", "db_chart"):
@@ -1035,6 +1127,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             container.add_paragraph().paragraph_format.space_after = Pt(2)
 
         elif btype == "footnotes":
+            docx_has_footnotes_block = True
             title = blk.get("title", "").strip() or "Anmerkungen & Quellen"
             p = container.add_paragraph()
             p.paragraph_format.space_before = Pt(12)
@@ -1044,7 +1137,14 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             rt.font.size = Pt(11.5)
             rt.font.color.rgb = RGBColor(0x00, 0x5A, 0x9C)
 
-            for item in blk.get("items", []):
+            combined_fn = list(blk.get("items", []))
+            existing_fn_texts = {str(it.get("text", "")).strip() for it in combined_fn}
+            for inf in docx_inline_footnotes:
+                if inf["text"] and inf["text"] not in existing_fn_texts:
+                    combined_fn.append(inf)
+                    existing_fn_texts.add(inf["text"])
+
+            for item in combined_fn:
                 num = str(item.get("num", "")).strip()
                 text = str(item.get("text", "")).strip()
                 pi = container.add_paragraph()
@@ -1134,6 +1234,16 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
 
     for item in grouped_blocks:
         _render_block(doc, item)
+
+    if docx_inline_footnotes and not docx_has_footnotes_block:
+        _render_block(
+            doc,
+            {
+                "type": "footnotes",
+                "title": "Anmerkungen & Quellen",
+                "items": docx_inline_footnotes,
+            },
+        )
 
     out_stream = io.BytesIO()
     doc.save(out_stream)
