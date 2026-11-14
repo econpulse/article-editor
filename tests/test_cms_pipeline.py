@@ -1733,6 +1733,44 @@ def test_priority_3_modular_js_footnotes_and_html_hardening():
     assert resilient_pdf.startswith(b"%PDF-")
 
 
+def test_tufte_colbreak_pagebreak_container_fix():
+    """
+    Verifiziert, dass bei Tufte-Artikeln mit Spalten-/Seitenumbrüchen (`colbreak`)
+    kein `typst.TypstError: pagebreaks are not allowed inside of containers` geworfen wird.
+    Testet sowohl die in-memory SVG-Vorschauseiten als auch die PDF-Kompilierung.
+    """
+    from schemas.article import ArticleDocument, ArticleMetadata, HeadingBlock, RichTextBlock, ColbreakBlock
+    from services.renderer import render_preview_svg_pages, render_pdf_bytes
+
+    tufte_doc = ArticleDocument(
+        id="art-tufte-colbreak-test",
+        template_id="investment_tufte",
+        metadata=ArticleMetadata(
+            title="Tufte Colbreak Resilienz",
+            subtitle="Prüft sauberen Seitenumbruch ohne Container-Einschluss",
+            author="Investment Center"
+        ),
+        blocks=[
+            HeadingBlock(id="h1", level=1, text="Erster Abschnitt"),
+            RichTextBlock(id="p1", html="<p>Absatz vor dem manuellen Seitenumbruch im Tufte-Layout.</p>"),
+            ColbreakBlock(id="cb1"),
+            HeadingBlock(id="h2", level=2, text="Zweiter Abschnitt auf neuer Seite"),
+            RichTextBlock(id="p2", html="<p>Absatz nach dem Umbruch auf Seite 2.</p>"),
+            ColbreakBlock(id="cb2"),
+            RichTextBlock(id="p3", html="<p>Dritter Abschnitt auf Seite 3.</p>")
+        ]
+    )
+
+    svg_pages = render_preview_svg_pages(tufte_doc)
+    assert len(svg_pages) >= 3, f"Erwartete mindestens 3 Seiten Vorschau-SVG, erhalten: {len(svg_pages)}"
+    for idx, page in enumerate(svg_pages):
+        assert "<svg" in page, f"Seite {idx+1} ist kein valider SVG-String"
+
+    pdf_bytes = render_pdf_bytes(tufte_doc)
+    assert pdf_bytes.startswith(b"%PDF-")
+    assert len(pdf_bytes) > 10000
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1751,6 +1789,7 @@ if __name__ == "__main__":
     test_hybrid_full_width_float_and_overflow_fallback()
     test_header_series_selection_and_rendering()
     test_tufte_template_pipeline()
+    test_tufte_colbreak_pagebreak_container_fix()
     test_priority_1_template_consolidation_and_layout()
     test_priority_2_tags_caching_and_deduplication()
     test_priority_3_modular_js_footnotes_and_html_hardening()

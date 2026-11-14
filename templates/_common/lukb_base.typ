@@ -19,10 +19,12 @@
 #let font-heading = ("Yoga Sans for LUKB Medium", "Yoga Sans for LUKB", "Calibri", "Arial")
 
 // A4 Seitengeometrie-Konstanten
+#let page-w = 595.28pt
 #let page-h = 841.89pt
 #let page-top-margin = 2cm
 #let page-bottom-margin = 2.4cm
 #let page-side-margin = 1.5cm
+#let page-content-w = page-w - 2 * page-side-margin
 #let max-float-h = 520pt
 
 // Tufte-Spaltenmasse (116mm + 8mm + 56mm = 180mm Satzspiegel auf A4 mit 2 x 15mm Rand)
@@ -919,10 +921,9 @@
   heading-below: 0.68em,
 ) = context {
   let start-pos = here().position()
-  layout(bounds => {
-    let col-w = (bounds.width - gutter) / 2
-    let avail-h = page-h - start-pos.y - page-bottom-margin
-    let page-body-h = page-h - page-top-margin - page-bottom-margin
+  let col-w = (page-content-w - gutter) / 2
+  let avail-h = page-h - start-pos.y - page-bottom-margin
+  let page-body-h = page-h - page-top-margin - page-bottom-margin
 
     let render-item(it) = render-single-block(
       it,
@@ -1039,7 +1040,6 @@
         }
       }
     }
-  })
 }
 
 #let render-col-run-smart(
@@ -1166,10 +1166,10 @@
   callout-accent: lukb-cyan,
   quote-accent: lukb-cyan,
   heading-below: 0.68em,
-) = {
-  layout(bounds => {
-    let runs = ()
-    let curr-cols = ()
+) = context {
+  let bounds = (width: page-content-w)
+  let runs = ()
+  let curr-cols = ()
     for blk in blocks {
       let is-full-block = (blk.type in ("figure", "db_chart", "table")) and (blk.at("layout", default: "column") == "full")
       let is-inline-full = false
@@ -1223,7 +1223,6 @@
         )
       }
     }
-  })
 }
 
 // ============================================================================
@@ -1448,16 +1447,18 @@
 }
 
 #let render-tufte-body(blocks) = {
-  layout(_bounds => {
-    let runs = build-tufte-runs(blocks)
-    for run in runs {
-      if run.kind == "break" {
-        pagebreak(weak: true)
-      } else if run.kind == "full" {
-        block(width: 100%)[
+  let runs = build-tufte-runs(blocks)
+  for run in runs {
+    if run.kind == "break" {
+      pagebreak(weak: true)
+    } else if run.kind == "full" {
+      context [
+        #block(width: 100%)[
           #render-tufte-single-block(run.item, is-margin: false, build-rows-fn: build-tufte-grid-rows)
         ]
-      } else {
+      ]
+    } else {
+      context {
         let rows = build-tufte-grid-rows(run.items, main-w: tufte-main-w, margin-w: tufte-margin-w)
         let gutters = if rows.len() > 1 {
           rows.slice(1).map(r => {
@@ -1501,5 +1502,5 @@
         )
       }
     }
-  })
+  }
 }
