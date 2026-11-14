@@ -801,14 +801,21 @@
       #text(font: font-heading, weight: "medium", size: 8.5pt, fill: lukb-navy)[\"#clean-title\"]#if pdate != "" [ vom #text(font: font-body, weight: "light", size: 8.5pt, fill: lukb-navy)[#pdate]]#if purl != "" [ #box(baseline: -0.05em)[#text(size: 0.8em, fill: lukb-blue)[#sym.arrow.tr]]]
     ]
 
-    block[
-      #set par(justify: false, leading: 0.35em)
-      #if purl != "" {
-        link(purl)[#line-text]
-      } else {
-        line-text
-      }
-    ]
+    let linked-content = if purl != "" {
+      link(purl)[#line-text]
+    } else {
+      line-text
+    }
+
+    grid(
+      columns: (auto, 1fr),
+      column-gutter: 6pt,
+      text(font: font-body, weight: "medium", size: 8.5pt, fill: lukb-blue)[#sym.dash.en],
+      block[
+        #set par(justify: false, leading: 0.35em)
+        #linked-content
+      ]
+    )
   }
 
   block(

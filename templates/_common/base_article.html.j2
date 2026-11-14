@@ -524,6 +524,16 @@
       font-size: 0.88rem;
       line-height: 1.4;
       color: var(--lukb-navy);
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .publication-item::before {
+      content: "–";
+      color: var(--lukb-blue);
+      font-weight: 500;
+      flex-shrink: 0;
     }
 
     .pub-item-link {

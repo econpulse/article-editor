@@ -1208,6 +1208,12 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 pi = container.add_paragraph()
                 pi.paragraph_format.space_before = Pt(1)
                 pi.paragraph_format.space_after = Pt(2)
+                pi.paragraph_format.left_indent = Pt(14)
+                pi.paragraph_format.first_line_indent = Pt(-14)
+                r_dash = pi.add_run("– ")
+                r_dash.bold = False
+                r_dash.font.size = Pt(8.5)
+                r_dash.font.color.rgb = RGBColor(0x00, 0x5A, 0x9C)
                 clean_title = item.get("clean_title") or item.get("title", "").strip().strip('"').strip('«').strip('»')
                 fmt_d = item.get("formatted_date") or format_publication_date(item.get("date", "")) or item.get("date", "")
                 text_content = f'"{clean_title}"'
