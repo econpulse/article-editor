@@ -993,6 +993,49 @@
     headerLeft.appendChild(dragHandle);
     headerLeft.appendChild(typePill);
 
+    // Verankerungs-Badge für Randelemente
+    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "table") && (blk.layout || "column") === "column";
+    if (isMarginType && blk.anchor_to) {
+      const anchorPill = document.createElement("span");
+      anchorPill.className = "block-anchor-pill";
+      anchorPill.title = "Dieses Element ist an einen Textabsatz verankert. Klicken, um zum Ziel zu springen.";
+      anchorPill.textContent = "⚓ Verankert";
+
+      anchorPill.addEventListener("mouseenter", function () {
+        const targetCard = document.querySelector('[data-block-id="' + blk.anchor_to + '"]');
+        if (targetCard) targetCard.classList.add("anchor-target-highlight");
+      });
+      anchorPill.addEventListener("mouseleave", function () {
+        const targetCard = document.querySelector('[data-block-id="' + blk.anchor_to + '"]');
+        if (targetCard) targetCard.classList.remove("anchor-target-highlight");
+      });
+      anchorPill.addEventListener("click", function (e) {
+        e.stopPropagation();
+        const targetCard = document.querySelector('[data-block-id="' + blk.anchor_to + '"]');
+        if (targetCard) {
+          targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+          targetCard.classList.add("anchor-target-highlight");
+          setTimeout(function () {
+            targetCard.classList.remove("anchor-target-highlight");
+          }, 1600);
+        }
+      });
+      headerLeft.appendChild(anchorPill);
+    }
+
+    // Badge für den Zielabsatz (wenn Randelemente an diesen Absatz verankert sind)
+    const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
+    const attachedMarginCount = blocksList.filter(function (o) {
+      return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "table") && (o.layout || "column") === "column";
+    }).length;
+    if (attachedMarginCount > 0) {
+      const targetPill = document.createElement("span");
+      targetPill.className = "block-anchor-target-pill";
+      targetPill.title = attachedMarginCount + " Randelement(e) an diesen Absatz verankert.";
+      targetPill.textContent = "⚓ " + attachedMarginCount + " verankert";
+      headerLeft.appendChild(targetPill);
+    }
+
     const peerBadge = document.createElement("span");
     peerBadge.className = "block-peer-badge";
     peerBadge.style.display = "none";
@@ -1068,6 +1111,11 @@
 
       state.selectedBlockIds.delete(blk.id);
       state.article.blocks.splice(index, 1);
+      state.article.blocks.forEach(function (b) {
+        if (b && b.anchor_to === blk.id) {
+          b.anchor_to = null;
+        }
+      });
       renderBlocksCanvas();
       markDirty();
       updateFloatingSelectionBar();
@@ -2724,6 +2772,9 @@
   function initEditorApp() {
     if (state._initialized) return;
     state._initialized = true;
+    window.lukbRefreshCanvasDecorations = function () {
+      renderBlocksCanvas();
+    };
     bindMetadataStaticListeners();
     bindAddBlockButtons();
     bindSidebarAndModalListeners();

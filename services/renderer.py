@@ -216,10 +216,60 @@ def _resolve_glossary_items(blk: dict[str, Any], all_blocks: list[dict[str, Any]
     return result
 
 
+def _reorder_blocks_for_anchors(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Normalisiert die Blockreihenfolge für Randelemente mit explizitem `anchor_to`:
+    Falls ein Randelement (figure, db_chart, table mit layout='column') an einen
+    bestimmten Block (anchor_to) verankert ist und sich vor oder nach diesem Block
+    im Daten-Array befindet, wird es unmittelbar hinter dem Anker-Block einsortiert.
+    Dadurch fliessen Textabsatz und Randelement in allen Rendering-Kanälen (Typst, Web, DOCX)
+    garantiert synchron.
+    """
+    if not blocks:
+        return []
+
+    has_anchors = any(
+        isinstance(b, dict)
+        and b.get("anchor_to")
+        and b.get("type") in ("figure", "db_chart", "table")
+        and b.get("layout", "column") == "column"
+        for b in blocks
+    )
+    if not has_anchors:
+        return blocks
+
+    anchored_map: dict[str, list[dict[str, Any]]] = {}
+    remaining_blocks: list[dict[str, Any]] = []
+    known_ids = {b.get("id") for b in blocks if isinstance(b, dict) and b.get("id")}
+
+    for blk in blocks:
+        if not isinstance(blk, dict):
+            remaining_blocks.append(blk)
+            continue
+        aid = blk.get("anchor_to")
+        is_margin = (
+            blk.get("type") in ("figure", "db_chart", "table")
+            and blk.get("layout", "column") == "column"
+        )
+        if is_margin and aid and aid in known_ids and aid != blk.get("id"):
+            anchored_map.setdefault(aid, []).append(blk)
+        else:
+            remaining_blocks.append(blk)
+
+    reordered: list[dict[str, Any]] = []
+    for blk in remaining_blocks:
+        reordered.append(blk)
+        if isinstance(blk, dict) and blk.get("id") in anchored_map:
+            reordered.extend(anchored_map[blk.get("id")])
+
+    return reordered
+
+
 def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
     """
     Zentrale Voraufbereitung des Artikel-Payloads für alle Ausgabekanäle (Typst-PDF/SVG, Web-HTML, Word-DOCX):
     - Formatiert das Publikationsdatum einheitlich im LUKB-Standardformat.
+    - Normalisiert die Reihenfolge verankerter Randelemente (`anchor_to`).
     - Löst Glossar-Begriffe (`all_items`) und Querverweise (`publications`) zentral einmalig auf.
     """
     payload = doc.model_dump()
@@ -230,7 +280,8 @@ def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
     payload["metadata"]["publication_date"] = formatted_date or raw_date
     payload["metadata"]["lead_typst"] = escape_typst_text(doc.metadata.lead or "")
 
-    raw_blocks = payload.get("blocks", [])
+    raw_blocks = _reorder_blocks_for_anchors(payload.get("blocks", []))
+    payload["blocks"] = raw_blocks
     for blk in raw_blocks:
         btype = blk.get("type")
         if btype == "glossary":

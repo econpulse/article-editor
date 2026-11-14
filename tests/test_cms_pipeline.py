@@ -1851,6 +1851,57 @@ def test_sources_never_orphaned_across_templates():
         assert len(docx) > 5000, f"Word Export fehlerhaft für {tpl_id}"
 
 
+def test_tufte_anchor_to_and_spacer_synchronization():
+    """Testet die explizite Absatz-Verankerung (anchor_to) und Spacer-Synchronisation im Tufte-Layout."""
+    from schemas.article import ArticleDocument, ArticleMetadata, FigureBlock, DbChartBlock, TableBlock, RichTextBlock, SpacerBlock
+    from services.renderer import _reorder_blocks_for_anchors, render_pdf_bytes, render_preview_svg_pages, render_web_html
+
+    # 1. Pydantic-Normalisierung
+    fig = FigureBlock(anchor_to="blk_target")
+    assert fig.anchor_to == "blk_target"
+    fig_auto = FigureBlock(anchor_to="auto")
+    assert fig_auto.anchor_to is None
+    fig_empty = FigureBlock(anchor_to="")
+    assert fig_empty.anchor_to is None
+
+    chart = DbChartBlock(anchor_to="blk_target")
+    assert chart.anchor_to == "blk_target"
+
+    tbl = TableBlock(anchor_to="blk_target")
+    assert tbl.anchor_to == "blk_target"
+
+    # 2. Block-Reordering Logik
+    blocks = [
+        {"id": "p1", "type": "richtext", "html": "<p>Absatz 1</p>"},
+        {"id": "sp1", "type": "spacer", "height_mm": 15},
+        {"id": "fig1", "type": "figure", "layout": "column", "anchor_to": "p2", "title": "Chart 1"},
+        {"id": "p2", "type": "richtext", "html": "<p>Absatz 2</p>"},
+    ]
+    reordered = _reorder_blocks_for_anchors(blocks)
+    assert [b["id"] for b in reordered] == ["p1", "sp1", "p2", "fig1"]
+
+    # 3. Vollständiges Rendering mit Typst & Web
+    doc = ArticleDocument(
+        template_id="investment_tufte",
+        metadata=ArticleMetadata(title="Tufte Anchor Test", lead="Lead Text"),
+        blocks=[
+            RichTextBlock(id="p1", html="<p>Erster Absatz vor dem Spacer.</p>").model_dump(),
+            SpacerBlock(id="sp1", height_mm=20).model_dump(),
+            RichTextBlock(id="p2", html="<p>Zweiter Absatz, an den der Chart verankert ist.</p>").model_dump(),
+            DbChartBlock(id="c1", layout="column", anchor_to="p2", title="Leitzinsen").model_dump(),
+        ]
+    )
+
+    pdf = render_pdf_bytes(doc)
+    assert pdf.startswith(b"%PDF-"), "Typst PDF Generierung mit anchor_to fehlgeschlagen"
+
+    svg_pages = render_preview_svg_pages(doc)
+    assert len(svg_pages) >= 1, "Typst SVG Seiten-Preview fehlgeschlagen"
+
+    html = render_web_html(doc)
+    assert "Leitzinsen" in html, "Web HTML enthält Chart-Titel nicht"
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1870,6 +1921,7 @@ if __name__ == "__main__":
     test_header_series_selection_and_rendering()
     test_tufte_template_pipeline()
     test_tufte_colbreak_pagebreak_container_fix()
+    test_tufte_anchor_to_and_spacer_synchronization()
     test_sources_never_orphaned_across_templates()
     test_priority_1_template_consolidation_and_layout()
     test_priority_2_tags_caching_and_deduplication()

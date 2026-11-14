@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import date
-from typing import Any, Literal, Union
+from typing import Any, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
@@ -110,6 +110,13 @@ def _normalize_full_position(v: Any) -> str:
     return s if s in ("auto", "top", "bottom", "inline") else "auto"
 
 
+def _normalize_anchor_to(v: Any) -> Optional[str]:
+    if v is None:
+        return None
+    s = str(v).strip()
+    return s if s and s.lower() != "auto" else None
+
+
 class FigureBlock(BaseModel):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["figure"] = "figure"
@@ -125,11 +132,20 @@ class FigureBlock(BaseModel):
         default="auto",
         description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
     )
+    anchor_to: Optional[str] = Field(
+        default=None,
+        description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
+    )
 
     @field_validator("full_position", mode="before")
     @classmethod
     def validate_figure_full_pos(cls, v: Any) -> str:
         return _normalize_full_position(v)
+
+    @field_validator("anchor_to", mode="before")
+    @classmethod
+    def validate_figure_anchor_to(cls, v: Any) -> Optional[str]:
+        return _normalize_anchor_to(v)
 
 
 ChartSeriesType = Literal["line", "step", "dot", "area", "bar", "stacked_bar"]
@@ -208,11 +224,20 @@ class DbChartBlock(BaseModel):
         description="Bis zu 5 Zeitreihen aus ts_db",
     )
     asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
+    anchor_to: Optional[str] = Field(
+        default=None,
+        description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
+    )
 
     @field_validator("full_position", mode="before")
     @classmethod
     def validate_chart_full_pos(cls, v: Any) -> str:
         return _normalize_full_position(v)
+
+    @field_validator("anchor_to", mode="before")
+    @classmethod
+    def validate_chart_anchor_to(cls, v: Any) -> Optional[str]:
+        return _normalize_anchor_to(v)
 
     @field_validator("chart_height_mm", mode="before")
     @classmethod
@@ -284,11 +309,20 @@ class TableBlock(BaseModel):
     )
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
     show_header: bool = Field(default=True, description="Tabellen-Kopfzeile anzeigen")
+    anchor_to: Optional[str] = Field(
+        default=None,
+        description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
+    )
 
     @field_validator("full_position", mode="before")
     @classmethod
     def validate_table_full_pos(cls, v: Any) -> str:
         return _normalize_full_position(v)
+
+    @field_validator("anchor_to", mode="before")
+    @classmethod
+    def validate_table_anchor_to(cls, v: Any) -> Optional[str]:
+        return _normalize_anchor_to(v)
     columns: list[TableColumn] = Field(
         default_factory=lambda: [
             TableColumn(field="col_1", title="Anlageklasse", align="left", width=33.4),

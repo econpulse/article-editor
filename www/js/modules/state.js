@@ -757,8 +757,12 @@
     layoutSel.addEventListener("change", function () {
       blk.layout = layoutSel.value;
       posWrap.style.display = blk.layout === "full" ? "block" : "none";
+      anchorWrap.style.display = blk.layout === "column" ? "block" : "none";
       if (onChanged) onChanged();
       markDirty();
+      if (typeof window.lukbRefreshCanvasDecorations === "function") {
+        window.lukbRefreshCanvasDecorations();
+      }
     });
 
     posSel.addEventListener("change", function () {
@@ -770,9 +774,86 @@
     posWrap.appendChild(posLbl);
     posWrap.appendChild(posSel);
 
+    const anchorWrap = document.createElement("div");
+    anchorWrap.style.marginTop = "6px";
+    anchorWrap.style.display = (blk.layout || "column") === "column" ? "block" : "none";
+
+    const anchorLbl = document.createElement("label");
+    anchorLbl.className = "field-label";
+    anchorLbl.style.fontSize = "11px";
+    anchorLbl.textContent = "⚓ Verankerung (Tufte-Randspalte)";
+
+    const anchorSel = document.createElement("select");
+    anchorSel.className = "cms-select";
+    anchorSel.style.fontSize = "12px";
+    anchorSel.style.padding = "4px 7px";
+
+    function populateAnchorOptions() {
+      anchorSel.innerHTML = "";
+      const defaultOpt = document.createElement("option");
+      defaultOpt.value = "";
+      defaultOpt.textContent = "Automatisch (Vorhergehender Absatz)";
+      anchorSel.appendChild(defaultOpt);
+
+      const allBlocks = (state.article && state.article.blocks) ? state.article.blocks : [];
+      let foundMatch = false;
+      allBlocks.forEach(function (b, bIdx) {
+        if (!b || b.id === blk.id) return;
+        if (b.type === "spacer" || b.type === "colbreak" || b.type === "divider" || b.type === "box_start" || b.type === "box_end") return;
+        if ((b.type === "figure" || b.type === "db_chart" || b.type === "table") && (b.layout || "column") === "column") return;
+
+        let label = (bIdx + 1) + ". ";
+        if (b.type === "heading") {
+          const txt = (b.text || "").trim();
+          label += "Überschrift: " + (txt.length > 28 ? txt.slice(0, 28) + "…" : (txt || "(leer)"));
+        } else if (b.type === "richtext") {
+          const tmp = document.createElement("div");
+          tmp.innerHTML = b.html || "";
+          const txt = (tmp.textContent || tmp.innerText || "").trim().replace(/\s+/g, " ");
+          label += "Absatz: " + (txt.length > 28 ? txt.slice(0, 28) + "…" : (txt || "(leer)"));
+        } else if (b.type === "callout") {
+          const txt = (b.title || "").trim();
+          label += "Kernaussagen: " + (txt.length > 22 ? txt.slice(0, 22) + "…" : (txt || "Box"));
+        } else if (b.type === "quote") {
+          const txt = (b.quote || "").trim();
+          label += "Zitat: " + (txt.length > 22 ? txt.slice(0, 22) + "…" : (txt || "Zitat"));
+        } else {
+          label += (b.type || "Block");
+        }
+
+        const opt = document.createElement("option");
+        opt.value = b.id;
+        opt.textContent = label;
+        if (blk.anchor_to === b.id) {
+          opt.selected = true;
+          foundMatch = true;
+        }
+        anchorSel.appendChild(opt);
+      });
+
+      if (!blk.anchor_to || !foundMatch) {
+        defaultOpt.selected = true;
+      }
+    }
+
+    populateAnchorOptions();
+
+    anchorSel.addEventListener("change", function () {
+      blk.anchor_to = anchorSel.value || null;
+      if (onChanged) onChanged();
+      markDirty();
+      if (typeof window.lukbRefreshCanvasDecorations === "function") {
+        window.lukbRefreshCanvasDecorations();
+      }
+    });
+
+    anchorWrap.appendChild(anchorLbl);
+    anchorWrap.appendChild(anchorSel);
+
     layoutWrap.appendChild(layoutLbl);
     layoutWrap.appendChild(layoutSel);
     layoutWrap.appendChild(posWrap);
+    layoutWrap.appendChild(anchorWrap);
     return layoutWrap;
   }
 

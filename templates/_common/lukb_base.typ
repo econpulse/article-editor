@@ -441,7 +441,7 @@
       ]
     ]
     #if blk.source != "" [
-      #block(width: 100%, breakable: false, above: if is-margin { 1.5pt } else { 2pt }, below: 0pt)[
+      #block(width: 100%, breakable: false, above: if is-margin { 0.5em } else { 0.55em }, below: 0pt)[
         #text(font: font-body, weight: "light", size: src-sz, fill: lukb-muted)[#blk.source]
       ]
     ]
@@ -610,7 +610,7 @@
                 width: 100%,
                 breakable: false,
                 stroke: (bottom: 0.6pt + lukb-border),
-                inset: (top: 4pt, bottom: if is-margin { 5pt } else { 6pt }),
+                inset: (top: if is-margin { 0.5em } else { 0.55em }, bottom: if is-margin { 5pt } else { 6pt }),
                 above: 0pt,
                 below: 0pt
               )[
@@ -629,7 +629,7 @@
         width: 100%,
         breakable: false,
         stroke: (bottom: 0.6pt + lukb-border),
-        inset: (top: if blk.source != "" { 4pt } else { 0pt }, bottom: if is-margin { 5pt } else { 6pt }),
+        inset: (top: if blk.source != "" { if is-margin { 0.5em } else { 0.55em } } else { 0pt }, bottom: if is-margin { 5pt } else { 6pt }),
         above: 0pt,
         below: 0pt
       )[
@@ -925,7 +925,7 @@
     })
   } else if blk.type == "spacer" {
     let h-mm = blk.at("height_mm", default: 8)
-    v(h-mm * 1mm)
+    block(height: h-mm * 1mm, width: 100%)[]
   } else if blk.type == "colbreak" {
     colbreak()
   } else if blk.type == "quote" {
@@ -1358,7 +1358,7 @@
     ]
   } else if blk.type == "spacer" {
     let h-mm = blk.at("height_mm", default: 8)
-    v(h-mm * 1mm)
+    block(height: h-mm * 1mm, width: 100%)[]
   } else if blk.type == "colbreak" {
     // Wird auf Run-Ebene als Seitenumbruch behandelt
   } else if blk.type == "quote" {
@@ -1415,8 +1415,35 @@
     let is-margin = (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "column")
     if is-margin {
       let mh = measure-margin(it)
-      if curr-right.len() == 0 {
-        // Erstes Rand-Element in dieser Zeile:
+      let anchor-id = it.at("anchor_to", default: none)
+      let explicit-anchor-pos = if anchor-id != none and anchor-id != "" and anchor-id != "auto" {
+        curr-left.position(x => x.at("id", default: "") == anchor-id)
+      } else {
+        none
+      }
+
+      if explicit-anchor-pos != none {
+        // Explizite Anker-Verknüpfung:
+        // Zielblock in curr-left gefunden! Trennt vor dem Anker-Absatz (bzw. vor dessen H2/H3-Überschrift).
+        let split-at = explicit-anchor-pos
+        if split-at > 0 and curr-left.at(split-at - 1).type == "heading" {
+          split-at = split-at - 1
+        }
+        if split-at > 0 {
+          let flushed-left = curr-left.slice(0, split-at)
+          let anchor-left = curr-left.slice(split-at)
+          rows.push((left: flushed-left, right: curr-right))
+          curr-left = anchor-left
+          left-h = anchor-left.map(measure-main).fold(0pt, (a, b) => a + b)
+          curr-right = (it,)
+          right-h = mh
+        } else {
+          // Der Anker steht bereits an erster Position in dieser Zeile
+          curr-right.push(it)
+          right-h = right-h + mh
+        }
+      } else if curr-right.len() == 0 {
+        // Erstes Rand-Element in dieser Zeile (Heuristik ohne expliziten Anker):
         // Falls links bereits mehrere Absätze stehen, spalten wir die älteren Absätze
         // als eigene Zeile ab und behalten den aktuellen Anker-Absatz (inkl. evtl. Überschrift davor),
         // damit das Rand-Element direkt neben seinem Anker-Absatz beginnt.
