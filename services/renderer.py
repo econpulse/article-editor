@@ -953,13 +953,19 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                             img_bytes = _svg_to_png_bytes(data.decode("utf-8", errors="ignore"), ppi=144.0)
                         else:
                             img_bytes = data
+            src = blk.get("source", "").strip()
             if img_bytes:
                 try:
-                    container.add_picture(io.BytesIO(img_bytes), width=Inches(6.0))
+                    p_pic = container.add_paragraph()
+                    p_pic.paragraph_format.space_before = Pt(4)
+                    p_pic.paragraph_format.space_after = Pt(2)
+                    if src:
+                        p_pic.paragraph_format.keep_with_next = True
+                    r_pic = p_pic.add_run()
+                    r_pic.add_picture(io.BytesIO(img_bytes), width=Inches(6.0))
                 except Exception:
                     pass
 
-            src = blk.get("source", "").strip()
             if src:
                 psrc = container.add_paragraph()
                 psrc.paragraph_format.space_before = Pt(3)
@@ -1017,9 +1023,11 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
                         run.font.size = Pt(8.5)
 
+                src = blk.get("source", "").strip()
                 row_offset = 1 if show_header else 0
                 for r_idx, row in enumerate(rows):
                     is_total = blk.get("highlight_last_row") and (r_idx == len(rows) - 1)
+                    is_last_row = (r_idx == len(rows) - 1)
                     row_cells = t.rows[r_idx + row_offset].cells
                     bg_hex = "E6EEF7" if is_total else ("F4F7FA" if r_idx % 2 == 1 else "FFFFFF")
                     for c_idx, col in enumerate(cols):
@@ -1033,13 +1041,14 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         _set_docx_cell_margins(cell, top=90, bottom=90, left=150, right=150)
                         p = cell.paragraphs[0]
                         p.alignment = WD_ALIGN_PARAGRAPH.RIGHT if col.get("align") == "right" else WD_ALIGN_PARAGRAPH.LEFT
+                        if is_last_row and src:
+                            p.paragraph_format.keep_with_next = True
                         val = str(row.get(col.get("field", ""), ""))
                         run = p.add_run(val)
                         run.bold = is_total
                         run.font.color.rgb = RGBColor(0x00, 0x28, 0x55) if is_total else RGBColor(0x1A, 0x24, 0x33)
                         run.font.size = Pt(8.5)
 
-            src = blk.get("source", "").strip()
             if src:
                 psrc = container.add_paragraph()
                 psrc.paragraph_format.space_before = Pt(3)

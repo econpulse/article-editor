@@ -413,13 +413,13 @@
     below: if is-floating { 0pt } else if is-margin { 0.6em } else { 1.1em }
   )[
     #if blk.title != "" [
-      #block(above: 0pt, below: if blk.subtitle != "" { if is-margin { 4.5pt } else { 5.5pt } } else { if is-margin { 5pt } else { 6pt } })[
+      #block(sticky: true, breakable: false, above: 0pt, below: if blk.subtitle != "" { if is-margin { 4.5pt } else { 5.5pt } } else { if is-margin { 5pt } else { 6pt } })[
         #set par(leading: 0.28em, justify: false)
         #text(font: font-heading, weight: "medium", size: title-sz, fill: lukb-navy)[#blk.title]
       ]
     ]
     #if blk.subtitle != "" [
-      #block(above: 0pt, below: if is-margin { 5pt } else { 6pt })[
+      #block(sticky: true, breakable: false, above: 0pt, below: if is-margin { 5pt } else { 6pt })[
         #set par(leading: 0.28em, justify: false)
         #text(font: font-body, weight: "light", size: sub-sz, fill: lukb-muted)[#blk.subtitle]
       ]
@@ -472,7 +472,9 @@
   })
 
   let is-floating = allow-float and (not is-margin) and (blk.at("layout", default: "column") == "full") and (not blk.at("_inline_full", default: false))
-  let can-break = (not is-floating) and (not is-margin)
+  let has-source = (blk.source != "")
+  let is-long-table = (rows.len() > 8)
+  let can-break = is-long-table and (not is-floating) and (not is-margin)
 
   let title-sz = if is-margin { 8.8pt } else { 10pt }
   let sub-sz = if is-margin { 7.6pt } else { 8.3pt }
@@ -514,6 +516,8 @@
     #set table.cell(breakable: false)
     #let show-header = blk.at("show_header", default: true)
     #let highlight-last = blk.at("highlight_last_row", default: false)
+    #let main-rows-count = if is-long-table and has-source and rows.len() > 0 { rows.len() - 1 } else { rows.len() }
+
     #table(
       columns: col-widths,
       align: aligns,
@@ -524,9 +528,9 @@
           if y == 0 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
         },
         bottom: if show-header {
-          if y == rows.len() { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
+          if y == main-rows-count { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
         } else {
-          if rows.len() > 0 and y == rows.len() - 1 { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
+          if main-rows-count > 0 and y == main-rows-count - 1 { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
         },
         ..(if is-tufte-style { (left: none, right: none) } else { (:) })
       ),
@@ -558,7 +562,7 @@
       } else {
         ()
       }),
-      ..for (r-idx, row-dict) in rows.enumerate() {
+      ..for (r-idx, row-dict) in rows.slice(0, main-rows-count).enumerate() {
         let is-total = highlight-last and (r-idx == rows.len() - 1)
         cols.map(c => {
           let cell-val = row-dict.at(c.field, default: "")
@@ -568,19 +572,69 @@
             text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
           }
         })
-      }
+      },
+      ..(if is-long-table and has-source and rows.len() > 0 {
+        let last-idx = rows.len() - 1
+        let last-row = rows.last()
+        let is-total = highlight-last
+        let last-bg = if is-total { rgb("#E6EEF7") } else if calc.even(last-idx + (if show-header { 1 } else { 0 })) { if is-tufte-style { rgb("#FAFBFD") } else { lukb-surface } } else { white }
+        (
+          table.cell(
+            colspan: col-count,
+            breakable: false,
+            inset: 0pt,
+            stroke: none,
+            fill: none,
+            [
+              #grid(
+                columns: col-widths,
+                inset: (x: pad-x, y: pad-y),
+                align: aligns,
+                stroke: (x, y) => (
+                  top: 0.4pt + lukb-border,
+                  bottom: 0.8pt + lukb-navy,
+                  ..(if is-tufte-style { (left: none, right: none) } else { (:) })
+                ),
+                fill: (x, y) => last-bg,
+                ..cols.map(c => {
+                  let cell-val = last-row.at(c.field, default: "")
+                  if is-total {
+                    text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
+                  } else {
+                    text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
+                  }
+                })
+              )
+              #block(
+                width: 100%,
+                breakable: false,
+                stroke: (bottom: 0.6pt + lukb-border),
+                inset: (top: 4pt, bottom: if is-margin { 5pt } else { 6pt }),
+                above: 0pt,
+                below: 0pt
+              )[
+                #text(font: font-body, weight: "light", size: if is-margin { 6.8pt } else { 7.5pt }, fill: lukb-muted)[#blk.source]
+              ]
+            ]
+          ),
+        )
+      } else {
+        ()
+      })
     )
 
-    #block(
-      width: 100%,
-      breakable: false,
-      stroke: (bottom: 0.6pt + lukb-border),
-      inset: (top: if blk.source != "" { 4pt } else { 0pt }, bottom: if is-margin { 5pt } else { 6pt }),
-      above: 0pt,
-      below: 0pt
-    )[
-      #if blk.source != "" [
-        #text(font: font-body, weight: "light", size: if is-margin { 6.8pt } else { 7.5pt }, fill: lukb-muted)[#blk.source]
+    #if not (is-long-table and has-source and rows.len() > 0) [
+      #block(
+        width: 100%,
+        breakable: false,
+        stroke: (bottom: 0.6pt + lukb-border),
+        inset: (top: if blk.source != "" { 4pt } else { 0pt }, bottom: if is-margin { 5pt } else { 6pt }),
+        above: 0pt,
+        below: 0pt
+      )[
+        #if blk.source != "" [
+          #text(font: font-body, weight: "light", size: if is-margin { 6.8pt } else { 7.5pt }, fill: lukb-muted)[#blk.source]
+        ]
       ]
     ]
   ]

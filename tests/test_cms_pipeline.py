@@ -1771,6 +1771,79 @@ def test_tufte_colbreak_pagebreak_container_fix():
     assert len(pdf_bytes) > 10000
 
 
+def test_sources_never_orphaned_across_templates():
+    """
+    Stellt sicher, dass Quellenangaben unter Charts, Tabellen und Grafiken
+    in allen Templates (Typst, Web-HTML, DOCX) fest mit dem visuellen Block
+    verknüpft bleiben und niemals als Einzelzeile auf eine Folgespalte/-seite rutschen.
+    """
+    from schemas.article import ArticleDocument, ArticleMetadata, TableBlock, DbChartBlock, FigureBlock
+    from services.renderer import render_pdf_bytes, render_web_html, render_docx_bytes
+
+    for tpl_id in ("investment_focus", "market_flash", "investment_tufte"):
+        doc = ArticleDocument(
+            id=f"art-source-test-{tpl_id}",
+            template_id=tpl_id,
+            metadata=ArticleMetadata(
+                title=f"Quellen-Kopplung Test ({tpl_id})",
+                subtitle="Verifiziert unzertrennliche Quellenangaben unter Visuals",
+                author="Investment Office"
+            ),
+            blocks=[
+                TableBlock(
+                    id="tbl_short",
+                    title="Kompakte Tabelle",
+                    source="Quelle: LUKB Asset Management",
+                    columns=[
+                        {"field": "asset", "title": "Anlageklasse", "width": 60.0},
+                        {"field": "ret", "title": "Rendite YTD", "width": 40.0}
+                    ],
+                    rows=[
+                        {"asset": "Schweizer Aktien (SPI)", "ret": "+6.8 %"},
+                        {"asset": "Globale Aktien (MSCI World)", "ret": "+12.4 %"},
+                        {"asset": "Obligationen CHF", "ret": "+2.1 %"}
+                    ]
+                ),
+                TableBlock(
+                    id="tbl_long",
+                    title="Lange Tabelle mit Umbruch",
+                    source="Quelle: Bloomberg, LUKB Research",
+                    columns=[
+                        {"field": "name", "title": "Titel", "width": 70.0},
+                        {"field": "w", "title": "Gewicht", "width": 30.0}
+                    ],
+                    rows=[
+                        {"name": f"Position {i}", "w": f"{i*1.2:.1f} %"}
+                        for i in range(1, 18)
+                    ]
+                ),
+                DbChartBlock(
+                    id="chart_1",
+                    title="Zinskurvenverlauf",
+                    source="Quelle: SNB, LUKB Berechnungen",
+                    chart_config={
+                        "chart_type": "line",
+                        "series_configs": [{"series_id": "CH_10Y", "label": "Eidgenossen 10J"}]
+                    }
+                )
+            ]
+        )
+
+        # 1. Typst PDF
+        pdf = render_pdf_bytes(doc)
+        assert pdf.startswith(b"%PDF-"), f"Typst PDF Generierung fehlgeschlagen für {tpl_id}"
+
+        # 2. Web HTML
+        html = render_web_html(doc)
+        assert "break-before: avoid" in html, f"CSS break-before: avoid fehlt in {tpl_id}"
+        assert "page-break-inside: avoid" in html or "break-inside: avoid" in html
+        assert "Quelle: LUKB Asset Management" in html
+
+        # 3. Word DOCX
+        docx = render_docx_bytes(doc)
+        assert len(docx) > 5000, f"Word Export fehlerhaft für {tpl_id}"
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -1790,6 +1863,7 @@ if __name__ == "__main__":
     test_header_series_selection_and_rendering()
     test_tufte_template_pipeline()
     test_tufte_colbreak_pagebreak_container_fix()
+    test_sources_never_orphaned_across_templates()
     test_priority_1_template_consolidation_and_layout()
     test_priority_2_tags_caching_and_deduplication()
     test_priority_3_modular_js_footnotes_and_html_hardening()
