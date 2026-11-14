@@ -830,7 +830,14 @@ def test_publications_block_layout_and_url():
     pdf_flash = render_pdf_bytes(doc)
     assert len(pdf_flash) > 5000
 
-    # 5. Word DOCX Export Rendering
+    # 5. Investment Tufte Template Rendering (Single-Column für Publikationen)
+    doc.template_id = "investment_tufte"
+    pdf_tufte = render_pdf_bytes(doc)
+    assert len(pdf_tufte) > 5000
+    svg_tufte = render_preview_svg_pages(doc)
+    assert len(svg_tufte) >= 1
+
+    # 6. Word DOCX Export Rendering
     docx_bytes = render_docx_bytes(doc)
     assert len(docx_bytes) > 2000
 

@@ -1379,7 +1379,7 @@
     render-publications-box(
       blk.at("title_typst", default: blk.at("title", default: "Weitere Publikationen")),
       blk.at("items_typst", default: blk.at("items", default: ())),
-      two-columns: true,
+      two-columns: false,
     )
   }
 }
