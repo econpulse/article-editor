@@ -17,6 +17,12 @@
       "name": "LUKB Market Flash (Kompakter Fokus-Bericht)",
       "description": "Kompaktes Fokus-Layout mit dunkelblauem Executive-Banner, zweispaltigem Satz für Text und Überschriften sowie wahlweise ein- oder zweispaltigen Grafiken und Tabellen.",
       "columns": 2
+    },
+    {
+      "id": "factsheet",
+      "name": "LUKB Factsheet (Fonds- & Strategieprofil)",
+      "description": "Kompaktes 2-seitiges Factsheet für Anlagefonds & Anlagestrategien mit Stammdaten, Performance, Asset Allocation und ESG-Nachhaltigkeitsprofil.",
+      "columns": 2
     }
   ]
 }

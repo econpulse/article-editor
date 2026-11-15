@@ -24,6 +24,7 @@
     investment_focus: "Investment Fokus",
     investment_tufte: "Investment Fokus (Tufte)",
     market_flash: "Market Flash",
+    factsheet: "Factsheet",
   };
 
   const MONTH_NAMES_DE = [

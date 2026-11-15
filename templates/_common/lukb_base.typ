@@ -477,28 +477,29 @@
   let is-long-table = (rows.len() > 8)
   let can-break = is-long-table and (not is-floating) and (not is-margin)
 
-  let title-sz = if is-margin { 8.8pt } else { 10pt }
-  let sub-sz = if is-margin { 7.6pt } else { 8.3pt }
-  let hdr-sz = if is-margin { 7.4pt } else { 8.2pt }
-  let cell-sz = if is-margin { 7.4pt } else { 8.3pt }
-  let pad-x = if is-margin { 3.5pt } else { 6pt }
-  let pad-y = if is-margin { 3pt } else { 5pt }
+  let is-factsheet = (style-variant == "factsheet")
+  let title-sz = if is-factsheet { 8.5pt } else if is-margin { 8.8pt } else { 10pt }
+  let sub-sz = if is-factsheet { 7.2pt } else if is-margin { 7.6pt } else { 8.3pt }
+  let hdr-sz = if is-factsheet { 7.2pt } else if is-margin { 7.4pt } else { 8.2pt }
+  let cell-sz = if is-factsheet { 7.0pt } else if is-margin { 7.4pt } else { 8.3pt }
+  let pad-x = if is-factsheet { 3pt } else if is-margin { 3.5pt } else { 6pt }
+  let pad-y = if is-factsheet { 1.8pt } else if is-margin { 3pt } else { 5pt }
   let is-tufte-style = (style-variant == "tufte")
 
   let tbl-box = block(
     width: 100%,
     breakable: can-break,
-    above: if is-floating { 0pt } else if is-margin { 0.4em } else { 1.1em },
-    below: if is-floating { 0pt } else if is-margin { 0.6em } else { 1.1em }
+    above: if is-floating { 0pt } else if is-factsheet { 0.35em } else if is-margin { 0.4em } else { 1.1em },
+    below: if is-floating { 0pt } else if is-factsheet { 0.45em } else if is-margin { 0.6em } else { 1.1em }
   )[
     #block(
       width: 100%,
       sticky: true,
       breakable: false,
-      stroke: (top: 1.5pt + lukb-navy),
-      inset: (top: if is-margin { 6pt } else { 7pt }),
+      stroke: (top: if is-factsheet { 1.2pt + lukb-navy } else { 1.5pt + lukb-navy }),
+      inset: (top: if is-factsheet { 4pt } else if is-margin { 6pt } else { 7pt }),
       above: 0pt,
-      below: if blk.title != "" or blk.subtitle != "" { if is-margin { 5pt } else { 6pt } } else { 2pt }
+      below: if blk.title != "" or blk.subtitle != "" { if is-factsheet { 3pt } else if is-margin { 5pt } else { 6pt } } else { 2pt }
     )[
       #if blk.title != "" [
         #block(above: 0pt, below: if blk.subtitle != "" { if is-margin { 4pt } else { 5.5pt } } else { 0pt })[

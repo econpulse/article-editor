@@ -1,0 +1,163 @@
+{% extends "_common/base_article.html.j2" %}
+
+{% block page_title %}{{ article.metadata.title }} — LUKB Factsheet{% endblock %}
+
+{% block extra_css %}
+  :root {
+    --callout-accent: var(--lukb-cyan);
+    --shell-max-width: 1080px;
+  }
+
+  .lukb-factsheet-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    margin-bottom: 24px;
+    align-items: start;
+  }
+
+  @media (max-width: 768px) {
+    .lukb-factsheet-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .lukb-factsheet-col {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .lukb-factsheet-p2-header {
+    border-top: 2px solid var(--lukb-border);
+    border-bottom: 2px solid var(--lukb-cyan);
+    padding: 20px 0 12px 0;
+    margin: 36px 0 24px 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .lukb-factsheet-p2-title {
+    font-family: var(--font-heading);
+    color: var(--lukb-cyan);
+    font-size: 1.65rem;
+    font-weight: 500;
+    margin: 0;
+    line-height: 1.2;
+  }
+
+  .lukb-factsheet-p2-kicker {
+    font-family: var(--font-heading);
+    color: var(--lukb-navy);
+    font-size: 0.84rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .lukb-data-table {
+    font-size: 0.82rem;
+  }
+
+  .lukb-data-table th, .lukb-data-table td {
+    padding: 4px 8px;
+  }
+
+  .blk-callout {
+    margin: 0.8em 0;
+  }
+{% endblock %}
+
+{% block header_banner %}
+  {{ render_brand_row() }}
+
+  {% set pub_date = article.metadata.publication_date_formatted or article.metadata.publication_date %}
+  <div class="lukb-factsheet-header-box" style="margin-bottom: 18px; border-bottom: 2px solid var(--lukb-navy); padding-bottom: 12px;">
+    <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;">
+      <h1 class="lukb-title" style="margin: 0; font-size: 2.1rem; color: var(--lukb-navy);">{{ article.metadata.title }}</h1>
+      {% if article.metadata.category %}
+      <span style="font-family: var(--font-heading); font-weight: 500; color: var(--lukb-cyan); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em;">
+        {{ article.metadata.category }}
+      </span>
+      {% endif %}
+    </div>
+    {% if article.metadata.subtitle %}
+    <p class="lukb-subtitle" style="margin: 4px 0 0 0; color: var(--lukb-blue); font-size: 1.05rem;">{{ article.metadata.subtitle }}</p>
+    {% endif %}
+  </div>
+
+  {{ render_tags_bar() }}
+{% endblock %}
+
+{% block body_content %}
+  {% set sections = [[]] %}
+  {% for blk in article.blocks %}
+    {% if blk.type == 'colbreak' %}
+      {% set _ = sections.append([]) %}
+    {% else %}
+      {% set _ = sections[-1].append(blk) %}
+    {% endif %}
+  {% endfor %}
+
+  {% if sections|length >= 4 %}
+    <!-- SEITE 1: 2 SPALTEN -->
+    <div class="lukb-factsheet-grid">
+      <div class="lukb-factsheet-col">
+        {% for blk in sections[0] %}
+          {{ render_single_block(blk, in_box=false) }}
+        {% endfor %}
+      </div>
+      <div class="lukb-factsheet-col">
+        {% for blk in sections[1] %}
+          {{ render_single_block(blk, in_box=false) }}
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- SEITE 2: TRENNER / HEADER -->
+    <div class="lukb-factsheet-p2-header">
+      <div>
+        <h2 class="lukb-factsheet-p2-title">Aus Prinzip nachhaltig</h2>
+        <div style="font-size: 0.9rem; color: var(--lukb-muted); margin-top: 3px;">Nachhaltigkeits- und ESG-Profil des Anlagefonds</div>
+      </div>
+      <div class="lukb-factsheet-p2-kicker">ESG &amp; STEWARDSHIP</div>
+    </div>
+
+    <!-- SEITE 2: 2 SPALTEN -->
+    <div class="lukb-factsheet-grid">
+      <div class="lukb-factsheet-col">
+        {% for blk in sections[2] %}
+          {{ render_single_block(blk, in_box=false) }}
+        {% endfor %}
+      </div>
+      <div class="lukb-factsheet-col">
+        {% for blk in sections[3] %}
+          {{ render_single_block(blk, in_box=false) }}
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if sections|length > 4 %}
+      <div class="lukb-factsheet-bottom" style="margin-top: 20px;">
+        {% for s in sections[4:] %}
+          {% for blk in s %}
+            {{ render_single_block(blk, in_box=false) }}
+          {% endfor %}
+        {% endfor %}
+      </div>
+    {% endif %}
+
+  {% else %}
+    <!-- Automatischer 2-Spalten-Fluss, falls keine 4 Abschnitte definiert sind -->
+    <div class="lukb-factsheet-grid">
+      {% for blk in article.blocks %}
+        {% if blk.type != 'colbreak' %}
+          <div>{{ render_single_block(blk, in_box=false) }}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endblock %}

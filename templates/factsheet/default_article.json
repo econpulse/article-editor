@@ -1,0 +1,310 @@
+{
+  "template_id": "factsheet",
+  "status": "draft",
+  "metadata": {
+    "title": "LUKB Expert-Ertrag",
+    "subtitle": "Einkommensorientierter Strategiefonds",
+    "publication_date": "2026-10-31",
+    "header_series": "Factsheet per 31.10.2026",
+    "category": "Anlagefonds",
+    "authors": [
+      {
+        "name": "LUKB Expert Fondsleitung AG",
+        "role": "Fondsleitung & Asset Management"
+      }
+    ],
+    "disclaimer": "Die in dieser Publikation ausgewiesenen historischen Performances stellen keinen Indikator für die laufende oder zukünftige Performance dar. Diese Information kann Werbeelemente enthalten und stellt keine Empfehlung zum Kauf oder Verkauf von Finanzinstrumenten oder Bankdienstleistungen dar und entbindet den Empfänger nicht von seiner eigenen Beurteilung. Das Basisinformationsblatt und der Prospekt mit integriertem Fondsvertrag können kostenlos bei der Fondsleitung, der Depotbank und allen Vertriebsträgern bezogen werden. Änderungen sind jederzeit möglich. Diese Information richtet sich ausschliesslich an Personen in der Schweiz."
+  },
+  "blocks": [
+    {
+      "id": "blk_fs_p1_h1",
+      "type": "heading",
+      "level": 2,
+      "text": "Anlagepolitik"
+    },
+    {
+      "id": "blk_fs_p1_rt1",
+      "type": "richtext",
+      "html": "<p>Der einkommensorientierte Strategiefonds investiert in ein global diversifiziertes Portfolio aus Obligationen, Aktien und nicht-traditionellen Anlagen. Ein hoher Anteil der Investitionen erfolgt in Obligationen und Schweizer Franken. Neben einer guten Diversifikation gilt der Qualität der Anlagen ein besonderes Augenmerk. Ziel der Anlagestrategie ist eine stetige und relativ schwankungsarme Wertentwicklung.</p>"
+    },
+    {
+      "id": "blk_fs_p1_h2",
+      "type": "heading",
+      "level": 2,
+      "text": "Anlageeignung"
+    },
+    {
+      "id": "blk_fs_p1_rt2",
+      "type": "richtext",
+      "html": "<p>Diese Lösung eignet sich für Anleger, die</p><ul><li>regelmässiges Einkommen wünschen</li><li>zusätzlichen Kapitalgewinn bei beschränktem Risiko anstreben</li><li>einen Anlagehorizont von mindestens 3 Jahren haben</li><li>über eine tiefe Risikotoleranz verfügen</li></ul>"
+    },
+    {
+      "id": "blk_fs_p1_tbl1",
+      "type": "table",
+      "title": "Aktuelle Daten",
+      "subtitle": "",
+      "source": "",
+      "layout": "column",
+      "show_header": false,
+      "columns": [
+        {"field": "metric", "title": "Kennzahl", "align": "left", "width": 55.0},
+        {"field": "val", "title": "Wert", "align": "right", "width": 45.0}
+      ],
+      "rows": [
+        {"metric": "Inventarwert", "val": "CHF 161.10"},
+        {"metric": "Fondsvermögen in Mio.", "val": "CHF 1'436.53"},
+        {"metric": "Höchst / Tiefst (Letzte 52 Wochen)", "val": "CHF 165.30 / CHF 157.20"},
+        {"metric": "Volatilität", "val": "5.5 %"}
+      ]
+    },
+    {
+      "id": "blk_fs_p1_chart1",
+      "type": "custom_chart",
+      "title": "Anlagekategorien",
+      "subtitle": "Vermögensaufteilung in %",
+      "source": "Quelle: LUKB Expert Fondsleitung AG",
+      "chart_type": "doughnut",
+      "doughnut_hole_pct": 55,
+      "legend_position": "right",
+      "palette": "lukb_blues",
+      "chart_height_mm": 24,
+      "color_by_category": true,
+      "has_header": true,
+      "x_col": "Kategorie",
+      "data_columns": ["Kategorie", "Anteil"],
+      "series": [
+        {"field": "Anteil", "label": "Anteil %", "enabled": true}
+      ],
+      "data_rows": [
+        ["Obligationen", 58.6],
+        ["Aktien", 25.0],
+        ["Immobilien", 8.6],
+        ["Edelmetalle", 5.5],
+        ["Liquidität", 1.3],
+        ["Rohstoffe", 1.0]
+      ]
+    },
+    {
+      "id": "blk_fs_p1_tbl2",
+      "type": "table",
+      "title": "Fondsinformationen",
+      "subtitle": "",
+      "source": "",
+      "layout": "column",
+      "show_header": false,
+      "columns": [
+        {"field": "prop", "title": "Merkmal", "align": "left", "width": 48.0},
+        {"field": "val", "title": "Wert", "align": "right", "width": 52.0}
+      ],
+      "rows": [
+        {"prop": "Valorennummer / ISIN", "val": "277'340 / CH0002773403"},
+        {"prop": "Fondswährung", "val": "CHF"},
+        {"prop": "Gründung / Domizil", "val": "23.11.1990 / Schweiz"},
+        {"prop": "Rechtsform / Vertriebszulassung", "val": "Schweizer Fonds (FCP) / CH"},
+        {"prop": "Benchmark", "val": "Customized"},
+        {"prop": "Steuerwert", "val": "CHF 160.30 (31.12.2025)"},
+        {"prop": "Ausschüttung", "val": "CHF 1.50 (22.04.2026)"},
+        {"prop": "Ausschüttungsrendite", "val": "0.9 %"},
+        {"prop": "Kommission bei Rücknahme", "val": "0.0 %"},
+        {"prop": "Pauschalkommission / TER", "val": "1.00 % / 1.12 % (31.01.2026)"},
+        {"prop": "Abschluss Rechnungsjahr", "val": "31. Januar"},
+        {"prop": "Depotbank", "val": "Luzerner Kantonalbank AG, Luzern"},
+        {"prop": "Beratung & Verkauf", "val": "www.lukb.ch, info@lukb.ch"},
+        {"prop": "Auftragserteilung", "val": "Täglich bis 16.00 Uhr"},
+        {"prop": "Forward Pricing", "val": "Abrechnung am Folgetag"}
+      ]
+    },
+    {
+      "id": "blk_fs_cb1",
+      "type": "colbreak"
+    },
+    {
+      "id": "blk_fs_p1_chart2",
+      "type": "custom_chart",
+      "title": "Kursentwicklung & Jahresperformance in CHF",
+      "subtitle": "Jahresperformance in % (Stand 31.10.2026)",
+      "source": "Quelle: Bloomberg, LUKB Expert Fondsleitung AG",
+      "chart_type": "category_bar",
+      "orientation": "vertical",
+      "palette": "lukb_blues",
+      "chart_height_mm": 26,
+      "color_by_category": false,
+      "has_header": true,
+      "x_col": "Jahr",
+      "data_columns": ["Jahr", "Performance"],
+      "series": [
+        {"field": "Performance", "label": "Performance %", "enabled": true}
+      ],
+      "data_rows": [
+        ["2021", 3.1],
+        ["2022", -11.1],
+        ["2023", 3.7],
+        ["2024", 7.8],
+        ["2025", 5.5],
+        ["2026", 1.4]
+      ]
+    },
+    {
+      "id": "blk_fs_p1_tbl3",
+      "type": "table",
+      "title": "Performance",
+      "subtitle": "Die jährliche Performance seit Gründung betrug 3.3 %.",
+      "source": "Stand per 31.10.2026",
+      "layout": "column",
+      "show_header": true,
+      "columns": [
+        {"field": "c1", "title": "akt. Jahr", "align": "right", "width": 16.6},
+        {"field": "c2", "title": "1 Jahr", "align": "right", "width": 16.6},
+        {"field": "c3", "title": "3 Jahre", "align": "right", "width": 16.7},
+        {"field": "c4", "title": "5 Jahre", "align": "right", "width": 16.7},
+        {"field": "c5", "title": "10 Jahre", "align": "right", "width": 16.7},
+        {"field": "c6", "title": "seit Grdg.", "align": "right", "width": 16.7}
+      ],
+      "rows": [
+        {"c1": "1.4 %", "c2": "2.1 %", "c3": "20.1 %", "c4": "6.9 %", "c5": "21.2 %", "c6": "223.4 %"}
+      ]
+    },
+    {
+      "id": "blk_fs_p1_chart3",
+      "type": "custom_chart",
+      "title": "Währungen (nach Absicherung)",
+      "subtitle": "Währungsallokation in %",
+      "source": "Quelle: LUKB Expert Fondsleitung AG",
+      "chart_type": "category_bar",
+      "orientation": "horizontal",
+      "palette": "lukb_blues",
+      "chart_height_mm": 22,
+      "color_by_category": false,
+      "has_header": true,
+      "x_col": "Währung",
+      "data_columns": ["Währung", "Anteil"],
+      "series": [
+        {"field": "Anteil", "label": "Anteil %", "enabled": true}
+      ],
+      "data_rows": [
+        ["CHF", 68.8],
+        ["Übrige", 13.7],
+        ["USD", 7.3],
+        ["EUR", 5.1],
+        ["GBP", 2.8],
+        ["JPY", 2.3]
+      ]
+    },
+    {
+      "id": "blk_fs_p1_tbl4",
+      "type": "table",
+      "title": "Die 10 grössten Aktienpositionen (von 387)",
+      "subtitle": "",
+      "source": "Quelle: LUKB Expert Fondsleitung AG",
+      "layout": "column",
+      "show_header": true,
+      "columns": [
+        {"field": "t1", "title": "Position", "align": "left", "width": 35.0},
+        {"field": "w1", "title": "Anteil", "align": "right", "width": 15.0},
+        {"field": "t2", "title": "Position", "align": "left", "width": 35.0},
+        {"field": "w2", "title": "Anteil", "align": "right", "width": 15.0}
+      ],
+      "rows": [
+        {"t1": "Roche Holding AG PS I", "w1": "1.1 %", "t2": "UBS Group AG N", "w2": "0.5 %"},
+        {"t1": "Novartis AG N", "w1": "1.0 %", "t2": "ABB AG N", "w2": "0.4 %"},
+        {"t1": "Nestle AG N", "w1": "0.8 %", "t2": "Microsoft Corp", "w2": "0.4 %"},
+        {"t1": "NVIDIA Corp", "w1": "0.5 %", "t2": "Zurich Insurance AG N", "w2": "0.4 %"},
+        {"t1": "Apple Inc", "w1": "0.5 %", "t2": "Richemont SA N", "w2": "0.3 %"}
+      ]
+    },
+    {
+      "id": "blk_fs_p1_callout1",
+      "type": "callout",
+      "title": "Fondsleitung / Fondsmanagement",
+      "html": "<p><strong>LUKB Expert Fondsleitung AG</strong>, Luzern<br/><a href=\"mailto:fondsleitung@lukb.ch\">fondsleitung@lukb.ch</a> · <a href=\"https://www.expertfonds.ch\" target=\"_blank\">www.expertfonds.ch</a></p><p style=\"margin-top:6px;\"><strong>Depotbank:</strong> Luzerner Kantonalbank AG, Luzern<br/><strong>Auftragserteilung:</strong> Täglich bis 16.00 Uhr (Forward Pricing)</p>"
+    },
+    {
+      "id": "blk_fs_cb2",
+      "type": "colbreak"
+    },
+    {
+      "id": "blk_fs_p2_h1",
+      "type": "heading",
+      "level": 2,
+      "text": "ESG-Integrationsansatz"
+    },
+    {
+      "id": "blk_fs_p2_rt1",
+      "type": "richtext",
+      "html": "<p>Bei der Auswahl von Anlagen werden ergänzend zur traditionellen Finanzanalyse auch systematisch Kriterien für eine nachhaltige Wirtschaftsweise berücksichtigt. Es besteht das Ziel, Nachhaltigkeitsrisiken zu reduzieren und dadurch insgesamt eine bessere Rendite/Risikoeigenschaft des Gesamtportfolios anzustreben. Es wird davon ausgegangen, dass sich Nachhaltigkeitsrisiken negativ auf die Rendite auswirken können.</p>"
+    },
+    {
+      "id": "blk_fs_p2_co1",
+      "type": "callout",
+      "title": "ESG-Faktoren",
+      "html": "<p>Der ESG-Integrationsansatz beinhaltet Aspekte aus den Bereichen Umwelt (<strong>E</strong>=Environment), Gesellschaft (<strong>S</strong>=Social) und guter Führung (<strong>G</strong>=Governance). Bei der Einstufung von Anlagen werden sowohl Ratings von Drittanbietern wie MSCI ESG als auch die ESG-Beurteilungen der Luzerner Kantonalbank AG herangezogen.</p>"
+    },
+    {
+      "id": "blk_fs_p2_h2",
+      "type": "heading",
+      "level": 2,
+      "text": "Ausschlüsse"
+    },
+    {
+      "id": "blk_fs_p2_rt2",
+      "type": "richtext",
+      "html": "<p>Hersteller von geächteten Waffen werden gemäss Empfehlungsliste des SVVK-ASIR (Schweizer Verein für verantwortungsbewusste Kapitalanlagen) ausgeschlossen, ebenso Unternehmen, die in sehr schwerwiegende Kontroversen im Bereich Menschenrechte, Arbeitsbedingungen, Umwelt, Kunden oder Unternehmensführung verwickelt sind.</p>"
+    },
+    {
+      "id": "blk_fs_p2_co2",
+      "type": "callout",
+      "title": "Geschäftsfelder & Umsatzschwellen",
+      "html": "<p>Die Geschäftsfelder und Umsatzschwellen, die zu einem Ausschluss führen, können dem Prospekt mit integriertem Fondsvertrag entnommen werden.</p>"
+    },
+    {
+      "id": "blk_fs_cb3",
+      "type": "colbreak"
+    },
+    {
+      "id": "blk_fs_p2_h3",
+      "type": "heading",
+      "level": 2,
+      "text": "Positive Screening / Best in Class"
+    },
+    {
+      "id": "blk_fs_p2_rt3",
+      "type": "richtext",
+      "html": "<p>Es wird in Unternehmen investiert, die ein definiertes Mindestniveau erreichen. In Unternehmen, die innerhalb ihrer Branche zu sogenannten Nachzüglern (Laggards) zählen, wird nicht investiert.</p>"
+    },
+    {
+      "id": "blk_fs_p2_co3",
+      "type": "callout",
+      "title": "ESG-Ratings",
+      "html": "<p>Beteiligungs- und Forderungspapiere von Unternehmen und Staaten mit den tiefsten ESG-Ratings (Rating CCC von MSCI ESG) werden ausgeschlossen, sofern die Luzerner Kantonalbank AG gemäss ihren Einschätzungen keine abweichende Einstufung publiziert hat.</p>"
+    },
+    {
+      "id": "blk_fs_p2_h4",
+      "type": "heading",
+      "level": 2,
+      "text": "Stewardship"
+    },
+    {
+      "id": "blk_fs_p2_rt4",
+      "type": "richtext",
+      "html": "<p>Der Finanzmarkt beeinflusst das Verhalten von Unternehmen massgeblich. Dies erlaubt Anlegerinnen und Anlegern, eine nachhaltigere Wirtschaft zu fördern. Der spezialisierte Dienstleister ISS Governance unterstützt uns beim Unternehmensdialog sowie bei der Stimmrechtswahrnehmung.</p>"
+    },
+    {
+      "id": "blk_fs_p2_co4",
+      "type": "callout",
+      "title": "Engagement: im Dialog Einfluss nehmen",
+      "html": "<p>Mit unserer primär kollaborativen Dialog-Strategie im Pool mit anderen grossen Investoren wird der Fokus auf die Einhaltung von globalen Normen gelegt, etwa bei schwerwiegenden Verstössen gegen Menschenrechte, sowie auf Klimawandel und Biodiversität.</p>"
+    },
+    {
+      "id": "blk_fs_p2_co5",
+      "type": "callout",
+      "title": "Stimmrechtswahrnehmung: überlegt abstimmen",
+      "html": "<p>Wir nehmen unsere Stimmrechte für die Mehrheit der Aktienpositionen aktiv wahr. Dabei berücksichtigen wir in unseren Entscheidungen die Empfehlungen der ISS Climate Proxy Voting Guidelines.</p>"
+    },
+    {
+      "id": "blk_fs_p2_co6",
+      "type": "callout",
+      "title": "Wir engagieren uns mit unseren Partnern",
+      "html": "<p><strong>Partner-Netzwerk:</strong> Swiss Sustainable Finance · Principles for Responsible Investment (PRI) · Climate Action 100+ · spring · ISS Governance · MSCI ESG Research</p><p style=\"margin-top:6px;\"><strong>Weitere Informationen zum Thema Nachhaltigkeit:</strong> Ausführliche Berichte zu unserem Nachhaltigkeitsansatz finden Sie unter <a href=\"https://www.lukb.ch/nachhaltigkeit\" target=\"_blank\">www.lukb.ch/nachhaltigkeit</a>.</p>"
+    }
+  ]
+}

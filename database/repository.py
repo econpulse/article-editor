@@ -16,6 +16,7 @@ from sqlalchemy import desc, func, or_, select
 
 logger = logging.getLogger(__name__)
 
+from config import TEMPLATES_DIR
 from database.connection import Base, engine, get_db_session
 from database.models import (
     ArticleModel,
@@ -393,6 +394,21 @@ def create_new_article(
     user: str = "Investment Office",
 ) -> ArticleDocument:
     """Erstellt einen neuen Artikel mit einer strukturierten Start-Vorlage."""
+    if template_id == "factsheet":
+        factsheet_json_path = TEMPLATES_DIR / "factsheet" / "default_article.json"
+        if factsheet_json_path.exists():
+            try:
+                raw_data = json.loads(factsheet_json_path.read_text(encoding="utf-8"))
+                new_doc = ArticleDocument.model_validate(raw_data)
+                new_doc.id = str(uuid.uuid4())
+                new_doc.status = "draft"
+                for blk in new_doc.blocks:
+                    blk["id"] = f"blk_{uuid.uuid4().hex[:8]}"
+                save_article(new_doc, user=user, create_revision=True, revision_note="Initiale Factsheet-Erstellung")
+                return new_doc
+            except Exception as exc:
+                logger.warning(f"Fehler beim Laden von default_article.json für factsheet: {exc}")
+
     new_doc = ArticleDocument(
         id=str(uuid.uuid4()),
         template_id=template_id,
@@ -1330,6 +1346,18 @@ def init_db_and_seed() -> None:
                                 break
                         except Exception:
                             pass
+        has_factsheet = any(item.get("template_id") == "factsheet" for item in existing)
+        if not has_factsheet:
+            factsheet_json_path = TEMPLATES_DIR / "factsheet" / "default_article.json"
+            if factsheet_json_path.exists():
+                try:
+                    raw_data = json.loads(factsheet_json_path.read_text(encoding="utf-8"))
+                    fs_doc = ArticleDocument.model_validate(raw_data)
+                    fs_doc.id = "art-lukb-factsheet-expert-ertrag"
+                    fs_doc.status = "published"
+                    save_article(fs_doc, user="LUKB Expert Fondsleitung AG", create_revision=True, revision_note="Initiales Factsheet Expert-Ertrag")
+                except Exception as exc:
+                    logger.warning(f"Factsheet seed fehlgeschlagen: {exc}")
         return
 
     # Beispiel-Artikel 1: Investment Focus (2-spaltiges Flaggschiff-Layout)
