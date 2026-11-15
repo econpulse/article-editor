@@ -1425,11 +1425,9 @@
 
       if explicit-anchor-pos != none {
         // Explizite Anker-Verknüpfung:
-        // Zielblock in curr-left gefunden! Trennt vor dem Anker-Absatz (bzw. vor dessen H2/H3-Überschrift).
+        // Zielblock in curr-left gefunden! Trennt exakt vor dem gewählten Anker-Block.
+        // User kann so bewusst wählen, ob das Randelement an der Überschrift oder am Absatz ausgerichtet wird.
         let split-at = explicit-anchor-pos
-        if split-at > 0 and curr-left.at(split-at - 1).type == "heading" {
-          split-at = split-at - 1
-        }
         if split-at > 0 {
           let flushed-left = curr-left.slice(0, split-at)
           let anchor-left = curr-left.slice(split-at)
@@ -1551,18 +1549,20 @@
       context {
         let rows = build-tufte-grid-rows(run.items, main-w: tufte-main-w, margin-w: tufte-margin-w)
         let gutters = if rows.len() > 1 {
-          rows.slice(1).map(r => {
-            if r.left.len() > 0 {
-              let first-it = r.left.at(0)
-              if first-it.type == "heading" {
-                let lvl = first-it.at("level", default: 2)
-                if lvl == 1 { 2.3em } else { 2.0em }
-              } else if first-it.type in ("callout", "textbox_group") {
-                1.6em
-              } else {
-                1.8em
-              }
+          range(rows.len() - 1).map(idx => {
+            let prev-row = rows.at(idx)
+            let next-row = rows.at(idx + 1)
+            let prev-last = if prev-row.left.len() > 0 { prev-row.left.last() } else { none }
+            let next-first = if next-row.left.len() > 0 { next-row.left.at(0) } else { none }
+
+            if prev-last != none and prev-last.type == "heading" {
+              // Vorherige Zeile endete mit einer Überschrift:
+              // Exakter Unterabstand der Überschrift (6pt bei H1, 0.65em bei H2/H3)
+              let lvl = prev-last.at("level", default: 2)
+              if lvl == 1 { 6pt } else { 0.65em }
             } else {
+              // Standard-Abstand im Tufte-Fliesstext (par spacing bzw. heading above-space):
+              // Exakt 1.8em, identisch zum vertikalen Abstand innerhalb derselben Zeile.
               1.8em
             }
           })

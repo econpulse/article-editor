@@ -1882,25 +1882,40 @@ def test_tufte_anchor_to_and_spacer_synchronization():
     assert [b["id"] for b in reordered] == ["p1", "sp1", "p2", "fig1"]
 
     # 3. Vollständiges Rendering mit Typst & Web
+    from schemas.article import HeadingBlock
     doc = ArticleDocument(
         template_id="investment_tufte",
         metadata=ArticleMetadata(title="Tufte Anchor Test", lead="Lead Text"),
         blocks=[
-            RichTextBlock(id="p1", html="<p>Erster Absatz vor dem Spacer.</p>").model_dump(),
+            HeadingBlock(id="h1", text="Wirtschaftsausblick", level=2).model_dump(),
+            RichTextBlock(id="p1", html="<p>Erster Absatz nach der Überschrift.</p>").model_dump(),
+            DbChartBlock(id="c1", layout="column", anchor_to="p1", title="Leitzinsen").model_dump(),
             SpacerBlock(id="sp1", height_mm=20).model_dump(),
-            RichTextBlock(id="p2", html="<p>Zweiter Absatz, an den der Chart verankert ist.</p>").model_dump(),
-            DbChartBlock(id="c1", layout="column", anchor_to="p2", title="Leitzinsen").model_dump(),
+            RichTextBlock(id="p2", html="<p>Zweiter Absatz nach Spacer.</p>").model_dump(),
         ]
     )
 
     pdf = render_pdf_bytes(doc)
-    assert pdf.startswith(b"%PDF-"), "Typst PDF Generierung mit anchor_to fehlgeschlagen"
+    assert pdf.startswith(b"%PDF-"), "Typst PDF Generierung mit anchor_to an Absatz nach Überschrift fehlgeschlagen"
 
     svg_pages = render_preview_svg_pages(doc)
     assert len(svg_pages) >= 1, "Typst SVG Seiten-Preview fehlgeschlagen"
 
     html = render_web_html(doc)
     assert "Leitzinsen" in html, "Web HTML enthält Chart-Titel nicht"
+
+    # Test Verankerung direkt an Überschrift
+    doc_heading_anchor = ArticleDocument(
+        template_id="investment_tufte",
+        metadata=ArticleMetadata(title="Tufte Anchor Heading Test", lead="Lead Text"),
+        blocks=[
+            HeadingBlock(id="h1", text="Wirtschaftsausblick", level=2).model_dump(),
+            DbChartBlock(id="c1", layout="column", anchor_to="h1", title="Leitzinsen").model_dump(),
+            RichTextBlock(id="p1", html="<p>Erster Absatz nach Überschrift.</p>").model_dump(),
+        ]
+    )
+    pdf_h = render_pdf_bytes(doc_heading_anchor)
+    assert pdf_h.startswith(b"%PDF-"), "Typst PDF mit Anker an Überschrift fehlgeschlagen"
 
 
 if __name__ == "__main__":
