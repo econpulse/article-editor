@@ -1292,6 +1292,30 @@
 // Asymmetrischer Tufte-Hauptteil mit entkoppelter Randspalten-Höhenlogik
 // ============================================================================
 
+#let compute-tufte-row-gutters(rows) = {
+  if rows.len() > 1 {
+    range(rows.len() - 1).map(idx => {
+      let prev-row = rows.at(idx)
+      let next-row = rows.at(idx + 1)
+      let prev-last = if prev-row.left.len() > 0 { prev-row.left.last() } else { none }
+      let next-first = if next-row.left.len() > 0 { next-row.left.at(0) } else { none }
+
+      if prev-last != none and prev-last.type == "heading" {
+        // Vorherige Zeile endete mit einer Überschrift:
+        // Exakter Unterabstand der Überschrift (6pt bei H1, 0.65em bei H2/H3)
+        let lvl = prev-last.at("level", default: 2)
+        if lvl == 1 { 6pt } else { 0.65em }
+      } else {
+        // Standard-Abstand im Tufte-Fliesstext (par spacing bzw. heading above-space):
+        // Exakt 1.8em, identisch zum vertikalen Abstand innerhalb derselben Zeile.
+        1.8em
+      }
+    })
+  } else {
+    1.8em
+  }
+}
+
 #let render-tufte-single-block(blk, is-margin: false, build-rows-fn: none) = {
   if blk.type == "heading" {
     render-heading(
@@ -1331,10 +1355,11 @@
     )[
       #if is-split and build-rows-fn != none [
         #let box-rows = build-rows-fn(blk.children, main-w: tufte-main-w - 10pt, margin-w: tufte-margin-w - 10pt)
+        #let box-gutters = compute-tufte-row-gutters(box-rows)
         #grid(
           columns: (1fr, tufte-margin-w),
           column-gutter: tufte-gutter,
-          row-gutter: 1.4em,
+          row-gutter: box-gutters,
           ..box-rows.map(r => (
             [
               #for l-it in r.left [
@@ -1548,27 +1573,7 @@
     } else {
       context {
         let rows = build-tufte-grid-rows(run.items, main-w: tufte-main-w, margin-w: tufte-margin-w)
-        let gutters = if rows.len() > 1 {
-          range(rows.len() - 1).map(idx => {
-            let prev-row = rows.at(idx)
-            let next-row = rows.at(idx + 1)
-            let prev-last = if prev-row.left.len() > 0 { prev-row.left.last() } else { none }
-            let next-first = if next-row.left.len() > 0 { next-row.left.at(0) } else { none }
-
-            if prev-last != none and prev-last.type == "heading" {
-              // Vorherige Zeile endete mit einer Überschrift:
-              // Exakter Unterabstand der Überschrift (6pt bei H1, 0.65em bei H2/H3)
-              let lvl = prev-last.at("level", default: 2)
-              if lvl == 1 { 6pt } else { 0.65em }
-            } else {
-              // Standard-Abstand im Tufte-Fliesstext (par spacing bzw. heading above-space):
-              // Exakt 1.8em, identisch zum vertikalen Abstand innerhalb derselben Zeile.
-              1.8em
-            }
-          })
-        } else {
-          1.8em
-        }
+        let gutters = compute-tufte-row-gutters(rows)
 
         grid(
           columns: (tufte-main-w, tufte-margin-w),
