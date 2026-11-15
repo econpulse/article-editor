@@ -27,6 +27,12 @@ TOOLBAR_BLOCKS: list[BlockButtonDef] = [
         title="Zeitreihen-Diagramm direkt aus der MSSQL-Tabelle ts_db erstellen (max. 5 Ticker)",
         style="border-color:#009FE3;background:#F0F9FF;color:#002855;",
     ),
+    BlockButtonDef(
+        "custom_chart",
+        "+ Daten-Chart (Excel / TSV)",
+        title="Diagramm (Kuchen/Doughnut, Zeitreihe oder Kategorie) direkt aus der Zwischenablage erstellen",
+        style="border-color:#037FDA;background:#EBF5FB;color:#002855;",
+    ),
     BlockButtonDef("table", "+ Tabelle (inkl. Excel-Paste)"),
     BlockButtonDef("callout", "+ Kernaussagen-Box"),
     BlockButtonDef(

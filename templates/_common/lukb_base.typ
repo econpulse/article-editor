@@ -866,7 +866,7 @@
     parbreak()
   } else if blk.type == "callout" {
     render-callout(blk.title, blk.typst_markup, accent-color: callout-accent)
-  } else if blk.type in ("figure", "db_chart") {
+  } else if blk.type in ("figure", "db_chart", "custom_chart") {
     let bcopy = blk
     if in-box {
       bcopy.insert("layout", "column")
@@ -995,7 +995,7 @@
       heading-below: heading-below,
     )
 
-    let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "full"))
+    let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "full"))
     let manual-colbreak-idx = items.position(it => it.type == "colbreak")
 
     if has-full-float {
@@ -1134,7 +1134,7 @@
     let overflow-idx = none
 
     for (idx, it) in items.enumerate() {
-      let is-full = (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "full")
+      let is-full = (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "full")
       if not is-full {
         let ih = measure(block(
           width: col-w,
@@ -1147,7 +1147,7 @@
           )
         )).height
         pending-sum-h = pending-sum-h + ih + 8pt
-        if it.type in ("figure", "db_chart", "callout", "quote") and ih > pending-max-indiv-h {
+        if it.type in ("figure", "db_chart", "custom_chart", "callout", "quote") and ih > pending-max-indiv-h {
           pending-max-indiv-h = ih
         }
       } else {
@@ -1233,7 +1233,7 @@
   let runs = ()
   let curr-cols = ()
     for blk in blocks {
-      let is-full-block = (blk.type in ("figure", "db_chart", "table")) and (blk.at("layout", default: "column") == "full")
+      let is-full-block = (blk.type in ("figure", "db_chart", "custom_chart", "table")) and (blk.at("layout", default: "column") == "full")
       let is-inline-full = false
       if is-full-block {
         let pos-mode = blk.at("full_position", default: "auto")
@@ -1308,13 +1308,13 @@
     parbreak()
   } else if blk.type == "callout" {
     render-callout(blk.title, blk.typst_markup, accent-color: lukb-cyan, title-size: 9.5pt, body-size: 8.8pt)
-  } else if blk.type in ("figure", "db_chart") {
+  } else if blk.type in ("figure", "db_chart", "custom_chart") {
     render-figure-box(blk, is-margin: is-margin, allow-float: false)
   } else if blk.type == "table" {
     render-table-box(blk, is-margin: is-margin, allow-float: false, style-variant: "tufte")
   } else if blk.type == "textbox_group" {
-    let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "table"))
-    let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "table")))
+    let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "custom_chart", "table"))
+    let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "custom_chart", "table")))
     let has-visuals = visual-children.len() > 0
     let has-text = text-children.len() > 0
     let is-split = has-visuals and has-text and (not is-margin)
@@ -1412,7 +1412,7 @@
   ).height + 10pt
 
   for it in items {
-    let is-margin = (it.type in ("figure", "db_chart", "table")) and (it.at("layout", default: "column") == "column")
+    let is-margin = (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "column")
     if is-margin {
       let mh = measure-margin(it)
       let anchor-id = it.at("anchor_to", default: none)
@@ -1515,8 +1515,8 @@
       }
       runs.push((kind: "break"))
     } else {
-      let has-box-visuals = (blk.type == "textbox_group") and blk.children.any(c => c.type in ("figure", "db_chart", "table"))
-      let is-full = ((blk.type in ("figure", "db_chart", "table", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")) or ((blk.type == "textbox_group") and (has-box-visuals or blk.at("layout", default: "column") == "full"))
+      let has-box-visuals = (blk.type == "textbox_group") and blk.children.any(c => c.type in ("figure", "db_chart", "custom_chart", "table"))
+      let is-full = ((blk.type in ("figure", "db_chart", "custom_chart", "table", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")) or ((blk.type == "textbox_group") and (has-box-visuals or blk.at("layout", default: "column") == "full"))
       if is-full {
         if curr-grid-items.len() > 0 {
           runs.push((kind: "grid", items: curr-grid-items))

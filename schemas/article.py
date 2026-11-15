@@ -265,6 +265,128 @@ class DbChartBlock(BaseModel):
         return []
 
 
+class CustomChartSeriesItem(BaseModel):
+    field: str = Field(default="", description="Spaltenname oder Spalten-Index in den Rohdaten")
+    label: str = Field(default="", description="Benutzerdefiniertes Label für die Legende")
+    chart_type: ChartSeriesType = Field(default="line", description="Darstellungsart für Zeitreihen")
+    enabled: bool = Field(default=True, description="Ob die Serie im Chart dargestellt wird")
+
+
+class CustomChartBlock(BaseModel):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["custom_chart"] = "custom_chart"
+    title: str = Field(default="", description="Grafik-Titel")
+    subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
+    source: str = Field(default="Quelle: LUKB Investment Office", description="Quellenangabe")
+    layout: Literal["column", "full"] = Field(
+        default="column",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+    full_position: FullPositionMode = Field(
+        default="auto",
+        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
+    )
+    chart_height_mm: int = Field(
+        default=36,
+        description="Höhe der eigentlichen Chartfläche in Millimeter (2mm-Schritte, Default: 36mm)",
+    )
+    palette: Literal["lukb_classic", "lukb_blues"] = Field(
+        default="lukb_classic",
+        description="ID der gewählten Farbpalette",
+    )
+    chart_type: Literal["timeseries", "category_bar", "doughnut", "pie"] = Field(
+        default="category_bar",
+        description="Art des Diagramms: timeseries, category_bar, doughnut, pie",
+    )
+    has_header: bool = Field(default=True, description="Erste Zeile als Spaltenüberschriften interpretieren")
+    x_col: str = Field(default="", description="Name/Index der Spalte für X-Achse / Kategorie / Datum")
+    series: list[CustomChartSeriesItem] = Field(default_factory=list, description="Konfigurierte Datenreihen")
+    raw_tsv: str = Field(default="", description="Rohdaten aus der Zwischenablage (TSV/CSV)")
+    data_columns: list[str] = Field(default_factory=list, description="Erkannte Spaltenköpfe")
+    data_rows: list[list[Any]] = Field(default_factory=list, description="Geparste Tabellenzeilen")
+    doughnut_hole_pct: int = Field(default=55, ge=0, le=85, description="Lochgrösse bei Doughnut in % (0 = Pie)")
+    legend_position: Literal["bottom", "right"] = Field(
+        default="bottom",
+        description="Position der Legende ('bottom' = unterhalb, 'right' = rechts neben der Grafik)",
+    )
+    legend_columns: Optional[int] = Field(
+        default=None,
+        description="Anzahl Spalten für die Legendeneinträge (Default: 1 bei rechts, 2 bei unterhalb)",
+    )
+    orientation: Literal["vertical", "horizontal"] = Field(
+        default="vertical",
+        description="Ausrichtung bei Säulen-/Balkendiagrammen ('vertical' = Säulen von unten nach oben, 'horizontal' = Balken von links nach rechts)",
+    )
+    color_by_category: bool = Field(
+        default=False,
+        description="Unterschiedliche Farben für jede Kategorie/Balken aus der Palette verwenden",
+    )
+    bar_mode: Literal["grouped", "stacked"] = Field(default="grouped", description="Säulen-Modus bei Kategorie-Charts")
+    asset_id: str = Field(default="", description="Optionales gecachtes SVG-Asset")
+    anchor_to: Optional[str] = Field(
+        default=None,
+        description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
+    )
+
+    @field_validator("legend_position", mode="before")
+    @classmethod
+    def validate_legend_position(cls, v: Any) -> str:
+        s = str(v or "bottom").strip().lower()
+        return s if s in ("bottom", "right") else "bottom"
+
+    @field_validator("legend_columns", mode="before")
+    @classmethod
+    def validate_legend_columns(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or v == "auto":
+            return None
+        try:
+            n = int(v)
+            return max(1, min(6, n))
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("orientation", mode="before")
+    @classmethod
+    def validate_orientation(cls, v: Any) -> str:
+        s = str(v or "vertical").strip().lower()
+        return s if s in ("vertical", "horizontal") else "vertical"
+
+    @field_validator("color_by_category", mode="before")
+    @classmethod
+    def validate_color_by_category(cls, v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        return str(v or "").strip().lower() in ("true", "1", "yes")
+
+    @field_validator("full_position", mode="before")
+    @classmethod
+    def validate_chart_full_pos(cls, v: Any) -> str:
+        return _normalize_full_position(v)
+
+    @field_validator("anchor_to", mode="before")
+    @classmethod
+    def validate_chart_anchor_to(cls, v: Any) -> Optional[str]:
+        return _normalize_anchor_to(v)
+
+    @field_validator("chart_height_mm", mode="before")
+    @classmethod
+    def validate_chart_height_mm(cls, v: Any) -> int:
+        try:
+            val = int(round(float(v)))
+        except (ValueError, TypeError):
+            val = 36
+        val = max(20, min(120, val))
+        if val % 2 != 0:
+            val = int(round(val / 2.0) * 2)
+        return val
+
+    @field_validator("palette", mode="before")
+    @classmethod
+    def validate_palette(cls, v: Any) -> str:
+        s = str(v or "lukb_classic").strip()
+        return s if s in ("lukb_classic", "lukb_blues") else "lukb_classic"
+
+
 def _equal_percentage_widths(n: int) -> list[float]:
     if n <= 0:
         return []
@@ -575,6 +697,7 @@ ContentBlock = Union[
     FootnotesBlock,
     GlossaryBlock,
     PublicationsBlock,
+    CustomChartBlock,
 ]
 
 
@@ -587,6 +710,8 @@ def parse_block(raw: dict[str, Any]) -> ContentBlock:
         return FigureBlock.model_validate(raw)
     if btype == "db_chart":
         return DbChartBlock.model_validate(raw)
+    if btype == "custom_chart":
+        return CustomChartBlock.model_validate(raw)
     if btype == "table":
         return TableBlock.model_validate(raw)
     if btype == "callout":

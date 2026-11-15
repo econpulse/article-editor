@@ -26,6 +26,7 @@
     tickerNameMap: {}, // O(1) Lookup: UPPERCASE_TICKER -> Name
     tickerQueryCache: {}, // Schneller Client-Cache: queryLower -> [{ticker, name}, ...]
     dbChartTimers: {}, // block_id -> timeoutId
+    customChartTimers: {}, // block_id -> timeoutId
     isDirty: false,
     autosaveTimer: null,
     sortableInstance: null,
@@ -484,6 +485,36 @@
         asset_id: "",
       };
     }
+    if (type === "custom_chart") {
+      return {
+        id: uid("blk"),
+        type: "custom_chart",
+        title: "Titel der Grafik",
+        subtitle: "Untertitel / Einheit / Zeitraum",
+        source: "Quelle: LUKB Investment Office",
+        layout: "column",
+        full_position: "auto",
+        chart_height_mm: 36,
+        palette: "lukb_classic",
+        chart_type: "category_bar",
+        has_header: true,
+        x_col: "Kategorie",
+        series: [
+          { field: "Aktuell", label: "Aktuell", chart_type: "bar", enabled: true },
+          { field: "Vorjahr", label: "Vorjahr", chart_type: "bar", enabled: true },
+        ],
+        raw_tsv: "Kategorie\tAktuell\tVorjahr\nAktien Schweiz\t14.5\t12.0\nAktien Global\t18.2\t15.5\nObligationen CHF\t2.5\t1.8\nLiquidität\t0.5\t0.2",
+        data_columns: ["Kategorie", "Aktuell", "Vorjahr"],
+        data_rows: [
+          ["Aktien Schweiz", "14.5", "12.0"],
+          ["Aktien Global", "18.2", "15.5"],
+          ["Obligationen CHF", "2.5", "1.8"],
+          ["Liquidität", "0.5", "0.2"],
+        ],
+        doughnut_hole_pct: 55,
+        bar_mode: "grouped",
+      };
+    }
     if (type === "table") {
       return {
         id: uid("blk"),
@@ -618,6 +649,8 @@
         return "Grafik-Container (Upload)";
       case "db_chart":
         return "DB-Chart (Zeitreihe aus ts_db)";
+      case "custom_chart":
+        return "Daten-Diagramm (Excel / Zwischenablage)";
       case "table":
         return "Daten-Tabelle";
       case "callout":
@@ -663,8 +696,9 @@
       group: "Daten & Grafiken",
       items: [
         { type: "db_chart", label: "DB-Chart (Zeitreihe)", icon: "📈" },
+        { type: "custom_chart", label: "Daten-Chart (Excel / TSV)", icon: "📊" },
         { type: "figure", label: "Grafik-Upload", icon: "🖼" },
-        { type: "table", label: "Tabelle (Excel)", icon: "📊" },
+        { type: "table", label: "Tabelle (Excel)", icon: "📋" },
       ],
     },
     {

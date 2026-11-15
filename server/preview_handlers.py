@@ -13,6 +13,7 @@ from database.repository import search_tickers
 from server.collab import set_peer_auto_preview
 from server.state import SessionState
 from services.chart_generator import generate_db_chart_svg
+from services.custom_chart_generator import generate_custom_chart_svg
 
 logger = logging.getLogger("lukb_cms.preview_handlers")
 
@@ -40,6 +41,27 @@ def register_preview_handlers(
         b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
         await session.send_custom_message(
             "lukb_db_chart_svg",
+            {
+                "block_id": bid,
+                "data_uri": f"data:image/svg+xml;base64,{b64}",
+            },
+        )
+
+    # Einzelne Custom-Chart-Vorschau (Clipboard) im Block sofort aktualisieren
+    @reactive.effect
+    @reactive.event(input.lukb_preview_custom_chart)
+    async def _on_preview_custom_chart() -> None:
+        payload = input.lukb_preview_custom_chart()
+        if not isinstance(payload, dict) or "block" not in payload:
+            return
+        blk = payload["block"]
+        bid = blk.get("id", "")
+        if not bid:
+            return
+        svg_markup = generate_custom_chart_svg(blk, embed_fonts=True)
+        b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+        await session.send_custom_message(
+            "lukb_custom_chart_svg",
             {
                 "block_id": bid,
                 "data_uri": f"data:image/svg+xml;base64,{b64}",

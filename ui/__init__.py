@@ -20,6 +20,7 @@ JS_MODULES = (
     "js/modules/state.js",
     "js/modules/richtext.js",
     "js/modules/db-chart.js",
+    "js/modules/custom-chart.js",
     "js/modules/table-editor.js",
     "js/modules/sidebar-modal.js",
     "js/modules/collab.js",

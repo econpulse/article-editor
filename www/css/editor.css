@@ -1660,6 +1660,18 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   flex-wrap: wrap;
 }
 
+.btn-lukb.active,
+.btn-lukb.active:hover,
+.btn-lukb.active:focus,
+.btn-lukb-ghost.active,
+.btn-lukb-ghost.active:hover,
+.btn-lukb-ghost.active:focus,
+.custom-chart-preset-btn.active,
+.custom-chart-preset-btn.active:hover,
+.custom-chart-preset-btn.active:focus,
+.custom-chart-type-btn.active,
+.custom-chart-type-btn.active:hover,
+.custom-chart-type-btn.active:focus,
 .db-height-preset-btn.active,
 .db-height-preset-btn.active:hover,
 .db-height-preset-btn.active:focus,

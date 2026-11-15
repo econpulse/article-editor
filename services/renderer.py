@@ -33,6 +33,7 @@ from config import FONTS_DIR, TEMPLATES_DIR, WWW_DIR
 from database.repository import get_asset
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
+from services.custom_chart_generator import generate_custom_chart_svg
 from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html
 
 LUKB_LOGO_SVG_PATH = WWW_DIR / "img" / "LUKB-Logo.svg"
@@ -231,7 +232,7 @@ def _reorder_blocks_for_anchors(blocks: list[dict[str, Any]]) -> list[dict[str, 
     has_anchors = any(
         isinstance(b, dict)
         and b.get("anchor_to")
-        and b.get("type") in ("figure", "db_chart", "table")
+        and b.get("type") in ("figure", "db_chart", "custom_chart", "table")
         and b.get("layout", "column") == "column"
         for b in blocks
     )
@@ -248,7 +249,7 @@ def _reorder_blocks_for_anchors(blocks: list[dict[str, Any]]) -> list[dict[str, 
             continue
         aid = blk.get("anchor_to")
         is_margin = (
-            blk.get("type") in ("figure", "db_chart", "table")
+            blk.get("type") in ("figure", "db_chart", "custom_chart", "table")
             and blk.get("layout", "column") == "column"
         )
         if is_margin and aid and aid in known_ids and aid != blk.get("id"):
@@ -346,6 +347,15 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                 max_date=doc.metadata.publication_date,
             )
             chart_filename = f"dbchart_{blk.get('id', 'chart')}.svg"
+            (work_dir / chart_filename).write_bytes(svg_markup.encode("utf-8"))
+            bcopy["resolved_image"] = chart_filename
+
+        elif btype == "custom_chart":
+            svg_markup = generate_custom_chart_svg(
+                blk,
+                embed_fonts=False,
+            )
+            chart_filename = f"customchart_{blk.get('id', 'chart')}.svg"
             (work_dir / chart_filename).write_bytes(svg_markup.encode("utf-8"))
             bcopy["resolved_image"] = chart_filename
 
@@ -590,6 +600,13 @@ def render_web_html(doc: ArticleDocument) -> str:
                 blk,
                 embed_fonts=True,
                 max_date=doc.metadata.publication_date,
+            )
+            b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+            blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
+        elif blk.get("type") == "custom_chart":
+            svg_markup = generate_custom_chart_svg(
+                blk,
+                embed_fonts=True,
             )
             b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
             blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
@@ -965,7 +982,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             _render_richtext_into_docx(cell, blk.get("html", ""), footnote_collector=docx_inline_footnotes)
             container.add_paragraph().paragraph_format.space_after = Pt(4)
 
-        elif btype in ("figure", "db_chart"):
+        elif btype in ("figure", "db_chart", "custom_chart"):
             g_title = blk.get("title", "").strip()
             if g_title:
                 pt = container.add_paragraph()
@@ -991,6 +1008,12 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                     blk,
                     embed_fonts=False,
                     max_date=doc_model.metadata.publication_date,
+                )
+                img_bytes = _svg_to_png_bytes(svg_code, ppi=144.0)
+            elif btype == "custom_chart":
+                svg_code = generate_custom_chart_svg(
+                    blk,
+                    embed_fonts=False,
                 )
                 img_bytes = _svg_to_png_bytes(svg_code, ppi=144.0)
             else:

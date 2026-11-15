@@ -149,7 +149,7 @@
       {% set visual_children = [] %}
       {% set text_children = [] %}
       {% for child in blk.children %}
-        {% if child.type in ["figure", "db_chart", "table"] %}
+        {% if child.type in ["figure", "db_chart", "custom_chart", "table"] %}
           {% set _ = visual_children.append(child) %}
         {% else %}
           {% set _ = text_children.append(child) %}

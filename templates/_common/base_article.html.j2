@@ -748,7 +748,7 @@
         <div class="blk-callout-content">{{ blk.html | safe }}</div>
       </aside>
 
-    {% elif blk.type in ("figure", "db_chart") %}
+    {% elif blk.type in ("figure", "db_chart", "custom_chart") %}
       <figure class="blk-figure {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
         {% if blk.title %}
           <div class="blk-box-title">{{ blk.title }}</div>

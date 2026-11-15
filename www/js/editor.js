@@ -10,6 +10,7 @@
   function bindFocusTrackingListeners() { return E.bindFocusTrackingListeners.apply(this, arguments); }
   function bindSidebarAndModalListeners() { return E.bindSidebarAndModalListeners.apply(this, arguments); }
   function buildCalloutBlockBody() { return E.buildCalloutBlockBody.apply(this, arguments); }
+  function buildCustomChartBlockBody() { return E.buildCustomChartBlockBody.apply(this, arguments); }
   function buildDbChartBlockBody() { return E.buildDbChartBlockBody.apply(this, arguments); }
   function buildGlossaryBlockBody() { return E.buildGlossaryBlockBody.apply(this, arguments); }
   function buildRichTextBlockBody() { return E.buildRichTextBlockBody.apply(this, arguments); }
@@ -994,7 +995,7 @@
     headerLeft.appendChild(typePill);
 
     // Verankerungs-Badge für Randelemente
-    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "table") && (blk.layout || "column") === "column";
+    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "custom_chart" || blk.type === "table") && (blk.layout || "column") === "column";
     if (isMarginType && blk.anchor_to) {
       const anchorPill = document.createElement("span");
       anchorPill.className = "block-anchor-pill";
@@ -1026,7 +1027,7 @@
     // Badge für den Zielabsatz (wenn Randelemente an diesen Absatz verankert sind)
     const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
     const attachedMarginCount = blocksList.filter(function (o) {
-      return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "table") && (o.layout || "column") === "column";
+      return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column";
     }).length;
     if (attachedMarginCount > 0) {
       const targetPill = document.createElement("span");
@@ -1156,6 +1157,8 @@
       buildFigureBlockBody(body, blk);
     } else if (blk.type === "db_chart") {
       buildDbChartBlockBody(body, blk);
+    } else if (blk.type === "custom_chart") {
+      buildCustomChartBlockBody(body, blk);
     } else if (blk.type === "table") {
       buildTableBlockBody(body, blk);
     } else if (blk.type === "spacer") {
@@ -2595,6 +2598,25 @@
       );
       if (chartImg) {
         chartImg.src = msg.data_uri;
+      }
+    });
+
+    // 3a-custom. Aktualisiert einzelne Custom-Chart-SVG-Vorschau im Block sofort
+    window.Shiny.addCustomMessageHandler("lukb_custom_chart_svg", function (msg) {
+      if (!msg || !msg.block_id || !msg.data_uri) return;
+      state.assetCache[msg.block_id] = msg.data_uri;
+      const chartImg = document.getElementById("custom-chart-preview-img-" + msg.block_id);
+      if (chartImg) {
+        chartImg.src = msg.data_uri;
+      }
+      const iframe = document.getElementById("preview-iframe-web");
+      if (iframe && iframe.contentDocument) {
+        const iframeImg = iframe.contentDocument.querySelector(
+          'img[data-block-id="' + msg.block_id + '"]'
+        );
+        if (iframeImg) {
+          iframeImg.src = msg.data_uri;
+        }
       }
     });
 

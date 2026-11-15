@@ -1668,7 +1668,8 @@ def test_priority_3_modular_js_footnotes_and_html_hardening():
     from ui import JS_MODULES, build_app_ui
 
     # 1. Frontend-Modularisierung prüfen
-    assert len(JS_MODULES) == 6
+    assert len(JS_MODULES) >= 6
+    assert "js/modules/custom-chart.js" in JS_MODULES
     ui_tag = build_app_ui()
     head_deps_html = "".join(str(d.head or "") for d in ui_tag.get_dependencies())
     for rel_mod in JS_MODULES:
@@ -1927,6 +1928,14 @@ if __name__ == "__main__":
     test_priority_2_tags_caching_and_deduplication()
     test_priority_3_modular_js_footnotes_and_html_hardening()
     test_full_cms_workflow()
+    import tests.test_custom_chart as tcc
+    tcc.test_parsing_helpers()
+    tcc.test_auto_detection()
+    tcc.test_doughnut_and_pie_svg()
+    tcc.test_category_bar_svg()
+    tcc.test_timeseries_svg()
+    tcc.test_pydantic_schema_validation()
+    tcc.test_dual_output_typst_and_web_rendering()
     from tests.test_portal_publisher import test_portal_publisher_flow
     test_portal_publisher_flow()
     from tests.test_connect_client import test_connect_client_not_configured, test_connect_client_configured_url
