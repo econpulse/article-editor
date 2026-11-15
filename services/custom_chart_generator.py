@@ -416,8 +416,8 @@ def _render_doughnut_pie_svg(
 
         total_legend_rows = math.ceil(len(slices) / legend_cols)
         legend_total_h = total_legend_rows * row_height
-        margin = 16.0
-        usable_w = svg_w - 2 * margin
+        legend_left_x = 0.0
+        usable_w = svg_w - legend_left_x
         col_w = usable_w / legend_cols
         svg_h = int(round(max(legend_start_y + legend_total_h + 16.0, target_plot_h + legend_total_h + 40.0)))
 
@@ -511,7 +511,7 @@ def _render_doughnut_pie_svg(
             color = active_palette[idx % len(active_palette)]
             r_idx = idx // legend_cols
             c_idx = idx % legend_cols
-            clx = margin + c_idx * col_w
+            clx = legend_left_x + c_idx * col_w
             ly = legend_start_y + r_idx * row_height
             pct_str = f"{(val / total_sum) * 100.0:.1f} %"
             safe_lbl = html.escape(label)
@@ -834,12 +834,14 @@ def _render_vertical_category_bar_svg(
         legend_top = axis_labels_bottom_y + desired_gap
         legend_start_y = round(legend_top + 13.0, 1)
 
+        legend_left_x = 0.0
+        col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
+
         if color_by_cat and len(active_series) == 1:
-            col_w = plot_w / items_per_legend_row
             for idx, cat in enumerate(categories):
                 r_idx = idx // items_per_legend_row
                 c_idx = idx % items_per_legend_row
-                lx = plot_left + c_idx * col_w
+                lx = legend_left_x + c_idx * col_w
                 ly = legend_start_y + r_idx * legend_row_gap
                 cat_color = active_palette[idx % len(active_palette)]
                 safe_lbl = html.escape(cat["category"])
@@ -851,11 +853,10 @@ def _render_vertical_category_bar_svg(
                     f'{safe_lbl}</text>'
                 )
         elif len(active_series) > 1:
-            col_w = plot_w / items_per_legend_row
             for idx, s in enumerate(active_series):
                 r_idx = idx // items_per_legend_row
                 c_idx = idx % items_per_legend_row
-                lx = plot_left + c_idx * col_w
+                lx = legend_left_x + c_idx * col_w
                 ly = legend_start_y + r_idx * legend_row_gap
                 safe_lbl = html.escape(s["label"])
 
@@ -1073,12 +1074,14 @@ def _render_horizontal_bar_svg(
         legend_top = axis_labels_bottom_y + desired_gap
         legend_start_y = round(legend_top + 13.0, 1)
 
+        legend_left_x = 0.0
+        col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
+
         if color_by_cat and len(active_series) == 1:
-            col_w = plot_w / items_per_legend_row
             for idx, cat in enumerate(categories):
                 r_idx = idx // items_per_legend_row
                 c_idx = idx % items_per_legend_row
-                lx = plot_left + c_idx * col_w
+                lx = legend_left_x + c_idx * col_w
                 ly = legend_start_y + r_idx * legend_row_gap
                 cat_color = active_palette[idx % len(active_palette)]
                 safe_lbl = html.escape(cat["category"])
@@ -1090,11 +1093,10 @@ def _render_horizontal_bar_svg(
                     f'{safe_lbl}</text>'
                 )
         elif len(active_series) > 1:
-            col_w = plot_w / items_per_legend_row
             for idx, s in enumerate(active_series):
                 r_idx = idx // items_per_legend_row
                 c_idx = idx % items_per_legend_row
-                lx = plot_left + c_idx * col_w
+                lx = legend_left_x + c_idx * col_w
                 ly = legend_start_y + r_idx * legend_row_gap
                 safe_lbl = html.escape(s["label"])
                 legend_elements.append(
@@ -1380,12 +1382,13 @@ def _render_timeseries_svg(
     legend_start_y = x_label_y + (34.0 if is_column else 27.0)
 
     legend_elements: list[str] = []
-    col_w = plot_w / items_per_legend_row
+    legend_left_x = 0.0
+    col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
 
     for idx, s in enumerate(configured_series):
         r_idx = idx // items_per_legend_row
         c_idx = idx % items_per_legend_row
-        lx = plot_left + c_idx * col_w
+        lx = legend_left_x + c_idx * col_w
         ly = legend_start_y + r_idx * legend_row_gap
         safe_lbl = html.escape(s["label"])
 
