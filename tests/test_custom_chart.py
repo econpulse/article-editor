@@ -461,6 +461,16 @@ def test_dual_output_typst_and_web_rendering():
     assert isinstance(docx_bytes, bytes)
     assert len(docx_bytes) > 1000
 
+    # 4. JS Modulprüfung: Farbpaletten & Höhen-Presets identisch zu DB-Chart
+    js_src = (ROOT / "www" / "js" / "modules" / "custom-chart.js").read_text(encoding="utf-8")
+    assert 'label: "28 mm", val: 28' in js_src
+    assert 'label: "36 mm (Standard)", val: 36' in js_src
+    assert 'label: "46 mm", val: 46' in js_src
+    assert 'label: "56 mm", val: 56' in js_src
+    assert "db-chart-palette-bar" in js_src
+    assert "db-palette-preset-btn" in js_src
+    assert "db-series-color-dot" in js_src
+
 
 if __name__ == "__main__":
     test_parsing_helpers()

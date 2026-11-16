@@ -1091,7 +1091,13 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         _set_docx_cell_background(cell, "002855")
                         _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
                         p = cell.paragraphs[0]
-                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT if col.get("align") == "right" else WD_ALIGN_PARAGRAPH.LEFT
+                        c_align = col.get("align")
+                        p.alignment = (
+                            WD_ALIGN_PARAGRAPH.RIGHT if c_align == "right"
+                            else WD_ALIGN_PARAGRAPH.CENTER if c_align == "center"
+                            else WD_ALIGN_PARAGRAPH.JUSTIFY if c_align == "justify"
+                            else WD_ALIGN_PARAGRAPH.LEFT
+                        )
                         run = p.add_run(col.get("title", ""))
                         run.bold = True
                         run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
@@ -1114,7 +1120,13 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         _set_docx_cell_background(cell, bg_hex)
                         _set_docx_cell_margins(cell, top=90, bottom=90, left=150, right=150)
                         p = cell.paragraphs[0]
-                        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT if col.get("align") == "right" else WD_ALIGN_PARAGRAPH.LEFT
+                        c_align = col.get("align")
+                        p.alignment = (
+                            WD_ALIGN_PARAGRAPH.RIGHT if c_align == "right"
+                            else WD_ALIGN_PARAGRAPH.CENTER if c_align == "center"
+                            else WD_ALIGN_PARAGRAPH.JUSTIFY if c_align == "justify"
+                            else WD_ALIGN_PARAGRAPH.LEFT
+                        )
                         if is_last_row and src:
                             p.paragraph_format.keep_with_next = True
                         val = str(row.get(col.get("field", ""), ""))

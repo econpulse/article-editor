@@ -215,6 +215,10 @@ class DbChartBlock(BaseModel):
         default="lukb_classic",
         description="ID der gewählten Farbpalette ('lukb_classic' oder 'lukb_blues')",
     )
+    legend_columns: Optional[int] = Field(
+        default=None,
+        description="Anzahl Spalten für die Legendeneinträge (Default: 2 Spalten)",
+    )
     series: list[TimeSeriesItem] = Field(
         default_factory=lambda: [
             TimeSeriesItem(ticker="SNB_RATE", chart_type="line", label=""),
@@ -256,6 +260,17 @@ class DbChartBlock(BaseModel):
     def validate_palette(cls, v: Any) -> str:
         s = str(v or "lukb_classic").strip()
         return s if s in ("lukb_classic", "lukb_blues") else "lukb_classic"
+
+    @field_validator("legend_columns", mode="before")
+    @classmethod
+    def validate_db_chart_legend_columns(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or v == "auto":
+            return None
+        try:
+            n = int(v)
+            return max(1, min(6, n))
+        except (ValueError, TypeError):
+            return None
 
     @field_validator("series", mode="before")
     @classmethod
@@ -401,8 +416,14 @@ def _equal_percentage_widths(n: int) -> list[float]:
 class TableColumn(BaseModel):
     field: str
     title: str
-    align: Literal["left", "center", "right"] = "left"
+    align: Literal["left", "center", "right", "justify"] = "left"
     width: float = Field(default=100.0, ge=0.1, le=100.0, description="Relative Spaltenbreite in Prozent")
+
+    @field_validator("align", mode="before")
+    @classmethod
+    def validate_align(cls, v: Any) -> str:
+        s = str(v or "left").strip().lower()
+        return s if s in ("left", "center", "right", "justify") else "left"
 
     @field_validator("width", mode="before")
     @classmethod

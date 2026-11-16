@@ -882,16 +882,18 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     tbl_blk = TableBlock(
         title="Relative Spaltenbreiten Test",
         columns=[
-            {"field": "name", "title": "Bezeichnung", "align": "left", "width": 75.0},
+            {"field": "name", "title": "Bezeichnung", "align": "justify", "width": 50.0},
+            {"field": "center_col", "title": "Zentrum", "align": "center", "width": 25.0},
             {"field": "val", "title": "Wert", "align": "right", "width": 25.0},
         ],
         rows=[
-            {"name": "Aktien Schweiz mit längerem Beschreibungstext für Umbruchtest", "val": "25.0 %"},
-            {"name": "Obligationen CHF", "val": "35.0 %"},
+            {"name": "Aktien Schweiz mit längerem Beschreibungstext für Umbruchtest und Blocksatz", "center_col": "Mitte", "val": "25.0 %"},
+            {"name": "Obligationen CHF", "center_col": "Mitte", "val": "35.0 %"},
         ],
     )
-    assert tbl_blk.columns[0].width == 75.0
-    assert tbl_blk.columns[1].width == 25.0
+    assert tbl_blk.columns[0].align == "justify"
+    assert tbl_blk.columns[1].align == "center"
+    assert tbl_blk.columns[2].align == "right"
     assert tbl_blk.show_header is True
 
     # 1b. Option Kopfzeile ein-/ausblenden (show_header)
@@ -959,6 +961,23 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     assert "#002855" in chart_svg
     assert "#005A9C" in chart_svg
 
+    # 2b. DB-Chart: Auswahl der Spaltenanzahl in der Legende (legend_columns)
+    chart_1col = DbChartBlock(
+        title="1-Spalten-Legende Chart",
+        palette="lukb_classic",
+        legend_columns=1,
+        series=[
+            {"ticker": "SNB_RATE", "chart_type": "line", "label": "SNB Leitzins"},
+            {"ticker": "ECB_RATE", "chart_type": "line", "label": "EZB Leitzins"},
+        ],
+    )
+    assert chart_1col.legend_columns == 1
+    svg_1col = generate_db_chart_svg(chart_1col.model_dump())
+    assert isinstance(svg_1col, str) and "<svg" in svg_1col
+
+    chart_auto = DbChartBlock(title="Auto-Legende Chart", legend_columns="auto")
+    assert chart_auto.legend_columns is None
+
     # 3. Links in Textabsätzen (ohne Underline, target="_blank", Pfeilsymbol)
     raw_link_html = '<p>Siehe auch unsere <a href="https://www.lukb.ch/marktbericht">Marktanalyse 2026</a> für Details.</p>'
     typ_code = html_to_typst(raw_link_html)
@@ -977,9 +996,11 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
     )
 
     html_out = render_web_html(doc)
-    # Tabelle: 75.00% und 25.00%, vertikale Ausrichtung top
-    assert "width: 75.00%;" in html_out
+    # Tabelle: 50.00% und 25.00%, vertikale Ausrichtung top, Spaltenausrichtung justify & center
+    assert "width: 50.00%;" in html_out
     assert "width: 25.00%;" in html_out
+    assert "text-align: justify;" in html_out
+    assert "text-align: center;" in html_out
     assert "vertical-align: top;" in html_out
     # Link im Textabsatz: target="_blank", no underline CSS, arrow icon CSS
     assert 'href="https://www.lukb.ch/marktbericht"' in html_out

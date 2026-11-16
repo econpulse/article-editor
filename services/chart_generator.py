@@ -615,7 +615,20 @@ def generate_db_chart_svg(
     # 22.5px im SVG rund 8.2pt im Druck (und 20.5px für die Legende rund 7.5pt im Druck).
     axis_font_size = 22.5 if is_column_layout else 14.5
     legend_font_size = 20.5 if is_column_layout else 14.0
-    items_per_legend_row = 2 if is_column_layout else 3
+    default_leg_cols = 2 if is_column_layout else 3
+    user_leg_cols = block_data.get("legend_columns")
+    if user_leg_cols is not None and user_leg_cols not in ("", "auto", 0):
+        try:
+            val = int(user_leg_cols)
+            if 1 <= val <= 6:
+                items_per_legend_row = val
+            else:
+                items_per_legend_row = default_leg_cols
+        except (ValueError, TypeError):
+            items_per_legend_row = default_leg_cols
+    else:
+        items_per_legend_row = default_leg_cols
+
     if len(resolved_series) < items_per_legend_row:
         items_per_legend_row = max(1, len(resolved_series))
     legend_rows = math.ceil(len(resolved_series) / items_per_legend_row)

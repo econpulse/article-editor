@@ -1624,7 +1624,7 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 /* DB-Chart (Zeitreihe aus ts_db) Block Editor */
 .db-chart-config-bar {
   display: grid;
-  grid-template-columns: 1.1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
   background: var(--lukb-surface-alt);
   border: 1px solid var(--lukb-border);

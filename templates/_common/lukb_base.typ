@@ -492,6 +492,7 @@
     above: if is-floating { 0pt } else if is-factsheet { 0.35em } else if is-margin { 0.4em } else { 1.1em },
     below: if is-floating { 0pt } else if is-factsheet { 0.45em } else if is-margin { 0.6em } else { 1.1em }
   )[
+    #set par(justify: false)
     #block(
       width: 100%,
       sticky: true,
@@ -553,12 +554,15 @@
         (
           table.header(
             repeat: true,
-            ..cols.map(c => text(
-              font: font-heading,
-              weight: "medium",
-              size: hdr-sz,
-              fill: if is-tufte-style { lukb-navy } else { white }
-            )[#c.title]),
+            ..cols.map(c => [
+              #set par(justify: false)
+              #text(
+                font: font-heading,
+                weight: "medium",
+                size: hdr-sz,
+                fill: if is-tufte-style { lukb-navy } else { white }
+              )[#c.title]
+            ]),
           ),
         )
       } else {
@@ -568,11 +572,15 @@
         let is-total = highlight-last and (r-idx == rows.len() - 1)
         cols.map(c => {
           let cell-val = row-dict.at(c.field, default: "")
-          if is-total {
-            text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
-          } else {
-            text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
-          }
+          let cell-justify = (c.align == "justify")
+          [
+            #set par(justify: cell-justify)
+            #(if is-total {
+              text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
+            } else {
+              text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
+            })
+          ]
         })
       },
       ..(if is-long-table and has-source and rows.len() > 0 {
@@ -600,11 +608,15 @@
                 fill: (x, y) => last-bg,
                 ..cols.map(c => {
                   let cell-val = last-row.at(c.field, default: "")
-                  if is-total {
-                    text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
-                  } else {
-                    text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
-                  }
+                  let cell-justify = (c.align == "justify")
+                  [
+                    #set par(justify: cell-justify)
+                    #(if is-total {
+                      text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
+                    } else {
+                      text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
+                    })
+                  ]
                 })
               )
               #block(
@@ -884,6 +896,7 @@
     }
     render-table-box(bcopy)
   } else if blk.type == "textbox_group" {
+    let has-colbreak = blk.children.any(c => c.type == "colbreak")
     layout(bounds => {
       let inner-content = [
         #for child in blk.children [
@@ -908,7 +921,7 @@
         inner-content
       )
       let box-h = measure(box-breakable, width: bounds.width).height
-      if box-h <= 460pt {
+      if (not has-colbreak) and box-h <= 460pt {
         block(
           width: 100%,
           breakable: false,
@@ -998,8 +1011,9 @@
 
     let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "full"))
     let manual-colbreak-idx = items.position(it => it.type == "colbreak")
+    let has-internal-colbreak = items.any(it => it.type == "textbox_group" and it.children.any(c => c.type == "colbreak"))
 
-    if has-full-float {
+    if has-full-float or has-internal-colbreak {
       columns(2, gutter: gutter)[
         #for it in items [ #render-item(it) ]
       ]

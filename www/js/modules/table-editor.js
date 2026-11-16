@@ -890,10 +890,32 @@
         const alignBtn = document.createElement("button");
         alignBtn.type = "button";
         alignBtn.className = "grid-col-align-btn";
-        alignBtn.title = "Spaltenausrichtung umschalten (Links / Zentriert / Rechts)";
-        alignBtn.textContent = col.align === "right" ? "⇥R" : col.align === "center" ? "↔Z" : "⇤L";
+        alignBtn.title =
+          col.align === "justify"
+            ? "Spaltenausrichtung: Blocksatz (Klicken zum Umschalten: Zentriert)"
+            : col.align === "center"
+            ? "Spaltenausrichtung: Zentriert (Klicken zum Umschalten: Rechtsbündig)"
+            : col.align === "right"
+            ? "Spaltenausrichtung: Rechtsbündig (Klicken zum Umschalten: Linksbündig)"
+            : "Spaltenausrichtung: Linksbündig (Klicken zum Umschalten: Blocksatz)";
+        alignBtn.textContent =
+          col.align === "justify"
+            ? "≡B"
+            : col.align === "right"
+            ? "⇥R"
+            : col.align === "center"
+            ? "↔Z"
+            : "⇤L";
         alignBtn.addEventListener("click", function () {
-          col.align = col.align === "left" ? "right" : col.align === "right" ? "center" : "left";
+          if (col.align === "left") {
+            col.align = "justify";
+          } else if (col.align === "justify") {
+            col.align = "center";
+          } else if (col.align === "center") {
+            col.align = "right";
+          } else {
+            col.align = "left";
+          }
           renderGrid();
           markDirty();
         });

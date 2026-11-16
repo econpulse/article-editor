@@ -477,6 +477,7 @@
         start_date: "2022-01-01",
         rebasing: "none",
         palette: "lukb_classic",
+        legend_columns: null,
         series: [
           { ticker: "SNB_RATE", chart_type: "line", chart_types: ["line"], label: "" },
           { ticker: "ECB_RATE", chart_type: "line", chart_types: ["line"], label: "" },

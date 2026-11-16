@@ -314,6 +314,9 @@
     if (!blk.chart_height_mm) {
       blk.chart_height_mm = 36;
     }
+    if (blk.legend_columns === undefined) {
+      blk.legend_columns = null;
+    }
 
     // Zeile 1: Grafik-Titel & Layout-Breite
     const topGrid = document.createElement("div");
@@ -439,8 +442,40 @@
     rebaseWrap.appendChild(rebaseLbl);
     rebaseWrap.appendChild(rebaseSel);
 
+    // Spalten der Legende (default: 2 Spalten, identisch zu Custom Chart)
+    const legColsWrap = document.createElement("div");
+    const legColsLbl = document.createElement("label");
+    legColsLbl.className = "field-label";
+    legColsLbl.textContent = "Spalten der Legende";
+    const legColsSel = document.createElement("select");
+    legColsSel.className = "cms-select";
+
+    const defCols = 2;
+    const curVal =
+      blk.legend_columns !== undefined && blk.legend_columns !== null
+        ? String(blk.legend_columns)
+        : "auto";
+    legColsSel.innerHTML =
+      '<option value="auto">Automatisch (' + defCols + ' Spalten)</option>' +
+      '<option value="1">1 Spalte</option>' +
+      '<option value="2">2 Spalten</option>' +
+      '<option value="3">3 Spalten</option>' +
+      '<option value="4">4 Spalten</option>';
+    legColsSel.value = curVal;
+
+    legColsSel.addEventListener("change", function () {
+      blk.legend_columns =
+        legColsSel.value === "auto" ? null : parseInt(legColsSel.value, 10);
+      markDirty();
+      requestDbChartPreview(blk, true);
+    });
+
+    legColsWrap.appendChild(legColsLbl);
+    legColsWrap.appendChild(legColsSel);
+
     configGrid.appendChild(dateWrap);
     configGrid.appendChild(rebaseWrap);
+    configGrid.appendChild(legColsWrap);
     container.appendChild(configGrid);
 
     // Zeile 3b: Farbpaletten-Steuerung (LUKB Standard vs. Blau-Abstufung)

@@ -508,8 +508,70 @@
       typeRow.appendChild(typeBtnsWrap);
       configContainer.appendChild(typeRow);
 
+      // Farbpaletten-Steuerung (LUKB Standard vs. Blau-Abstufung - identisch zu DB-Charts)
+      if (blk.palette !== "lukb_classic" && blk.palette !== "lukb_blues") {
+        blk.palette = "lukb_classic";
+      }
+
+      const paletteBar = document.createElement("div");
+      paletteBar.className = "db-chart-palette-bar";
+
+      const paletteTop = document.createElement("div");
+      paletteTop.className = "db-chart-palette-top";
+
+      const paletteLbl = document.createElement("span");
+      paletteLbl.className = "field-label";
+      paletteLbl.style.margin = "0";
+      paletteLbl.textContent = "Farbpalette:";
+
+      const palettePresetsWrap = document.createElement("div");
+      palettePresetsWrap.className = "db-palette-presets";
+
+      function renderPaletteControls() {
+        palettePresetsWrap.innerHTML = "";
+        CUSTOM_CHART_PALETTES.forEach(function (preset) {
+          const pBtn = document.createElement("button");
+          pBtn.type = "button";
+          pBtn.className =
+            "db-palette-preset-btn" + (blk.palette === preset.id ? " active" : "");
+          pBtn.title = "Farbpalette «" + preset.label + "» anwenden";
+
+          const swatches = document.createElement("span");
+          swatches.className = "db-palette-mini-swatches";
+          preset.colors.forEach(function (hex) {
+            const sw = document.createElement("span");
+            sw.className = "db-palette-mini-swatch";
+            sw.style.backgroundColor = hex;
+            swatches.appendChild(sw);
+          });
+
+          const lblSpan = document.createElement("span");
+          lblSpan.textContent = preset.label;
+
+          pBtn.appendChild(swatches);
+          pBtn.appendChild(lblSpan);
+          pBtn.addEventListener("click", function () {
+            blk.palette = preset.id;
+            renderPaletteControls();
+            if (typeof updateSeriesColorDots === "function") {
+              updateSeriesColorDots();
+            }
+            markDirty();
+            requestCustomChartPreview(blk, true);
+          });
+          palettePresetsWrap.appendChild(pBtn);
+        });
+      }
+
+      paletteTop.appendChild(paletteLbl);
+      paletteTop.appendChild(palettePresetsWrap);
+      paletteBar.appendChild(paletteTop);
+      configContainer.appendChild(paletteBar);
+      renderPaletteControls();
+
       // 2. Spalten-Mapping & Diagramm-Optionen
       let updateLegColsOptions = null;
+      let updateSeriesColorDots = null;
       const mapGrid = document.createElement("div");
       mapGrid.style.display = "grid";
       mapGrid.style.gridTemplateColumns = "repeat(auto-fit, minmax(200px, 1fr))";
@@ -724,29 +786,6 @@
         mapGrid.appendChild(holeWrap);
       }
 
-      // Farbpalette (für alle Diagrammtypen)
-      const palWrap = document.createElement("div");
-      const palLbl = document.createElement("label");
-      palLbl.className = "field-label";
-      palLbl.textContent = "Farbpalette";
-      const palSel = document.createElement("select");
-      palSel.className = "cms-select";
-      CUSTOM_CHART_PALETTES.forEach(function (p) {
-        const opt = document.createElement("option");
-        opt.value = p.id;
-        opt.textContent = p.label;
-        if (p.id === (blk.palette || "lukb_classic")) opt.selected = true;
-        palSel.appendChild(opt);
-      });
-      palSel.addEventListener("change", function () {
-        blk.palette = palSel.value;
-        markDirty();
-        requestCustomChartPreview(blk, true);
-      });
-      palWrap.appendChild(palLbl);
-      palWrap.appendChild(palSel);
-      mapGrid.appendChild(palWrap);
-
       // Spalten der Legende (für alle Diagrammtypen)
       const legColsWrap = document.createElement("div");
       const legColsLbl = document.createElement("label");
@@ -800,6 +839,20 @@
       seriesCard.appendChild(seriesCardTitle);
 
       const seriesList = blk.series || [];
+      const seriesColorDots = [];
+      function getActivePaletteColors() {
+        const found =
+          CUSTOM_CHART_PALETTES.find(function (p) { return p.id === blk.palette; }) ||
+          CUSTOM_CHART_PALETTES[0];
+        return found.colors;
+      }
+      updateSeriesColorDots = function () {
+        const activeColors = getActivePaletteColors();
+        seriesColorDots.forEach(function (item) {
+          item.dot.style.backgroundColor = activeColors[item.idx % activeColors.length];
+        });
+      };
+
       if (seriesList.length === 0) {
         const noValMsg = document.createElement("div");
         noValMsg.style.fontSize = "12px";
@@ -829,6 +882,15 @@
             requestCustomChartPreview(blk, true);
           });
           rowEl.appendChild(chk);
+
+          // Farbpunkt aus gewählter Palette
+          const activeColors = getActivePaletteColors();
+          const colorDot = document.createElement("span");
+          colorDot.className = "db-series-color-dot";
+          colorDot.style.backgroundColor = activeColors[sIdx % activeColors.length];
+          colorDot.title = "Farbe der Datenreihe " + (sIdx + 1) + " (aus gewählter Palette)";
+          seriesColorDots.push({ dot: colorDot, idx: sIdx });
+          rowEl.appendChild(colorDot);
 
           // Original Spaltenname Badge
           const badge = document.createElement("span");
@@ -894,38 +956,28 @@
     rebuildConfigSection();
 
     // =========================================================================
-    // Chartfläche-Höhe (2mm Schritte, Presets & Stepper)
+    // Chartfläche-Höhe (identisch zu DB-Charts: 28, 36, 46, 56 mm)
     // =========================================================================
-    const heightCard = document.createElement("div");
-    heightCard.className = "db-chart-height-card";
-    heightCard.style.display = "flex";
-    heightCard.style.alignItems = "center";
-    heightCard.style.justifyContent = "space-between";
-    heightCard.style.gap = "12px";
-    heightCard.style.marginBottom = "14px";
-    heightCard.style.padding = "8px 10px";
-    heightCard.style.background = "#F8FAFC";
-    heightCard.style.border = "1px solid #E2E8F0";
-    heightCard.style.borderRadius = "4px";
+    const heightBar = document.createElement("div");
+    heightBar.className = "db-chart-height-bar";
 
     const heightLeft = document.createElement("div");
-    heightLeft.style.display = "flex";
-    heightLeft.style.alignItems = "center";
-    heightLeft.style.gap = "8px";
+    heightLeft.className = "db-chart-height-left";
 
     const heightLbl = document.createElement("label");
     heightLbl.className = "field-label";
     heightLbl.style.margin = "0";
-    heightLbl.textContent = "Höhe der Chartfläche (mm):";
+    heightLbl.style.whiteSpace = "nowrap";
+    heightLbl.textContent = "Höhe Chartfläche (Y-Achse):";
 
     const heightInp = document.createElement("input");
     heightInp.type = "number";
-    heightInp.className = "cms-input";
-    heightInp.style.width = "65px";
-    heightInp.style.height = "28px";
-    heightInp.style.fontSize = "12px";
+    heightInp.className = "cms-input font-medium";
+    heightInp.style.maxWidth = "70px";
+    heightInp.style.textAlign = "center";
+    heightInp.style.padding = "4px 8px";
     heightInp.min = "20";
-    heightInp.max = "120";
+    heightInp.max = "100";
     heightInp.step = "2";
     heightInp.value = blk.chart_height_mm || 36;
 
@@ -934,7 +986,7 @@
     function updateChartHeight(newVal) {
       let num = parseInt(newVal, 10);
       if (isNaN(num)) num = 36;
-      num = Math.max(20, Math.min(120, Math.round(num / 2) * 2));
+      num = Math.max(20, Math.min(100, Math.round(num / 2) * 2));
       blk.chart_height_mm = num;
       heightInp.value = num;
       updatePresetActive();
@@ -968,12 +1020,9 @@
 
     heightLeft.appendChild(heightLbl);
     heightLeft.appendChild(heightInp);
-    heightCard.appendChild(heightLeft);
 
     const heightPresets = document.createElement("div");
-    heightPresets.style.display = "flex";
-    heightPresets.style.gap = "4px";
-    heightPresets.style.flexWrap = "wrap";
+    heightPresets.className = "db-chart-height-presets";
 
     const stepDownBtn = document.createElement("button");
     stepDownBtn.type = "button";
@@ -998,17 +1047,18 @@
     heightPresets.appendChild(stepUpBtn);
 
     [
-      { label: "Kompakt (28mm)", val: 28 },
-      { label: "Standard (36mm)", val: 36 },
-      { label: "Mittel (48mm)", val: 48 },
-      { label: "Gross (64mm)", val: 64 },
+      { label: "28 mm", val: 28, title: "Kompakt (28 mm)" },
+      { label: "36 mm (Standard)", val: 36, title: "Standardhöhe (36 mm)" },
+      { label: "46 mm", val: 46, title: "Erweitert (46 mm)" },
+      { label: "56 mm", val: 56, title: "Gross (56 mm)" },
     ].forEach(function (preset) {
       const pBtn = document.createElement("button");
       pBtn.type = "button";
-      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn custom-chart-preset-btn";
-      pBtn.style.padding = "4px 8px";
+      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn";
+      pBtn.style.padding = "4px 9px";
       pBtn.style.fontSize = "11.5px";
       pBtn.textContent = preset.label;
+      pBtn.title = preset.title;
       pBtn.addEventListener("click", function () {
         updateChartHeight(preset.val);
       });
@@ -1017,8 +1067,9 @@
     });
 
     updatePresetActive();
-    heightCard.appendChild(heightPresets);
-    container.appendChild(heightCard);
+    heightBar.appendChild(heightLeft);
+    heightBar.appendChild(heightPresets);
+    container.appendChild(heightBar);
 
     // =========================================================================
     // Live-SVG-Vorschau
