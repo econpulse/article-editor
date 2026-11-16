@@ -986,11 +986,25 @@ def test_table_column_widths_db_chart_palette_and_paragraph_links():
         series=[
             {"ticker": "SNB_RATE", "chart_type": "line", "label": "SNB Leitzins"},
             {"ticker": "ECB_RATE", "chart_type": "line", "label": "EZB Leitzins"},
+            {"ticker": "FED_RATE", "chart_type": "line", "label": "FED Funds"},
         ],
     )
     assert chart_1col.legend_columns == 1
     svg_1col = generate_db_chart_svg(chart_1col.model_dump())
     assert isinstance(svg_1col, str) and "<svg" in svg_1col
+
+    chart_2col = DbChartBlock(
+        title="2-Spalten-Legende Chart",
+        palette="lukb_classic",
+        legend_columns=2,
+        series=[
+            {"ticker": "SNB_RATE", "chart_type": "line", "label": "SNB Leitzins"},
+            {"ticker": "ECB_RATE", "chart_type": "line", "label": "EZB Leitzins"},
+            {"ticker": "FED_RATE", "chart_type": "line", "label": "FED Funds"},
+        ],
+    )
+    svg_2col = generate_db_chart_svg(chart_2col.model_dump())
+    assert svg_1col != svg_2col, "1-Spalten- und 2-Spalten-Legende dürfen nicht denselben Cache-Eintrag liefern"
 
     chart_auto = DbChartBlock(title="Auto-Legende Chart", legend_columns="auto")
     assert chart_auto.legend_columns is None

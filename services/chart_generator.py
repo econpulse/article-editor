@@ -441,6 +441,15 @@ def _compute_db_chart_cache_key(
             }
         )
 
+    user_leg_cols = block_data.get("legend_columns")
+    if user_leg_cols is not None and user_leg_cols not in ("", "auto", 0):
+        try:
+            leg_cols_str = str(int(user_leg_cols))
+        except (ValueError, TypeError):
+            leg_cols_str = "auto"
+    else:
+        leg_cols_str = "auto"
+
     key_payload = {
         "series": normalized_series,
         "start_date": str(block_data.get("start_date") or "2022-01-01").strip(),
@@ -449,6 +458,7 @@ def _compute_db_chart_cache_key(
         "layout": str(block_data.get("layout") or "column").strip(),
         "chart_height_mm": str(block_data.get("chart_height_mm") or "36").strip(),
         "palette": resolve_chart_palette(block_data),
+        "legend_columns": leg_cols_str,
         "embed_fonts": bool(embed_fonts),
         "max_date": str(max_date or "").strip(),
     }

@@ -6,6 +6,7 @@
   const E = (window.LUKBEditor = window.LUKBEditor || {});
   function createFullLayoutControl() { return E.createFullLayoutControl.apply(this, arguments); }
   function deepClone() { return E.deepClone.apply(this, arguments); }
+  function flushAutosave() { return E.flushAutosave ? E.flushAutosave.apply(this, arguments) : undefined; }
   function markDirty() { return E.markDirty.apply(this, arguments); }
   const state = E.state;
 
@@ -376,24 +377,35 @@
     const dateLbl = document.createElement("label");
     dateLbl.className = "field-label";
     dateLbl.textContent = "Startdatum im Chart";
-    const dateRow = document.createElement("div");
-    dateRow.style.display = "flex";
-    dateRow.style.gap = "6px";
-    dateRow.style.alignItems = "center";
 
     const dateInp = document.createElement("input");
     dateInp.type = "date";
     dateInp.className = "cms-input";
-    dateInp.style.maxWidth = "155px";
+    dateInp.style.width = "100%";
     dateInp.value = blk.start_date || "2022-01-01";
     dateInp.addEventListener("change", function () {
       blk.start_date = dateInp.value || "2022-01-01";
       requestDbChartPreview(blk, true);
       markDirty();
+      if (typeof flushAutosave === "function") flushAutosave(false);
     });
-    dateRow.appendChild(dateInp);
 
-    // Schnellwahl-Buttons für Startdatum
+    // Schnellwahl-Buttons für Startdatum (unterhalb des Datumsfeldes, verhindert Überlappung)
+    const presetRow = document.createElement("div");
+    presetRow.className = "db-chart-date-presets";
+    presetRow.style.display = "flex";
+    presetRow.style.gap = "4px";
+    presetRow.style.marginTop = "5px";
+    presetRow.style.alignItems = "center";
+    presetRow.style.flexWrap = "wrap";
+
+    const presetLbl = document.createElement("span");
+    presetLbl.style.fontSize = "11px";
+    presetLbl.style.color = "var(--lukb-muted, #64748B)";
+    presetLbl.style.marginRight = "2px";
+    presetLbl.textContent = "Start:";
+    presetRow.appendChild(presetLbl);
+
     [
       { label: "2021", date: "2021-01-01" },
       { label: "2023", date: "2023-01-01" },
@@ -402,8 +414,9 @@
       const pBtn = document.createElement("button");
       pBtn.type = "button";
       pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
-      pBtn.style.padding = "4px 7px";
+      pBtn.style.padding = "2px 7px";
       pBtn.style.fontSize = "11px";
+      pBtn.style.lineHeight = "1.2";
       pBtn.textContent = preset.label;
       pBtn.title = "Startdatum auf " + preset.date + " setzen";
       pBtn.addEventListener("click", function () {
@@ -411,12 +424,14 @@
         dateInp.value = preset.date;
         requestDbChartPreview(blk, true);
         markDirty();
+        if (typeof flushAutosave === "function") flushAutosave(false);
       });
-      dateRow.appendChild(pBtn);
+      presetRow.appendChild(pBtn);
     });
 
     dateWrap.appendChild(dateLbl);
-    dateWrap.appendChild(dateRow);
+    dateWrap.appendChild(dateInp);
+    dateWrap.appendChild(presetRow);
 
     const rebaseWrap = document.createElement("div");
     const rebaseLbl = document.createElement("label");
@@ -438,11 +453,12 @@
       blk.rebasing = rebaseSel.value;
       requestDbChartPreview(blk, true);
       markDirty();
+      if (typeof flushAutosave === "function") flushAutosave(false);
     });
     rebaseWrap.appendChild(rebaseLbl);
     rebaseWrap.appendChild(rebaseSel);
 
-    // Spalten der Legende (default: 2 Spalten, identisch zu Custom Chart)
+    // Spalten der Legende (default: 2 Spalten bzw. 3 bei Vollbreite, identisch zu Custom Chart)
     const legColsWrap = document.createElement("div");
     const legColsLbl = document.createElement("label");
     legColsLbl.className = "field-label";
@@ -450,7 +466,8 @@
     const legColsSel = document.createElement("select");
     legColsSel.className = "cms-select";
 
-    const defCols = 2;
+    const isCol = (blk.layout || "column") === "column";
+    const defCols = isCol ? 2 : 3;
     const curVal =
       blk.legend_columns !== undefined && blk.legend_columns !== null
         ? String(blk.legend_columns)
@@ -468,6 +485,7 @@
         legColsSel.value === "auto" ? null : parseInt(legColsSel.value, 10);
       markDirty();
       requestDbChartPreview(blk, true);
+      if (typeof flushAutosave === "function") flushAutosave(false);
     });
 
     legColsWrap.appendChild(legColsLbl);
@@ -533,6 +551,7 @@
           renderSeriesRows();
           requestDbChartPreview(blk, true);
           markDirty();
+          if (typeof flushAutosave === "function") flushAutosave(false);
         });
         palettePresetsWrap.appendChild(pBtn);
       });
@@ -753,6 +772,7 @@
       updatePresetActive();
       requestDbChartPreview(blk, true);
       markDirty();
+      if (typeof flushAutosave === "function") flushAutosave(false);
     }
 
     function updatePresetActive() {
