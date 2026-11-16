@@ -921,7 +921,13 @@
         inner-content
       )
       let box-h = measure(box-breakable, width: bounds.width).height
-      if (not has-colbreak) and box-h <= 460pt {
+      // Typografische Regel:
+      // Kurze Boxen (1 Kind-Element und <= 90pt / ca. 3.2cm) ohne manuellen Umbruch werden zusammengehalten,
+      // um Kasten-Fragmente am Spaltenende zu vermeiden.
+      // Mehrteilige Boxen (mehrere Absätze/Überschriften) oder längere Boxen (> 90pt) dürfen
+      // harmonisch über Spalten umbrechen, um grosse Weissraum-Löcher zu verhindern.
+      let is-short-single-box = (blk.children.len() <= 1) and (box-h <= 90pt)
+      if (not has-colbreak) and is-short-single-box {
         block(
           width: 100%,
           breakable: false,

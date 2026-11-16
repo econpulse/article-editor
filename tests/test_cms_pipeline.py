@@ -215,6 +215,23 @@ def test_textbox_start_end_markers_grouping():
             {"id": "p2", "type": "richtext", "html": "<p>Absatz ausserhalb der Box.</p>"},
         ],
     )
+    pdf_bytes = render_pdf_bytes(doc)
+    assert pdf_bytes.startswith(b"%PDF-")
+
+    # Prüfe auch 2-Spalten-Template (investment_focus) mit Box
+    doc_focus = ArticleDocument(
+        id="art-box-focus-test",
+        template_id="investment_focus",
+        blocks=[
+            {"id": "m1", "type": "box_start"},
+            {"id": "p1", "type": "richtext", "html": "<p>Ein kurzer Absatz in der Box.</p>"},
+            {"id": "m2", "type": "box_end"},
+            {"id": "p2", "type": "richtext", "html": "<p>Absatz ausserhalb der Box.</p>"},
+        ],
+    )
+    pdf_focus = render_pdf_bytes(doc_focus)
+    assert pdf_focus.startswith(b"%PDF-")
+
     svgs = render_preview_svg_pages(doc)
     assert len(svgs) >= 1
     assert "<svg" in svgs[0]
