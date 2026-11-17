@@ -10,7 +10,12 @@ import logging
 from shiny import Inputs, Outputs, Session, reactive
 
 from database.repository import search_tickers
-from server.collab import set_peer_auto_preview
+from server.collab import (
+    get_peer_preview_mode,
+    is_peer_auto_preview,
+    set_peer_auto_preview,
+    set_peer_preview_mode,
+)
 from server.state import SessionState
 from services.chart_generator import generate_db_chart_svg
 from services.custom_chart_generator import generate_custom_chart_svg
@@ -99,7 +104,30 @@ def register_preview_handlers(
         if enabled and payload.get("refresh_now"):
             doc = state.current_doc.get()
             if doc is not None:
-                await state.send_preview(doc, include_typst=True)
+                preview_mode = get_peer_preview_mode(state.session_id, default="pdf")
+                await state.send_preview(
+                    doc,
+                    include_typst=(preview_mode == "pdf"),
+                    include_web=(preview_mode == "web"),
+                )
+
+    # Umschalten des Vorschau-Modus (PDF Typst vs. Web HTML5)
+    @reactive.effect
+    @reactive.event(input.lukb_preview_mode_change)
+    async def _on_preview_mode_change() -> None:
+        payload = input.lukb_preview_mode_change()
+        if not isinstance(payload, dict):
+            return
+        mode = str(payload.get("mode", "pdf")).strip().lower()
+        set_peer_preview_mode(state.session_id, mode)
+        doc = state.current_doc.get()
+        if doc is not None:
+            if mode == "web":
+                await state.send_preview(doc, include_typst=False, include_web=True)
+            elif mode == "pdf":
+                auto_preview = is_peer_auto_preview(state.session_id, default=True)
+                if auto_preview:
+                    await state.send_preview(doc, include_typst=True, include_web=False)
 
     # Manueller Preview-Refresh
     @reactive.effect
@@ -107,4 +135,9 @@ def register_preview_handlers(
     async def _on_refresh_preview() -> None:
         doc = state.current_doc.get()
         if doc is not None:
-            await state.send_preview(doc, include_typst=True)
+            preview_mode = get_peer_preview_mode(state.session_id, default="pdf")
+            await state.send_preview(
+                doc,
+                include_typst=(preview_mode == "pdf"),
+                include_web=(preview_mode == "web"),
+            )

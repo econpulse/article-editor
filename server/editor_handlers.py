@@ -5,6 +5,7 @@ Behandelt Asset-Uploads, Live-Fokus / Cursor-Presence, Debounced Autosave und 3-
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from shiny import Inputs, Outputs, Session, reactive, ui
@@ -16,10 +17,12 @@ from server.collab import (
     broadcast_presence,
     broadcast_preview_to_coauthors,
     collect_article_assets_map,
+    get_peer_preview_mode,
     get_peer_user,
     is_peer_auto_preview,
     set_peer_auto_preview,
     set_peer_focus,
+    set_peer_preview_mode,
 )
 from server.state import SessionState
 
@@ -55,7 +58,12 @@ def register_editor_handlers(
         doc = state.current_doc.get()
         if doc is not None:
             auto_preview = is_peer_auto_preview(state.session_id, default=True)
-            await state.send_preview(doc, include_typst=auto_preview)
+            preview_mode = get_peer_preview_mode(state.session_id, default="pdf")
+            await state.send_preview(
+                doc,
+                include_typst=auto_preview and (preview_mode == "pdf"),
+                include_web=auto_preview and (preview_mode == "web"),
+            )
 
     # Live-Fokus-Meldung eines Autors (welcher Block / welches Feld wird gerade editiert?)
     @reactive.effect
@@ -87,7 +95,8 @@ def register_editor_handlers(
                     base_doc = None
 
             user_label = get_peer_user(state.session_id, fallback=state.current_user)
-            save_info = save_article(
+            save_info = await asyncio.to_thread(
+                save_article,
                 doc=doc,
                 user=user_label,
                 create_revision=bool(payload.get("create_revision", False)),
@@ -98,14 +107,39 @@ def register_editor_handlers(
             state.current_article_id.set(merged_doc.id)
             state.current_doc.set(merged_doc)
 
-            assets_map = collect_article_assets_map(merged_doc)
+            known_asset_ids = payload.get("known_asset_ids")
+            assets_map = collect_article_assets_map(merged_doc, known_asset_ids=known_asset_ids)
             save_info["assets"] = assets_map
             await session.send_custom_message("lukb_autosave_ack", save_info)
-            await state.send_article_list(merged_doc.id)
+
+            # Sidebar-Refresh nur ausführen, wenn Titel, Status, Kategorie oder Revisions-Snapshot geändert wurden
+            meta_changed = False
+            if base_doc is not None:
+                meta_changed = (
+                    doc.metadata.title != base_doc.metadata.title
+                    or doc.metadata.category != base_doc.metadata.category
+                    or doc.status != base_doc.status
+                )
+            else:
+                meta_changed = True
+
+            if meta_changed or payload.get("create_revision"):
+                await state.send_article_list(merged_doc.id)
 
             auto_preview = bool(payload.get("auto_preview", is_peer_auto_preview(state.session_id, default=True)))
             set_peer_auto_preview(state.session_id, auto_preview)
-            svg_pages, web_html = await state.send_preview(merged_doc, include_typst=auto_preview)
+
+            preview_mode = str(payload.get("preview_mode", get_peer_preview_mode(state.session_id, default="pdf")))
+            set_peer_preview_mode(state.session_id, preview_mode)
+
+            include_typst = auto_preview and (preview_mode == "pdf")
+            include_web = auto_preview and (preview_mode == "web")
+
+            svg_pages, web_html = await state.send_preview(
+                merged_doc,
+                include_typst=include_typst,
+                include_web=include_web,
+            )
 
             # Synchronisiere alle Co-Autoren (und bei erfolgtem DB-Merge auch den Sender selbst)
             await broadcast_article_sync(

@@ -2479,7 +2479,27 @@
           pdfContainer.style.display = mode === "pdf" ? "flex" : "none";
           webContainer.style.display = mode === "web" ? "block" : "none";
         }
+        if (mode === "web") {
+          const webIframe = document.getElementById("preview-iframe-web");
+          if (webIframe && state.pendingWebHtml && webIframe.srcdoc !== state.pendingWebHtml) {
+            webIframe.srcdoc = state.pendingWebHtml;
+          }
+        }
+        if (window.Shiny && window.Shiny.setInputValue) {
+          window.Shiny.setInputValue(
+            "lukb_preview_mode_change",
+            { mode: mode, ts: Date.now() },
+            { priority: "event" }
+          );
+        }
       });
+    });
+
+    // Sofortiger Autosave bei Fenster-/Tab-Fokusverlust
+    window.addEventListener("blur", function () {
+      if (state.isDirty && typeof flushAutosave === "function") {
+        flushAutosave(false, "Autosave bei Fokusverlust");
+      }
     });
 
     // Kontinuierliche Aktualisierung der Typst-Vorschau an-/ausschalten
@@ -2726,12 +2746,30 @@
           mergedBlocks.forEach(function (blk, idx) {
             if (blk.type === "box_start") insideBox = true;
             if (blk.id !== focusedBlockId) {
-              const existingCard = canvas.querySelector('[data-block-id="' + blk.id + '"]');
-              const newCard = buildBlockCardElement(blk, idx, insideBox);
-              if (existingCard) {
-                canvas.replaceChild(newCard, existingCard);
-              } else {
-                canvas.appendChild(newCard);
+              const locBlk = localBlocksById[blk.id];
+              // Prüfe, ob sich der Block tatsächlich geändert hat
+              const isUnchanged = locBlk && JSON.stringify(locBlk) === JSON.stringify(blk);
+              if (!isUnchanged) {
+                const existingCard = canvas.querySelector('[data-block-id="' + blk.id + '"]');
+                // Optimierter In-Place Update für Richtext & Callout (vermeidet DOM-Zerstörung)
+                if (existingCard && (blk.type === "richtext" || blk.type === "callout") && locBlk && locBlk.type === blk.type) {
+                  const editable = existingCard.querySelector(".richtext-editable");
+                  if (editable && editable !== document.activeElement && editable.innerHTML !== blk.html) {
+                    editable.innerHTML = blk.html || "<p></p>";
+                    if (blk.type === "callout") {
+                      const titleInp = existingCard.querySelector(".cms-input");
+                      if (titleInp && titleInp !== document.activeElement) titleInp.value = blk.title || "";
+                    }
+                    if (blk.type === "box_end") insideBox = false;
+                    return;
+                  }
+                }
+                const newCard = buildBlockCardElement(blk, idx, insideBox);
+                if (existingCard) {
+                  canvas.replaceChild(newCard, existingCard);
+                } else {
+                  canvas.appendChild(newCard);
+                }
               }
             }
             if (blk.type === "box_end") insideBox = false;
@@ -2790,8 +2828,13 @@
         }
       }
 
-      if (webIframe && typeof msg.web_html === "string") {
-        webIframe.srcdoc = msg.web_html;
+      if (typeof msg.web_html === "string" && msg.web_html) {
+        state.pendingWebHtml = msg.web_html;
+        if (webIframe && state.previewMode === "web") {
+          if (webIframe.srcdoc !== msg.web_html) {
+            webIframe.srcdoc = msg.web_html;
+          }
+        }
       }
     });
 

@@ -333,13 +333,13 @@
     if (statsDebounceTimer) {
       clearTimeout(statsDebounceTimer);
     }
-    statsDebounceTimer = setTimeout(updateLiveStatsCounter, 250);
+    statsDebounceTimer = setTimeout(updateLiveStatsCounter, 500);
     if (state.autosaveTimer) {
       clearTimeout(state.autosaveTimer);
     }
     state.autosaveTimer = setTimeout(function () {
       flushAutosave(false);
-    }, 1000);
+    }, 3000);
   }
 
   function updateLiveStatsCounter() {
@@ -418,6 +418,9 @@
     state.isDirty = false;
     setAutosaveIndicator("saving", "Speichert in Datenbank …");
 
+    const knownAssets = Object.keys(state.assetCache || {});
+    const currentMode = state.previewMode || "pdf";
+
     if (window.Shiny && window.Shiny.setInputValue) {
       window.Shiny.setInputValue(
         "lukb_autosave_payload",
@@ -427,6 +430,8 @@
           create_revision: !!createRevision,
           revision_note: revisionNote || "",
           auto_preview: state.autoPreview,
+          preview_mode: currentMode,
+          known_asset_ids: knownAssets,
           ts: Date.now(),
         },
         { priority: "event" }

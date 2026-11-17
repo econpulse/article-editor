@@ -193,13 +193,17 @@ Wenn das Repository in einem bankinternen Git (z. B. GitLab, Bitbucket, GitHub E
 
 ## 5. Laufzeit-Konfiguration & Skalierung auf Posit Connect
 
-Für einen reibungslosen Redaktionsbetrieb auf Posit Connect empfehlen sich im Tab **Access & Runtime**:
+Für einen reibungslosen Redaktionsbetrieb mit Echtzeit-Kollaboration auf Posit Connect empfehlen sich im Tab **Access & Runtime**:
 
-- **Max Processes:** `3` bis `5` (je nach Anzahl gleichzeitiger Redakteure).
+- **Max Processes:** `1` (Empfohlen für Live-Co-Authoring, da die aktive Autoren-Presence und der WebSocket-Live-Sync prozessbasiert verwaltet werden. Dank der asynchronen Worker-Threads in Shiny for Python werden CPU-intensive Renderaufgaben wie Typst und HTML non-blocking im Threadpool ausgeführt).
 - **Min Processes Running:** `1` (verhindert Kaltstart-Verzögerungen, da die Verbindung zum MSSQL-Server beim ersten Aufruf sofort steht).
-- **Max Connections Per Process:** `10` bis `20` (Shiny for Python verarbeitet asynchrone WebSocket-Verbindungen hocheffizient).
+- **Max Connections Per Process:** `25` bis `50` (Shiny for Python verarbeitet asynchrone WebSocket-Verbindungen hocheffizient bei minimalem Speicherbedarf).
 - **Load Factor:** `0.7`
 - **Access Control:** Auf «Specific users or groups» oder «Anyone with login» einschränken (z. B. AD-Gruppe `GRP_INVESTMENT_OFFICE`).
+
+> [!TIP]
+> **Performance bei grossen Dokumenten (>70 Blöcke):**
+> Durch die entkoppelte Vorschau-Engine (Typst und HTML werden strikt on-demand und in separaten Hintergrund-Threads ausgeführt) sowie den optimierten Delta-Sync für Grafiken bleibt die Benutzeroberfläche auch bei paralleler Bearbeitung umfangreicher Publikationen dauerhaft flüssig.
 
 ---
 

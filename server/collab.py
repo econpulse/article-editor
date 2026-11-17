@@ -30,14 +30,20 @@ def get_peer_color(session_id: str) -> str:
     return PEER_COLORS[abs(hash(session_id)) % len(PEER_COLORS)]
 
 
-def collect_article_assets_map(doc: ArticleDocument) -> dict[str, str]:
-    """Lädt für alle Grafik- und DB-Chart-Blöcke eines Artikels die zugehörigen Data-URIs."""
+def collect_article_assets_map(
+    doc: ArticleDocument,
+    known_asset_ids: set[str] | list[str] | None = None,
+) -> dict[str, str]:
+    """Lädt für alle Grafik- und DB-Chart-Blöcke eines Artikels die zugehörigen Data-URIs.
+    Überspringt Assets, die in known_asset_ids enthalten sind, um wiederholte Datenübertragungen zu vermeiden.
+    """
+    known_set = set(known_asset_ids) if known_asset_ids is not None else None
     assets_map: dict[str, str] = {}
     for blk in doc.blocks:
         btype = blk.get("type")
         if btype == "figure":
             aid = blk.get("asset_id", "")
-            if aid and aid not in assets_map:
+            if aid and (known_set is None or aid not in known_set) and aid not in assets_map:
                 rec = get_asset(aid)
                 if rec and rec.get("data"):
                     b64 = base64.b64encode(rec["data"]).decode("ascii")
@@ -45,7 +51,7 @@ def collect_article_assets_map(doc: ArticleDocument) -> dict[str, str]:
                     assets_map[aid] = f"data:{mime};base64,{b64}"
         elif btype == "db_chart":
             bid = blk.get("id", "")
-            if bid:
+            if bid and (known_set is None or bid not in known_set):
                 svg_markup = generate_db_chart_svg(blk)
                 b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
                 assets_map[bid] = f"data:image/svg+xml;base64,{b64}"
@@ -67,6 +73,7 @@ def register_peer(
         "article_id": "",
         "focused_target": "",
         "auto_preview": True,
+        "preview_mode": "pdf",
         "sync_doc_cb": sync_doc_cb,
     }
 
@@ -172,7 +179,8 @@ async def broadcast_preview_to_coauthors(
     """
     Aktualisiert die Live-Vorschau bei allen anderen Co-Autoren im selben Artikel.
     Wiederverwendet bereits berechnete `pre_rendered_svg`- und `pre_rendered_html`-Ergebnisse
-    bzw. berechnet sie höchstens einmal pro Speichervorgang für alle Co-Autoren gemeinsam.
+    bzw. berechnet sie asynchron im Worker-Thread höchstens einmal pro Speichervorgang.
+    Rendert HTML nur, falls mindestens ein Co-Autor die Web-Vorschau aktiv betrachtet.
     """
     coauthor_targets = [
         (sid, info)
@@ -184,18 +192,25 @@ async def broadcast_preview_to_coauthors(
     if not coauthor_targets:
         return
 
+    any_peer_needs_web = any(
+        info.get("preview_mode", "pdf") == "web"
+        for _, info in coauthor_targets
+    )
     shared_html = pre_rendered_html
-    if shared_html is None:
+    if any_peer_needs_web and shared_html is None:
         try:
-            shared_html = render_web_html(doc)
+            shared_html = await asyncio.to_thread(render_web_html, doc)
         except Exception as exc:
             shared_html = f"<pre>Fehler beim HTML-Rendering: {exc}</pre>"
 
-    any_peer_needs_typst = any(bool(info.get("auto_preview", True)) for _, info in coauthor_targets)
+    any_peer_needs_typst = any(
+        bool(info.get("auto_preview", True)) and info.get("preview_mode", "pdf") == "pdf"
+        for _, info in coauthor_targets
+    )
     shared_svg = pre_rendered_svg
     if any_peer_needs_typst and shared_svg is None:
         try:
-            shared_svg = render_preview_svg_pages(doc)
+            shared_svg = await asyncio.to_thread(render_preview_svg_pages, doc)
         except Exception:
             shared_svg = None
 
@@ -204,12 +219,14 @@ async def broadcast_preview_to_coauthors(
         if peer_sess is not None:
             try:
                 peer_auto = bool(info.get("auto_preview", True))
+                peer_mode = info.get("preview_mode", "pdf")
                 await peer_sess.send_custom_message(
                     "lukb_update_preview",
                     {
-                        "svg_pages": shared_svg if peer_auto else None,
-                        "web_html": shared_html,
-                        "typst_skipped": not peer_auto,
+                        "svg_pages": shared_svg if (peer_auto and peer_mode == "pdf") else None,
+                        "web_html": shared_html if peer_mode == "web" else None,
+                        "typst_skipped": not (peer_auto and peer_mode == "pdf"),
+                        "web_skipped": peer_mode != "web",
                     },
                 )
             except Exception:
@@ -244,6 +261,17 @@ def set_peer_auto_preview(session_id: str, auto_preview: bool) -> None:
 def is_peer_auto_preview(session_id: str, default: bool = True) -> bool:
     """Prüft, ob für eine Session die kontinuierliche Vorschau aktiviert ist."""
     return bool(ACTIVE_PEERS.get(session_id, {}).get("auto_preview", default))
+
+
+def set_peer_preview_mode(session_id: str, preview_mode: str) -> None:
+    """Aktualisiert den aktiven Vorschaumodus (pdf vs. web) für eine Session."""
+    if session_id in ACTIVE_PEERS:
+        ACTIVE_PEERS[session_id]["preview_mode"] = preview_mode
+
+
+def get_peer_preview_mode(session_id: str, default: str = "pdf") -> str:
+    """Gibt den aktiven Vorschaumodus (pdf vs. web) für eine Session zurück."""
+    return ACTIVE_PEERS.get(session_id, {}).get("preview_mode", default)
 
 
 def get_peer_user(session_id: str, fallback: str = "Analyst") -> str:

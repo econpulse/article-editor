@@ -5,6 +5,7 @@ Kapselt den reaktiven Session-Zustand und WebSocket-Meldungen an das Frontend.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 from shiny import Inputs, Session, reactive
@@ -100,8 +101,9 @@ class SessionState:
         self,
         doc: ArticleDocument | None = None,
         include_typst: bool = True,
+        include_web: bool = False,
     ) -> tuple[list[str] | None, str | None]:
-        """Rendert die SVG- und HTML-Vorschau, sendet sie an den Client und gibt (svg_pages, web_html) zurück."""
+        """Rendert die SVG- und/oder HTML-Vorschau asynchron im Worker-Thread, sendet sie an den Client und gibt (svg_pages, web_html) zurück."""
         if doc is None:
             doc = self.current_doc.get()
         if doc is None:
@@ -110,7 +112,7 @@ class SessionState:
         svg_pages: list[str] | None = None
         if include_typst:
             try:
-                svg_pages = render_preview_svg_pages(doc)
+                svg_pages = await asyncio.to_thread(render_preview_svg_pages, doc)
             except Exception as exc:
                 logger.exception("Typst Preview-Fehler")
                 err_svg = (
@@ -121,11 +123,13 @@ class SessionState:
                 )
                 svg_pages = [err_svg]
 
-        try:
-            web_html = render_web_html(doc)
-        except Exception as exc:
-            logger.exception("Web HTML Preview-Fehler")
-            web_html = f"<pre>Fehler beim HTML-Rendering: {exc}</pre>"
+        web_html: str | None = None
+        if include_web:
+            try:
+                web_html = await asyncio.to_thread(render_web_html, doc)
+            except Exception as exc:
+                logger.exception("Web HTML Preview-Fehler")
+                web_html = f"<pre>Fehler beim HTML-Rendering: {exc}</pre>"
 
         await self.session.send_custom_message(
             "lukb_update_preview",
@@ -133,6 +137,7 @@ class SessionState:
                 "svg_pages": svg_pages,
                 "web_html": web_html,
                 "typst_skipped": not include_typst,
+                "web_skipped": not include_web,
             },
         )
         return svg_pages, web_html
@@ -165,7 +170,7 @@ class SessionState:
             },
         )
         await self.send_article_list(doc.id)
-        await self.send_preview(doc)
+        await self.send_preview(doc, include_typst=True, include_web=False)
         if prev_article_id and prev_article_id != doc.id:
             await broadcast_presence(prev_article_id)
         await broadcast_presence(doc.id)
