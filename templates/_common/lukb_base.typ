@@ -920,13 +920,17 @@
         below: 1.05em,
         inner-content
       )
-      let box-h = measure(box-breakable, width: bounds.width).height
       // Typografische Regel:
       // Kurze Boxen (1 Kind-Element und <= 90pt / ca. 3.2cm) ohne manuellen Umbruch werden zusammengehalten,
       // um Kasten-Fragmente am Spaltenende zu vermeiden.
       // Mehrteilige Boxen (mehrere Absätze/Überschriften) oder längere Boxen (> 90pt) dürfen
       // harmonisch über Spalten umbrechen, um grosse Weissraum-Löcher zu verhindern.
-      let is-short-single-box = (blk.children.len() <= 1) and (box-h <= 90pt)
+      let is-short-single-box = if blk.children.len() <= 1 {
+        let box-h = measure(box-breakable, width: bounds.width).height
+        box-h <= 90pt
+      } else {
+        false
+      }
       if (not has-colbreak) and is-short-single-box {
         block(
           width: 100%,
@@ -1049,8 +1053,16 @@
       let best-diff = 999999pt
       let best-max-h = 999999pt
 
-      if items.len() >= 2 {
-        let item-heights = items.map(it => measure(block(width: col-w, render-item(it))).height)
+      if items.len() >= 2 and items.len() <= 24 {
+        let item-heights = items.map(it => {
+          if it.type == "spacer" {
+            (it.at("height_mm", default: 8) * 2.83465pt)
+          } else if it.type == "colbreak" {
+            0pt
+          } else {
+            measure(block(width: col-w, render-item(it))).height
+          }
+        })
         let inter-gap = 12pt
         let prefix-h = (0pt,)
         let running = 0pt
@@ -1157,16 +1169,22 @@
     for (idx, it) in items.enumerate() {
       let is-full = (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "full")
       if not is-full {
-        let ih = measure(block(
-          width: col-w,
-          render-single-block(
-            it,
-            in-box: false,
-            callout-accent: callout-accent,
-            quote-accent: quote-accent,
-            heading-below: heading-below,
-          )
-        )).height
+        let ih = if it.type == "spacer" {
+          (it.at("height_mm", default: 8) * 2.83465pt)
+        } else if it.type == "colbreak" {
+          0pt
+        } else {
+          measure(block(
+            width: col-w,
+            render-single-block(
+              it,
+              in-box: false,
+              callout-accent: callout-accent,
+              quote-accent: quote-accent,
+              heading-below: heading-below,
+            )
+          )).height
+        }
         pending-sum-h = pending-sum-h + ih + 8pt
         if it.type in ("figure", "db_chart", "custom_chart", "callout", "quote") and ih > pending-max-indiv-h {
           pending-max-indiv-h = ih

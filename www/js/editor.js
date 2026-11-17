@@ -2800,13 +2800,32 @@
       const refreshBtn = document.getElementById("btn_refresh_preview");
 
       if (pdfContainer && Array.isArray(msg.svg_pages)) {
-        pdfContainer.innerHTML = "";
-        msg.svg_pages.forEach(function (svgMarkup, idx) {
+        const existingPages = Array.from(pdfContainer.querySelectorAll(":scope > .typst-svg-page"));
+
+        // Überzählige Seiten vom Ende entfernen
+        while (existingPages.length > msg.svg_pages.length) {
+          const toRemove = existingPages.pop();
+          if (toRemove) toRemove.remove();
+        }
+        // Fehlende Seiten anhängen
+        while (existingPages.length < msg.svg_pages.length) {
           const pageWrap = document.createElement("div");
           pageWrap.className = "typst-svg-page";
-          pageWrap.innerHTML = svgMarkup;
           pdfContainer.appendChild(pageWrap);
+          existingPages.push(pageWrap);
+        }
+
+        // Differenzielles In-Place Update: Nur Seiten anfassen, deren SVG abweicht
+        msg.svg_pages.forEach(function (svgMarkup, idx) {
+          const pageEl = existingPages[idx];
+          if (!pageEl) return;
+          const lenStr = String(svgMarkup.length);
+          if (pageEl.dataset.svgLen !== lenStr || pageEl.innerHTML !== svgMarkup) {
+            pageEl.innerHTML = svgMarkup;
+            pageEl.dataset.svgLen = lenStr;
+          }
         });
+
         state.lastKnownPageCount = msg.svg_pages.length;
         state.previewPending = false;
         if (refreshBtn) {

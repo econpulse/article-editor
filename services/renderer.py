@@ -14,9 +14,11 @@ import datetime
 import html
 import io
 import json
+import logging
 import mimetypes
 import re
 import tempfile
+import threading
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -29,14 +31,21 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from docx.shared import Inches, Pt, RGBColor
 
-from config import FONTS_DIR, TEMPLATES_DIR, WWW_DIR
+from config import DATA_DIR, FONTS_DIR, TEMPLATES_DIR, WWW_DIR
 from database.repository import get_asset
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
 from services.custom_chart_generator import generate_custom_chart_svg
 from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html
 
+logger = logging.getLogger("lukb_cms.renderer")
+
 LUKB_LOGO_SVG_PATH = WWW_DIR / "img" / "LUKB-Logo.svg"
+TYPST_CACHE_DIR = DATA_DIR / "typst_cache"
+TYPST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+_COMPILER_CACHE: dict[str, typst.Compiler] = {}
+_COMPILER_LOCK = threading.Lock()
 
 _jinja_env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
@@ -308,7 +317,9 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
     - Gruppiert Blöcke zwischen `box_start` und `box_end` zu einer gemeinsamen farblichen Textbox.
     """
     if LUKB_LOGO_SVG_PATH.exists():
-        (work_dir / "LUKB-Logo.svg").write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
+        logo_dst = work_dir / "LUKB-Logo.svg"
+        if not logo_dst.exists() or LUKB_LOGO_SVG_PATH.stat().st_mtime > logo_dst.stat().st_mtime:
+            logo_dst.write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
 
     payload = _prepare_common_article_payload(doc)
     asset_cache: dict[str, dict[str, Any] | None] = {}
@@ -347,7 +358,10 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                 max_date=doc.metadata.publication_date,
             )
             chart_filename = f"dbchart_{blk.get('id', 'chart')}.svg"
-            (work_dir / chart_filename).write_bytes(svg_markup.encode("utf-8"))
+            chart_file_path = work_dir / chart_filename
+            chart_bytes = svg_markup.encode("utf-8")
+            if not chart_file_path.exists() or chart_file_path.stat().st_size != len(chart_bytes):
+                chart_file_path.write_bytes(chart_bytes)
             bcopy["resolved_image"] = chart_filename
 
         elif btype == "custom_chart":
@@ -356,7 +370,10 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                 embed_fonts=False,
             )
             chart_filename = f"customchart_{blk.get('id', 'chart')}.svg"
-            (work_dir / chart_filename).write_bytes(svg_markup.encode("utf-8"))
+            chart_file_path = work_dir / chart_filename
+            chart_bytes = svg_markup.encode("utf-8")
+            if not chart_file_path.exists() or chart_file_path.stat().st_size != len(chart_bytes):
+                chart_file_path.write_bytes(chart_bytes)
             bcopy["resolved_image"] = chart_filename
 
         elif btype == "quote":
@@ -415,13 +432,42 @@ def _get_template_typ_path(template_id: str) -> Path:
     return TEMPLATES_DIR / "investment_focus" / "template.typ"
 
 
+def _ensure_typst_workspace(template_id: str) -> tuple[Path, Path]:
+    """
+    Synchronisiert gemeinsame Typst-Basismodule (`templates/_common/*.typ`), das
+    angeforderte Template sowie das LUKB-Logo in das persistente Arbeitsverzeichnis `TYPST_CACHE_DIR`.
+    Kopiert Dateien nur, wenn sie nicht existieren oder sich die Quell-mtime geändert hat.
+    Gibt (work_typ, TYPST_CACHE_DIR) zurück.
+    """
+    TYPST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+    common_src = TEMPLATES_DIR / "_common"
+    if common_src.exists():
+        common_dst = TYPST_CACHE_DIR / "_common"
+        common_dst.mkdir(parents=True, exist_ok=True)
+        for src_file in common_src.glob("*.typ"):
+            dst_file = common_dst / src_file.name
+            if not dst_file.exists() or src_file.stat().st_mtime > dst_file.stat().st_mtime:
+                dst_file.write_bytes(src_file.read_bytes())
+
+    template_path = _get_template_typ_path(template_id)
+    tpl_folder_name = template_path.parent.name
+    tpl_dst_dir = TYPST_CACHE_DIR / tpl_folder_name
+    tpl_dst_dir.mkdir(parents=True, exist_ok=True)
+    work_typ = tpl_dst_dir / "document.typ"
+    if not work_typ.exists() or template_path.stat().st_mtime > work_typ.stat().st_mtime:
+        work_typ.write_bytes(template_path.read_bytes())
+
+    if LUKB_LOGO_SVG_PATH.exists():
+        logo_dst = TYPST_CACHE_DIR / "LUKB-Logo.svg"
+        if not logo_dst.exists() or LUKB_LOGO_SVG_PATH.stat().st_mtime > logo_dst.stat().st_mtime:
+            logo_dst.write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
+
+    return work_typ, TYPST_CACHE_DIR
+
+
 def _stage_typst_workspace(template_id: str, tmp_dir: Path) -> Path:
-    """
-    Kopiert gemeinsame Typst-Basismodule (`templates/_common/*.typ`) sowie das
-    angeforderte Template in das temporäre Arbeitsverzeichnis `tmp_dir`, sodass
-    relative `#import "../_common/lukb_base.typ": *`-Direktiven innerhalb von
-    `root=tmp_dir` sauber aufgelöst werden.
-    """
+    """Legacy-Hilfsfunktion für explizite Temp-Verzeichnisse."""
     common_src = TEMPLATES_DIR / "_common"
     if common_src.exists():
         common_dst = tmp_dir / "_common"
@@ -445,47 +491,91 @@ def _get_font_paths() -> list[Path]:
     return paths
 
 
+def invalidate_compiler_cache(template_id: str | None = None) -> None:
+    """Invalidiert den Typst.Compiler-Cache für ein Template oder alle Templates."""
+    with _COMPILER_LOCK:
+        if template_id:
+            _COMPILER_CACHE.pop(template_id, None)
+        else:
+            _COMPILER_CACHE.clear()
+
+
+def _get_or_create_compiler(template_id: str, work_typ: Path, root_dir: Path, article_json_str: str) -> typst.Compiler:
+    """Holt eine wiederverwendbare Typst.Compiler-Instanz aus dem Cache oder initialisiert sie."""
+    with _COMPILER_LOCK:
+        compiler = _COMPILER_CACHE.get(template_id)
+        if compiler is None:
+            compiler = typst.Compiler(
+                input=work_typ,
+                root=root_dir,
+                font_paths=_get_font_paths(),
+                sys_inputs={"article_json": article_json_str},
+            )
+            _COMPILER_CACHE[template_id] = compiler
+        return compiler
+
+
 def render_pdf_bytes(doc: ArticleDocument) -> bytes:
     """Kompiliert ein ArticleDocument mit der aktuellsten Typst-Engine zu einem PDF (bytes)."""
-    with tempfile.TemporaryDirectory(prefix="lukb_typst_") as tmp_dir_str:
-        tmp_dir = Path(tmp_dir_str)
-        work_typ = _stage_typst_workspace(doc.template_id, tmp_dir)
+    work_typ, work_dir = _ensure_typst_workspace(doc.template_id)
+    payload = _prepare_typst_payload(doc, work_dir)
+    article_json_str = json.dumps(payload, ensure_ascii=False)
 
-        payload = _prepare_typst_payload(doc, tmp_dir)
+    try:
+        compiler = _get_or_create_compiler(doc.template_id, work_typ, work_dir, article_json_str)
+        with _COMPILER_LOCK:
+            pdf_bytes = compiler.compile(
+                format="pdf",
+                sys_inputs={"article_json": article_json_str},
+            )
+    except Exception as exc:
+        logger.warning(f"Fehler im Typst.Compiler-Cache für PDF ({exc}), Fallback auf Einmal-Kompilierung.")
+        invalidate_compiler_cache(doc.template_id)
         pdf_bytes = typst.compile(
             input=work_typ,
-            root=tmp_dir,
+            root=work_dir,
             font_paths=_get_font_paths(),
-            sys_inputs={"article_json": json.dumps(payload, ensure_ascii=False)},
+            sys_inputs={"article_json": article_json_str},
         )
-        if isinstance(pdf_bytes, list):
-            return pdf_bytes[0]
-        return pdf_bytes
+
+    if isinstance(pdf_bytes, list):
+        return pdf_bytes[0]
+    return pdf_bytes
 
 
 def render_preview_svg_pages(doc: ArticleDocument) -> list[str]:
     """
     Kompiliert ein ArticleDocument in-memory zu einer Liste von SVG-Strings (eine SVG pro PDF-Seite).
-    Dadurch kann die PDF-Vorschau im Browser verzögerungsfrei und gestochen scharf gerendert werden.
+    Nutzt eine langlebige `typst.Compiler`-Instanz mit persistentem Rust-Cache für maximale Geschwindigkeit.
     """
-    with tempfile.TemporaryDirectory(prefix="lukb_typst_svg_") as tmp_dir_str:
-        tmp_dir = Path(tmp_dir_str)
-        work_typ = _stage_typst_workspace(doc.template_id, tmp_dir)
+    work_typ, work_dir = _ensure_typst_workspace(doc.template_id)
+    payload = _prepare_typst_payload(doc, work_dir)
+    article_json_str = json.dumps(payload, ensure_ascii=False)
 
-        payload = _prepare_typst_payload(doc, tmp_dir)
+    try:
+        compiler = _get_or_create_compiler(doc.template_id, work_typ, work_dir, article_json_str)
+        with _COMPILER_LOCK:
+            compiled = compiler.compile(
+                format="svg",
+                sys_inputs={"article_json": article_json_str},
+            )
+    except Exception as exc:
+        logger.warning(f"Fehler im Typst.Compiler-Cache für SVG ({exc}), Fallback auf Einmal-Kompilierung.")
+        invalidate_compiler_cache(doc.template_id)
         compiled = typst.compile(
             input=work_typ,
-            root=tmp_dir,
+            root=work_dir,
             format="svg",
             font_paths=_get_font_paths(),
-            sys_inputs={"article_json": json.dumps(payload, ensure_ascii=False)},
+            sys_inputs={"article_json": article_json_str},
         )
-        if isinstance(compiled, bytes):
-            pages_bytes = [compiled]
-        else:
-            pages_bytes = list(compiled)
 
-        return [p.decode("utf-8") for p in pages_bytes]
+    if isinstance(compiled, bytes):
+        pages_bytes = [compiled]
+    else:
+        pages_bytes = list(compiled)
+
+    return [p.decode("utf-8") for p in pages_bytes]
 
 
 _ANCHOR_TAG_RE = re.compile(r"<a\b([^>]*)>", re.IGNORECASE)

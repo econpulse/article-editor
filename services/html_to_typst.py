@@ -6,6 +6,7 @@ escaped, sodass Benutzereingaben niemals zu Typst-Kompilierungsfehlern führen.
 
 from __future__ import annotations
 
+import functools
 import re
 from html.parser import HTMLParser
 
@@ -21,6 +22,7 @@ _DANGEROUS_SELF_RE = re.compile(
 _HTML_COMMENTS_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
+@functools.lru_cache(maxsize=4096)
 def sanitize_richtext_html(html_str: str) -> str:
     """
     Bereinigt und normalisiert RichText-HTML aus `contentEditable` und Browser-Copy-Paste:
@@ -44,6 +46,7 @@ def sanitize_richtext_html(html_str: str) -> str:
     return cleaned.strip()
 
 
+@functools.lru_cache(maxsize=4096)
 def escape_typst_text(text: str) -> str:
     """Escaped alle in Typst-Markup reservierten Zeichen in reinem Text."""
     if not text:
@@ -193,6 +196,7 @@ class _HtmlToTypstParser(HTMLParser):
         self.parts.append(escape_typst_text(cleaned))
 
 
+@functools.lru_cache(maxsize=4096)
 def html_to_typst(html_str: str) -> str:
     """Konvertiert einen HTML-String aus dem Rich-Text-Block in sicheren, klammerbalancierten Typst-Markup-Code."""
     if not html_str or not html_str.strip():
