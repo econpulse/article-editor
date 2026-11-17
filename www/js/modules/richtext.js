@@ -590,6 +590,127 @@
     popover.style.left = Math.max(10, Math.min(window.innerWidth - 340, rect.left + window.scrollX)) + "px";
   }
 
+  /**
+   * Bereinigt aus PDFs oder Dokumenten kopierten Fließtext beim Einfügen:
+   * - Entfernt harte, layoutbedingte Zeilenumbrüche mitten im Fließtext.
+   * - Führt getrennte Silben (z.B. "Wirtschafts-\nprognose" -> "Wirtschaftsprognose") wieder zusammen.
+   * - Bewahrt Ergänzungsstriche ("Ein-\nund Auszahlungen" -> "Ein- und Auszahlungen")
+   *   und zusammengesetzte Begriffe ("Online-\nBanking" -> "Online-Banking", "COVID-19").
+   * - Bewahrt bewusst gesetzte Zeilenumbrüche:
+   *   a) Absatzwechsel (mind. zwei Zeilenumbrüche bzw. Leerzeilen)
+   *   b) Aufzählungen & nummerierte Listen (•, -, –, 1., a) etc.)
+   *   c) Doppelpunkt-Einleitungen vor Aufzählungen oder Zitaten
+   * - Ignoriert Abkürzungen (z. B., u. a.) und Dezimalzahlen (1.5 %), damit diese nicht
+   *   fälschlich als Aufzählung interpretiert werden.
+   */
+  function cleanPdfPastedText(rawText) {
+    if (!rawText || typeof rawText !== "string") return "";
+
+    // 1. Zeilenenden vereinheitlichen (Windows \r\n -> \n)
+    let t = rawText.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+    // 2. Geschützte Leerzeichen & unsichtbare Steuerzeichen normalisieren
+    t = t.replace(/\u00A0/g, " ").replace(/\u200B/g, "");
+
+    // 3. Weiche Trennstriche (Soft-Hyphen / &shy;) am Zeilenende oder im Text entfernen
+    t = t.replace(/\u00AD\s*\n\s*/g, "");
+    t = t.replace(/\u00AD/g, "");
+
+    // 4. In Absatzblöcke trennen (mind. 2 Newlines = bewusster Absatzwechsel)
+    const chunks = t.split(/\n[ \t]*\n+/);
+    const cleanedChunks = [];
+
+    const bulletRe = /^[•·▪▫■□✦✓✔➔➜→➢►]\s*/;
+    const dashBulletRe = /^[–—\-*]\s+/;
+    const numberedOrLetterRe = /^(?:\d+[\.\)]|\(\d+\)|\[\d+\]|[a-zA-Z]\)|\([a-zA-Z]\)|\[[a-zA-Z]\]|[ivxIVX]+[\.\)]|\([ivxIVX]+\))\s+/;
+    const letterDotRe = /^[a-zA-Z]\.\s+/;
+    const abbrevRe = /^(?:z\.\s*B\.|u\.\s*a\.|d\.\s*h\.|e\.\s*g\.|i\.\s*e\.|o\.\s*ä\.|s\.\s*o\.|s\.\s*u\.|v\.\s*a\.)/i;
+    const conjunctionRe = /^(?:und|oder|sowie|bzw\.?|respektive|wie|aber|bis|als)\b/i;
+    const punctEndRe = /[:.;!?»”\"'\)]\s*$/;
+
+    function isListItemStart(line, prevLine, prevWasList) {
+      const trimmed = line.trim();
+      if (bulletRe.test(trimmed) || dashBulletRe.test(trimmed)) {
+        return true;
+      }
+      if (numberedOrLetterRe.test(trimmed) || letterDotRe.test(trimmed)) {
+        if (abbrevRe.test(trimmed)) {
+          return false;
+        }
+        // Gültige Aufzählung, wenn vorherige Zeile bereits Liste war,
+        // oder am Blockanfang, oder die vorherige Zeile mit Satzzeichen endete.
+        if (prevWasList || !prevLine || punctEndRe.test(prevLine)) {
+          return true;
+        }
+        return false;
+      }
+      return false;
+    }
+
+    for (let cIdx = 0; cIdx < chunks.length; cIdx++) {
+      const chunk = chunks[cIdx];
+      const lines = chunk.split("\n");
+
+      if (lines.length <= 1) {
+        cleanedChunks.push(lines[0].replace(/[ \t]{2,}/g, " ").trim());
+        continue;
+      }
+
+      const resultLines = [];
+      let currentLine = lines[0].replace(/[ \t]{2,}/g, " ").trim();
+      let currIsList = isListItemStart(currentLine, "", false);
+
+      for (let i = 1; i < lines.length; i++) {
+        const nextLine = lines[i].replace(/[ \t]{2,}/g, " ").trim();
+        if (!nextLine) continue;
+
+        const nextIsList = isListItemStart(nextLine, currentLine, currIsList);
+        // Prüfen auf kurze Doppelpunkt-Einzeiler (z.B. "Die Schwerpunkte:", "Hinweis:")
+        const isColonHeading =
+          /:$/.test(currentLine) &&
+          currentLine.length < 80 &&
+          !/^[a-zäöüß]/.test(nextLine);
+
+        if (nextIsList || isColonHeading) {
+          resultLines.push(currentLine);
+          currentLine = nextLine;
+          currIsList = nextIsList;
+        } else {
+          // Zeilenumbruch entfernen und Fließtext zusammenfügen
+          const hyphenMatch = currentLine.match(/([a-zA-ZäöüÄÖÜß]+)-$/);
+          const dashMatch = currentLine.match(/\s+[-–—]$/);
+
+          if (dashMatch) {
+            // Gedankenstrich am Zeilenende
+            currentLine = currentLine.replace(/\s+[-–—]$/, " –") + " " + nextLine;
+          } else if (hyphenMatch) {
+            if (conjunctionRe.test(nextLine)) {
+              // Ergänzungsstrich: "Ein- und Auszahlungen"
+              currentLine = currentLine + " " + nextLine;
+            } else if (/^[A-ZÄÖÜ\d\/]/.test(nextLine)) {
+              // Zusammensetzung mit Grossbuchstaben, Zahl oder Slash: "Online-Banking", "COVID-19"
+              currentLine = currentLine + nextLine;
+            } else if (/^[a-zäöüß]/.test(nextLine)) {
+              // Silbentrennung: Bindestrich entfernen ("Wirtschafts- + prognose" -> "Wirtschaftsprognose")
+              currentLine = currentLine.slice(0, -1) + nextLine;
+            } else {
+              currentLine = currentLine + " " + nextLine;
+            }
+          } else {
+            currentLine = currentLine + " " + nextLine;
+          }
+        }
+      }
+
+      if (currentLine) {
+        resultLines.push(currentLine);
+      }
+      cleanedChunks.push(resultLines.join("\n"));
+    }
+
+    return cleanedChunks.join("\n\n");
+  }
+
   function createRichTextWidget(initialHtml, onChange, extraRightEl) {
     const wrapper = document.createElement("div");
 
@@ -757,10 +878,11 @@
       }
     });
 
-    // Verhindere fremde Styles beim Einfügen aus Word/Webseiten
+    // Verhindere fremde Styles und bereinige ungewollte Zeilenumbrüche aus PDFs
     editable.addEventListener("paste", function (e) {
       e.preventDefault();
-      const text = (e.clipboardData || window.clipboardData).getData("text/plain");
+      const rawText = (e.clipboardData || window.clipboardData).getData("text/plain");
+      const text = cleanPdfPastedText(rawText);
       document.execCommand("insertText", false, text);
       onChange(editable.innerHTML);
       updateGlossaryBlockPreviews();
@@ -810,6 +932,7 @@
     buildCalloutBlockBody: buildCalloutBlockBody,
     buildGlossaryBlockBody: buildGlossaryBlockBody,
     buildRichTextBlockBody: buildRichTextBlockBody,
+    cleanPdfPastedText: cleanPdfPastedText,
     closeActivePopover: closeActivePopover,
     createRichTextWidget: createRichTextWidget,
     openFootnotePopover: openFootnotePopover,

@@ -15,6 +15,7 @@
   function buildGlossaryBlockBody() { return E.buildGlossaryBlockBody.apply(this, arguments); }
   function buildRichTextBlockBody() { return E.buildRichTextBlockBody.apply(this, arguments); }
   function buildTableBlockBody() { return E.buildTableBlockBody.apply(this, arguments); }
+  function cleanPdfPastedText() { return E.cleanPdfPastedText.apply(this, arguments); }
   function clearUndoStack() { return E.clearUndoStack.apply(this, arguments); }
   function closeFigureContextMenu() { return E.closeFigureContextMenu.apply(this, arguments); }
   function createDefaultBlock() { return E.createDefaultBlock.apply(this, arguments); }
@@ -1232,6 +1233,18 @@
     qTextarea.placeholder = "Zitattext eingeben (ohne Anführungszeichen, werden automatisch formatiert) …";
     qTextarea.value = blk.quote || "";
     qTextarea.addEventListener("input", function () {
+      blk.quote = qTextarea.value;
+      markDirty();
+    });
+    qTextarea.addEventListener("paste", function (e) {
+      e.preventDefault();
+      const rawText = (e.clipboardData || window.clipboardData).getData("text/plain");
+      const cleaned = cleanPdfPastedText(rawText);
+      if (!document.execCommand("insertText", false, cleaned)) {
+        const start = qTextarea.selectionStart;
+        const end = qTextarea.selectionEnd;
+        qTextarea.setRangeText(cleaned, start, end, "end");
+      }
       blk.quote = qTextarea.value;
       markDirty();
     });
