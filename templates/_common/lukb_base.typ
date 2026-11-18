@@ -310,6 +310,7 @@
 #let render-heading(
   level,
   content-text,
+  outline-level: none,
   h1-size: 14.5pt,
   h2-size: 10.8pt,
   h3-size: 9.8pt,
@@ -317,10 +318,13 @@
   h1-below: 6.5pt,
   below-space: 0.68em,
 ) = {
+  let eff-outline-level = if outline-level != none { outline-level } else { level }
   let sz = if level == 1 { h1-size } else if level == 2 { h2-size } else { h3-size }
   let col = if level == 1 { lukb-navy } else if level == 2 { lukb-blue } else { lukb-text }
   let lead = if level == 1 { 0.42em } else if level == 2 { 0.38em } else { 0.34em }
   let blw = if level == 1 { h1-below } else { below-space }
+  let clean-title = str(content-text).trim()
+  let do-outline = clean-title != ""
   if level == 1 {
     block(
       width: 100%,
@@ -329,12 +333,13 @@
       above: above-space,
       below: blw
     )[
+      #show heading: it => it.body
       #stack(
         spacing: 4.5pt,
         block(width: 100%)[
           #set text(hyphenate: false)
           #set par(leading: lead, justify: false)
-          #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
+          #heading(level: eff-outline-level, outlined: do-outline)[#text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]]
         ],
         line(length: 100%, stroke: 0.75pt + lukb-navy)
       )
@@ -347,9 +352,10 @@
       above: above-space,
       below: blw
     )[
+      #show heading: it => it.body
       #set text(hyphenate: false)
       #set par(leading: lead, justify: false)
-      #text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]
+      #heading(level: eff-outline-level, outlined: do-outline)[#text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]]
     ]
   }
 }
@@ -873,7 +879,8 @@
   heading-below: 0.68em,
 ) = {
   if blk.type == "heading" {
-    render-heading(blk.level, blk.text, below-space: heading-below)
+    let out-lvl = blk.at("outline_level", default: none)
+    render-heading(blk.level, blk.text, outline-level: out-lvl, below-space: heading-below)
   } else if blk.type == "richtext" {
     eval(blk.typst_markup, mode: "markup")
     parbreak()
@@ -1356,9 +1363,11 @@
 
 #let render-tufte-single-block(blk, is-margin: false, build-rows-fn: none) = {
   if blk.type == "heading" {
+    let out-lvl = blk.at("outline_level", default: none)
     render-heading(
       blk.level,
       blk.text,
+      outline-level: out-lvl,
       h1-size: 13.5pt,
       h2-size: 10.5pt,
       h3-size: 9.6pt,

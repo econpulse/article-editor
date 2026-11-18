@@ -160,7 +160,8 @@
     bcopy.insert("layout", "column")
     render-figure-box(bcopy, is-margin: true)
   } else if blk.type == "heading" {
-    render-heading(blk.level, blk.text, below-space: 0.30em)
+    let out-lvl = blk.at("outline_level", default: none)
+    render-heading(blk.level, blk.text, outline-level: out-lvl, below-space: 0.30em)
   } else if blk.type == "richtext" {
     eval(blk.typst_markup, mode: "markup")
     parbreak()

@@ -1737,6 +1737,19 @@ def test_priority_3_modular_js_footnotes_and_html_hardening():
     assert "sanitizeRichTextHtml" in (ROOT / "www" / "js" / "modules" / "state.js").read_text(encoding="utf-8")
     assert "sanitizeRichTextHtml" in (ROOT / "www" / "js" / "modules" / "richtext.js").read_text(encoding="utf-8")
 
+    # Keine zirkulären Forwarder-Exporte in editor.js (verhindert RangeError: Maximum call stack size exceeded)
+    for circular_fn in (
+        "buildSpacerBlockBody",
+        "buildQuoteBlockBody",
+        "buildDividerBlockBody",
+        "buildColbreakBlockBody",
+    ):
+        import re
+        pattern = rf"{circular_fn}\s*:\s*{circular_fn}"
+        assert not re.search(pattern, editor_main), (
+            f"Zirkulärer Forwarder-Export entdeckt: {circular_fn} darf nicht in editor.js Object.assign(E) re-exportiert werden!"
+        )
+
     # 2. Vereinheitlichtes Fussnoten-System (PDF, Web-HTML, Word-DOCX)
     fn_doc = ArticleDocument(
         id="art-p3-footnotes",
@@ -2028,6 +2041,80 @@ def test_tufte_anchor_to_and_spacer_synchronization():
     assert pdf_h.startswith(b"%PDF-"), "Typst PDF mit Anker an Überschrift fehlgeschlagen"
 
 
+def test_typst_pdf_outline_hierarchy():
+    """
+    Stellt sicher, dass das aus Typst generierte PDF Acrobat-Lesezeichen (Document Outline) enthält:
+    - Ermittelt aus H1, H2 und H3 Überschriften
+    - Wenn keine H1 existiert, wird H2 zur höchsten Hierarchiestufe (Level 1 in der Outline)
+    - Es wird kein visuelles Inhaltsverzeichnis (TOC) gerendert
+    - Ohne Überschriften wird keine Outline generiert
+    """
+    import io
+    import pypdf
+    from schemas.article import ArticleDocument, ArticleMetadata, HeadingBlock, RichTextBlock
+
+    # 1. Fall: Artikel mit H1, H2, H3 -> H1 ist Root, H2 Kind, H3 Enkel
+    doc_with_h1 = ArticleDocument(
+        metadata=ArticleMetadata(title="Outline Test mit H1"),
+        template_id="investment_focus",
+        blocks=[
+            HeadingBlock(id="h1_1", level=1, text="Kapitel 1").model_dump(),
+            RichTextBlock(id="p1", html="<p>Absatz 1</p>").model_dump(),
+            HeadingBlock(id="h2_1", level=2, text="Unterkapitel 1.1").model_dump(),
+            RichTextBlock(id="p2", html="<p>Absatz 2</p>").model_dump(),
+            HeadingBlock(id="h3_1", level=3, text="Detail 1.1.1").model_dump(),
+            RichTextBlock(id="p3", html="<p>Absatz 3</p>").model_dump(),
+            HeadingBlock(id="h1_2", level=1, text="Kapitel 2").model_dump(),
+            RichTextBlock(id="p4", html="<p>Absatz 4</p>").model_dump(),
+        ],
+    )
+    pdf_h1 = render_pdf_bytes(doc_with_h1)
+    assert b"/Outlines" in pdf_h1
+    reader1 = pypdf.PdfReader(io.BytesIO(pdf_h1))
+    outline1 = reader1.outline
+    assert len(outline1) == 3
+    assert outline1[0]["/Title"] == "Kapitel 1"
+    assert isinstance(outline1[1], list)
+    assert outline1[1][0]["/Title"] == "Unterkapitel 1.1"
+    assert isinstance(outline1[1][1], list)
+    assert outline1[1][1][0]["/Title"] == "Detail 1.1.1"
+    assert outline1[2]["/Title"] == "Kapitel 2"
+
+    # 2. Fall: Artikel OHNE H1, nur H2 und H3 -> H2 ist höchste Hierarchiestufe, H3 ist Kind
+    doc_without_h1 = ArticleDocument(
+        metadata=ArticleMetadata(title="Outline Test ohne H1"),
+        template_id="investment_focus",
+        blocks=[
+            HeadingBlock(id="h2_a", level=2, text="Hauptabschnitt A").model_dump(),
+            RichTextBlock(id="p5", html="<p>Absatz A</p>").model_dump(),
+            HeadingBlock(id="h3_a", level=3, text="Unterabschnitt A.1").model_dump(),
+            RichTextBlock(id="p6", html="<p>Absatz A.1</p>").model_dump(),
+            HeadingBlock(id="h2_b", level=2, text="Hauptabschnitt B").model_dump(),
+            RichTextBlock(id="p7", html="<p>Absatz B</p>").model_dump(),
+        ],
+    )
+    pdf_no_h1 = render_pdf_bytes(doc_without_h1)
+    assert b"/Outlines" in pdf_no_h1
+    reader2 = pypdf.PdfReader(io.BytesIO(pdf_no_h1))
+    outline2 = reader2.outline
+    assert len(outline2) == 3
+    assert outline2[0]["/Title"] == "Hauptabschnitt A"
+    assert isinstance(outline2[1], list)
+    assert outline2[1][0]["/Title"] == "Unterabschnitt A.1"
+    assert outline2[2]["/Title"] == "Hauptabschnitt B"
+
+    # 3. Fall: Artikel ohne Überschriften -> Keine Outlines
+    doc_empty = ArticleDocument(
+        metadata=ArticleMetadata(title="Keine Überschriften"),
+        template_id="investment_focus",
+        blocks=[
+            RichTextBlock(id="p8", html="<p>Nur Fliesstext ohne Überschriften.</p>").model_dump(),
+        ],
+    )
+    pdf_empty = render_pdf_bytes(doc_empty)
+    assert b"/Outlines" not in pdf_empty
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -2053,6 +2140,7 @@ if __name__ == "__main__":
     test_priority_1_template_consolidation_and_layout()
     test_priority_2_tags_caching_and_deduplication()
     test_priority_3_modular_js_footnotes_and_html_hardening()
+    test_typst_pdf_outline_hierarchy()
     test_full_cms_workflow()
     import tests.test_custom_chart as tcc
     tcc.test_parsing_helpers()

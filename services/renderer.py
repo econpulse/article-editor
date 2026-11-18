@@ -331,12 +331,26 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
     }
     asset_cache = get_assets_by_ids(figure_aids) if figure_aids else {}
 
+    # Gliederungshierarchie für Acrobat / PDF-Bookmarks (H1, H2, H3) berechnen:
+    # Falls keine H1 im Dokument existiert, wird H2 zur höchsten Ebene (Level 1 in der PDF-Outline).
+    heading_lvls = [
+        int(blk.get("level", 2))
+        for blk in raw_blocks
+        if blk.get("type") == "heading" and str(blk.get("text", "")).strip()
+    ]
+    min_heading_lvl = min(heading_lvls) if heading_lvls else 1
+    level_offset = min_heading_lvl - 1 if min_heading_lvl > 1 else 0
+
     enriched_blocks: list[dict[str, Any]] = []
     for blk in raw_blocks:
         btype = blk.get("type")
         bcopy = dict(blk)
 
-        if btype in ("richtext", "callout"):
+        if btype == "heading":
+            lvl = int(blk.get("level", 2))
+            bcopy["outline_level"] = max(1, lvl - level_offset)
+
+        elif btype in ("richtext", "callout"):
             bcopy["typst_markup"] = html_to_typst(blk.get("html", ""))
 
         elif btype == "figure":
