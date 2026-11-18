@@ -32,7 +32,7 @@ from docx.oxml.ns import nsdecls
 from docx.shared import Inches, Pt, RGBColor
 
 from config import DATA_DIR, FONTS_DIR, TEMPLATES_DIR, WWW_DIR
-from database.repository import get_asset
+from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
 from services.custom_chart_generator import generate_custom_chart_svg
@@ -46,6 +46,7 @@ TYPST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _COMPILER_CACHE: dict[str, typst.Compiler] = {}
 _COMPILER_LOCK = threading.Lock()
+_LOGO_PNG_CACHE: bytes | None = None
 
 _jinja_env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
@@ -316,16 +317,22 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
       und trägt den relativen Pfad als `resolved_image` ein.
     - Gruppiert Blöcke zwischen `box_start` und `box_end` zu einer gemeinsamen farblichen Textbox.
     """
-    if LUKB_LOGO_SVG_PATH.exists():
+    if work_dir != TYPST_CACHE_DIR and LUKB_LOGO_SVG_PATH.exists():
         logo_dst = work_dir / "LUKB-Logo.svg"
         if not logo_dst.exists() or LUKB_LOGO_SVG_PATH.stat().st_mtime > logo_dst.stat().st_mtime:
             logo_dst.write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
 
     payload = _prepare_common_article_payload(doc)
-    asset_cache: dict[str, dict[str, Any] | None] = {}
+    raw_blocks = payload.get("blocks", [])
+    figure_aids = {
+        blk.get("asset_id", "")
+        for blk in raw_blocks
+        if blk.get("type") == "figure" and blk.get("asset_id")
+    }
+    asset_cache = get_assets_by_ids(figure_aids) if figure_aids else {}
 
     enriched_blocks: list[dict[str, Any]] = []
-    for blk in payload.get("blocks", []):
+    for blk in raw_blocks:
         btype = blk.get("type")
         bcopy = dict(blk)
 
@@ -336,9 +343,7 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
             asset_id = blk.get("asset_id", "")
             resolved_rel_path = ""
             if asset_id:
-                if asset_id not in asset_cache:
-                    asset_cache[asset_id] = get_asset(asset_id)
-                asset_record = asset_cache[asset_id]
+                asset_record = asset_cache.get(asset_id)
                 if asset_record and asset_record.get("data"):
                     ext = _extension_for_mime(
                         asset_record.get("mime_type", ""),
@@ -360,7 +365,7 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
             chart_filename = f"dbchart_{blk.get('id', 'chart')}.svg"
             chart_file_path = work_dir / chart_filename
             chart_bytes = svg_markup.encode("utf-8")
-            if not chart_file_path.exists() or chart_file_path.stat().st_size != len(chart_bytes):
+            if not chart_file_path.exists() or chart_file_path.read_bytes() != chart_bytes:
                 chart_file_path.write_bytes(chart_bytes)
             bcopy["resolved_image"] = chart_filename
 
@@ -372,7 +377,7 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
             chart_filename = f"customchart_{blk.get('id', 'chart')}.svg"
             chart_file_path = work_dir / chart_filename
             chart_bytes = svg_markup.encode("utf-8")
-            if not chart_file_path.exists() or chart_file_path.stat().st_size != len(chart_bytes):
+            if not chart_file_path.exists() or chart_file_path.read_bytes() != chart_bytes:
                 chart_file_path.write_bytes(chart_bytes)
             bcopy["resolved_image"] = chart_filename
 
@@ -464,24 +469,6 @@ def _ensure_typst_workspace(template_id: str) -> tuple[Path, Path]:
             logo_dst.write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
 
     return work_typ, TYPST_CACHE_DIR
-
-
-def _stage_typst_workspace(template_id: str, tmp_dir: Path) -> Path:
-    """Legacy-Hilfsfunktion für explizite Temp-Verzeichnisse."""
-    common_src = TEMPLATES_DIR / "_common"
-    if common_src.exists():
-        common_dst = tmp_dir / "_common"
-        common_dst.mkdir(parents=True, exist_ok=True)
-        for typ_file in common_src.glob("*.typ"):
-            (common_dst / typ_file.name).write_bytes(typ_file.read_bytes())
-
-    template_path = _get_template_typ_path(template_id)
-    tpl_folder_name = template_path.parent.name
-    tpl_dst_dir = tmp_dir / tpl_folder_name
-    tpl_dst_dir.mkdir(parents=True, exist_ok=True)
-    work_typ = tpl_dst_dir / "document.typ"
-    work_typ.write_bytes(template_path.read_bytes())
-    return work_typ
 
 
 def _get_font_paths() -> list[Path]:
@@ -667,6 +654,12 @@ def render_web_html(doc: ArticleDocument) -> str:
     payload = _prepare_common_article_payload(doc)
     raw_blocks = payload.get("blocks", [])
     payload["auto_footnotes"] = _transform_web_inline_footnotes(raw_blocks)
+    figure_aids = {
+        blk.get("asset_id", "")
+        for blk in raw_blocks
+        if blk.get("type") == "figure" and blk.get("asset_id")
+    }
+    asset_records = get_assets_by_ids(figure_aids) if figure_aids else {}
     asset_uri_cache: dict[str, str] = {}
     for blk in raw_blocks:
         if blk.get("type") in ("richtext", "callout"):
@@ -676,7 +669,7 @@ def render_web_html(doc: ArticleDocument) -> str:
             data_uri = ""
             if asset_id:
                 if asset_id not in asset_uri_cache:
-                    asset_record = get_asset(asset_id)
+                    asset_record = asset_records.get(asset_id)
                     if asset_record and asset_record.get("data"):
                         b64 = base64.b64encode(asset_record["data"]).decode("ascii")
                         mime = asset_record.get("mime_type", "image/svg+xml")
@@ -905,6 +898,16 @@ def _render_richtext_into_docx(
             _add_html_runs_to_paragraph(p, inner, footnote_collector=footnote_collector)
 
 
+def _get_cached_logo_png_bytes() -> bytes | None:
+    """Rendert das statische LUKB-Logo einmalig als PNG für den Word-Export und cached es im Speicher."""
+    global _LOGO_PNG_CACHE
+    if _LOGO_PNG_CACHE is None and LUKB_LOGO_SVG_PATH.exists():
+        _LOGO_PNG_CACHE = _svg_to_png_bytes(
+            LUKB_LOGO_SVG_PATH.read_text(encoding="utf-8"), ppi=200.0
+        )
+    return _LOGO_PNG_CACHE
+
+
 def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
     """
     Exportiert ein ArticleDocument als druckreifes, sauber formatiertes Microsoft Word Dokument (.docx)
@@ -928,10 +931,9 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
     meta = doc_model.metadata
 
     # 1. Kopfbereich: LUKB Logo & Kategorie
-    if LUKB_LOGO_SVG_PATH.exists():
-        logo_png = _svg_to_png_bytes(LUKB_LOGO_SVG_PATH.read_text(encoding="utf-8"), ppi=200.0)
-        if logo_png:
-            doc.add_picture(io.BytesIO(logo_png), width=Inches(1.8))
+    logo_png = _get_cached_logo_png_bytes()
+    if logo_png:
+        doc.add_picture(io.BytesIO(logo_png), width=Inches(1.8))
 
     cat_date_p = doc.add_paragraph()
     cat_date_p.paragraph_format.space_before = Pt(8)
@@ -1018,7 +1020,14 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
 
     # 5. Inhaltsblöcke rendern
     common_payload = _prepare_common_article_payload(doc_model)
-    grouped_blocks = _group_blocks_into_render_items(common_payload.get("blocks", []))
+    raw_common_blocks = common_payload.get("blocks", [])
+    docx_figure_aids = {
+        b.get("asset_id", "")
+        for b in raw_common_blocks
+        if b.get("type") == "figure" and b.get("asset_id")
+    }
+    docx_asset_records = get_assets_by_ids(docx_figure_aids) if docx_figure_aids else {}
+    grouped_blocks = _group_blocks_into_render_items(raw_common_blocks)
     docx_inline_footnotes: list[dict[str, str]] = []
     docx_has_footnotes_block = False
 
@@ -1109,7 +1118,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             else:
                 asset_id = blk.get("asset_id", "")
                 if asset_id:
-                    rec = get_asset(asset_id)
+                    rec = docx_asset_records.get(asset_id)
                     if rec and rec.get("data"):
                         data = rec["data"]
                         mime = rec.get("mime_type", "")

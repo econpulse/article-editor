@@ -8,8 +8,8 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import date
-from typing import Any, Literal, Optional, Union
-from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Annotated, Any, Literal, Optional, Union
+from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
 
 
 def _new_block_id() -> str:
@@ -117,13 +117,9 @@ def _normalize_anchor_to(v: Any) -> Optional[str]:
     return s if s and s.lower() != "auto" else None
 
 
-class FigureBlock(BaseModel):
-    id: str = Field(default_factory=_new_block_id)
-    type: Literal["figure"] = "figure"
-    title: str = Field(default="", description="Grafik-Titel")
-    subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
-    source: str = Field(default="Quelle: Bloomberg, LUKB Investment Office", description="Quellenangabe")
-    asset_id: str = Field(default="", description="UUID des hochgeladenen Grafik-Assets in der DB")
+class MarginAnchorBlockBase(BaseModel):
+    """Gemeinsame Basis für Inhaltsblöcke mit Spalten-/Vollbreiten-Layout und Tufte-Verankerung."""
+
     layout: Literal["column", "full"] = Field(
         default="column",
         description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
@@ -139,13 +135,71 @@ class FigureBlock(BaseModel):
 
     @field_validator("full_position", mode="before")
     @classmethod
-    def validate_figure_full_pos(cls, v: Any) -> str:
+    def validate_full_pos(cls, v: Any) -> str:
         return _normalize_full_position(v)
 
     @field_validator("anchor_to", mode="before")
     @classmethod
-    def validate_figure_anchor_to(cls, v: Any) -> Optional[str]:
+    def validate_anchor_to(cls, v: Any) -> Optional[str]:
         return _normalize_anchor_to(v)
+
+
+class ChartBlockBase(MarginAnchorBlockBase):
+    """Gemeinsame Basis für Diagramm-Blöcke (DB-Chart und Custom-Chart)."""
+
+    title: str = Field(default="", description="Grafik-Titel")
+    subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
+    chart_height_mm: int = Field(
+        default=36,
+        description="Höhe der eigentlichen Chartfläche (Y-Achsenbereich) in Millimeter (2mm-Schritte, Default: 36mm)",
+    )
+    palette: Literal["lukb_classic", "lukb_blues"] = Field(
+        default="lukb_classic",
+        description="ID der gewählten Farbpalette ('lukb_classic' oder 'lukb_blues')",
+    )
+    legend_columns: Optional[int] = Field(
+        default=None,
+        description="Anzahl Spalten für die Legendeneinträge",
+    )
+    asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
+
+    @field_validator("chart_height_mm", mode="before")
+    @classmethod
+    def validate_chart_height_mm(cls, v: Any) -> int:
+        try:
+            val = int(round(float(v)))
+        except (ValueError, TypeError):
+            val = 36
+        val = max(20, min(120, val))
+        if val % 2 != 0:
+            val = int(round(val / 2.0) * 2)
+        return val
+
+    @field_validator("palette", mode="before")
+    @classmethod
+    def validate_palette(cls, v: Any) -> str:
+        s = str(v or "lukb_classic").strip()
+        return s if s in ("lukb_classic", "lukb_blues") else "lukb_classic"
+
+    @field_validator("legend_columns", mode="before")
+    @classmethod
+    def validate_legend_columns(cls, v: Any) -> Optional[int]:
+        if v is None or v == "" or v == "auto":
+            return None
+        try:
+            n = int(v)
+            return max(1, min(6, n))
+        except (ValueError, TypeError):
+            return None
+
+
+class FigureBlock(MarginAnchorBlockBase):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["figure"] = "figure"
+    title: str = Field(default="", description="Grafik-Titel")
+    subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
+    source: str = Field(default="Quelle: Bloomberg, LUKB Investment Office", description="Quellenangabe")
+    asset_id: str = Field(default="", description="UUID des hochgeladenen Grafik-Assets in der DB")
 
 
 ChartSeriesType = Literal["line", "step", "dot", "area", "bar", "stacked_bar"]
@@ -188,36 +242,14 @@ class TimeSeriesItem(BaseModel):
         return out
 
 
-class DbChartBlock(BaseModel):
+class DbChartBlock(ChartBlockBase):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["db_chart"] = "db_chart"
-    title: str = Field(default="", description="Grafik-Titel")
-    subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
     source: str = Field(default="Quelle: Bloomberg, LUKB Investment Office", description="Quellenangabe")
-    layout: Literal["column", "full"] = Field(
-        default="column",
-        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
-    )
-    full_position: FullPositionMode = Field(
-        default="auto",
-        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
-    )
-    chart_height_mm: int = Field(
-        default=36,
-        description="Höhe der eigentlichen Chartfläche (Y-Achsenbereich) in Millimeter (2mm-Schritte, Default: 36mm)",
-    )
     start_date: str = Field(default="2022-01-01", description="Startdatum im Chart (YYYY-MM-DD)")
     rebasing: Literal["none", "index_100"] = Field(
         default="none",
         description="'none' = Originalwerte, 'index_100' = Indexiert auf 100 am Startdatum",
-    )
-    palette: Literal["lukb_classic", "lukb_blues"] = Field(
-        default="lukb_classic",
-        description="ID der gewählten Farbpalette ('lukb_classic' oder 'lukb_blues')",
-    )
-    legend_columns: Optional[int] = Field(
-        default=None,
-        description="Anzahl Spalten für die Legendeneinträge (Default: 2 Spalten)",
     )
     series: list[TimeSeriesItem] = Field(
         default_factory=lambda: [
@@ -227,50 +259,6 @@ class DbChartBlock(BaseModel):
         ],
         description="Bis zu 5 Zeitreihen aus ts_db",
     )
-    asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
-    anchor_to: Optional[str] = Field(
-        default=None,
-        description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
-    )
-
-    @field_validator("full_position", mode="before")
-    @classmethod
-    def validate_chart_full_pos(cls, v: Any) -> str:
-        return _normalize_full_position(v)
-
-    @field_validator("anchor_to", mode="before")
-    @classmethod
-    def validate_chart_anchor_to(cls, v: Any) -> Optional[str]:
-        return _normalize_anchor_to(v)
-
-    @field_validator("chart_height_mm", mode="before")
-    @classmethod
-    def validate_chart_height_mm(cls, v: Any) -> int:
-        try:
-            val = int(round(float(v)))
-        except (ValueError, TypeError):
-            val = 36
-        val = max(20, min(120, val))
-        if val % 2 != 0:
-            val = int(round(val / 2.0) * 2)
-        return val
-
-    @field_validator("palette", mode="before")
-    @classmethod
-    def validate_palette(cls, v: Any) -> str:
-        s = str(v or "lukb_classic").strip()
-        return s if s in ("lukb_classic", "lukb_blues") else "lukb_classic"
-
-    @field_validator("legend_columns", mode="before")
-    @classmethod
-    def validate_db_chart_legend_columns(cls, v: Any) -> Optional[int]:
-        if v is None or v == "" or v == "auto":
-            return None
-        try:
-            n = int(v)
-            return max(1, min(6, n))
-        except (ValueError, TypeError):
-            return None
 
     @field_validator("series", mode="before")
     @classmethod
@@ -287,28 +275,10 @@ class CustomChartSeriesItem(BaseModel):
     enabled: bool = Field(default=True, description="Ob die Serie im Chart dargestellt wird")
 
 
-class CustomChartBlock(BaseModel):
+class CustomChartBlock(ChartBlockBase):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["custom_chart"] = "custom_chart"
-    title: str = Field(default="", description="Grafik-Titel")
-    subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
     source: str = Field(default="Quelle: LUKB Investment Office", description="Quellenangabe")
-    layout: Literal["column", "full"] = Field(
-        default="column",
-        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
-    )
-    full_position: FullPositionMode = Field(
-        default="auto",
-        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
-    )
-    chart_height_mm: int = Field(
-        default=36,
-        description="Höhe der eigentlichen Chartfläche in Millimeter (2mm-Schritte, Default: 36mm)",
-    )
-    palette: Literal["lukb_classic", "lukb_blues"] = Field(
-        default="lukb_classic",
-        description="ID der gewählten Farbpalette",
-    )
     chart_type: Literal["timeseries", "category_bar", "doughnut", "pie"] = Field(
         default="category_bar",
         description="Art des Diagramms: timeseries, category_bar, doughnut, pie",
@@ -324,10 +294,6 @@ class CustomChartBlock(BaseModel):
         default="bottom",
         description="Position der Legende ('bottom' = unterhalb, 'right' = rechts neben der Grafik)",
     )
-    legend_columns: Optional[int] = Field(
-        default=None,
-        description="Anzahl Spalten für die Legendeneinträge (Default: 1 bei rechts, 2 bei unterhalb)",
-    )
     orientation: Literal["vertical", "horizontal"] = Field(
         default="vertical",
         description="Ausrichtung bei Säulen-/Balkendiagrammen ('vertical' = Säulen von unten nach oben, 'horizontal' = Balken von links nach rechts)",
@@ -337,28 +303,12 @@ class CustomChartBlock(BaseModel):
         description="Unterschiedliche Farben für jede Kategorie/Balken aus der Palette verwenden",
     )
     bar_mode: Literal["grouped", "stacked"] = Field(default="grouped", description="Säulen-Modus bei Kategorie-Charts")
-    asset_id: str = Field(default="", description="Optionales gecachtes SVG-Asset")
-    anchor_to: Optional[str] = Field(
-        default=None,
-        description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
-    )
 
     @field_validator("legend_position", mode="before")
     @classmethod
     def validate_legend_position(cls, v: Any) -> str:
         s = str(v or "bottom").strip().lower()
         return s if s in ("bottom", "right") else "bottom"
-
-    @field_validator("legend_columns", mode="before")
-    @classmethod
-    def validate_legend_columns(cls, v: Any) -> Optional[int]:
-        if v is None or v == "" or v == "auto":
-            return None
-        try:
-            n = int(v)
-            return max(1, min(6, n))
-        except (ValueError, TypeError):
-            return None
 
     @field_validator("orientation", mode="before")
     @classmethod
@@ -372,34 +322,6 @@ class CustomChartBlock(BaseModel):
         if isinstance(v, bool):
             return v
         return str(v or "").strip().lower() in ("true", "1", "yes")
-
-    @field_validator("full_position", mode="before")
-    @classmethod
-    def validate_chart_full_pos(cls, v: Any) -> str:
-        return _normalize_full_position(v)
-
-    @field_validator("anchor_to", mode="before")
-    @classmethod
-    def validate_chart_anchor_to(cls, v: Any) -> Optional[str]:
-        return _normalize_anchor_to(v)
-
-    @field_validator("chart_height_mm", mode="before")
-    @classmethod
-    def validate_chart_height_mm(cls, v: Any) -> int:
-        try:
-            val = int(round(float(v)))
-        except (ValueError, TypeError):
-            val = 36
-        val = max(20, min(120, val))
-        if val % 2 != 0:
-            val = int(round(val / 2.0) * 2)
-        return val
-
-    @field_validator("palette", mode="before")
-    @classmethod
-    def validate_palette(cls, v: Any) -> str:
-        s = str(v or "lukb_classic").strip()
-        return s if s in ("lukb_classic", "lukb_blues") else "lukb_classic"
 
 
 def _equal_percentage_widths(n: int) -> list[float]:
@@ -439,33 +361,14 @@ class TableColumn(BaseModel):
         return max(0.1, min(100.0, round(val, 1)))
 
 
-class TableBlock(BaseModel):
+class TableBlock(MarginAnchorBlockBase):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["table"] = "table"
     title: str = Field(default="", description="Tabellen-Titel")
     subtitle: str = Field(default="", description="Tabellen-Untertitel")
     source: str = Field(default="Quelle: LUKB Investment Office", description="Tabellen-Quelle / Fussnote")
-    layout: Literal["column", "full"] = Field(default="column")
-    full_position: FullPositionMode = Field(
-        default="auto",
-        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
-    )
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
     show_header: bool = Field(default=True, description="Tabellen-Kopfzeile anzeigen")
-    anchor_to: Optional[str] = Field(
-        default=None,
-        description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
-    )
-
-    @field_validator("full_position", mode="before")
-    @classmethod
-    def validate_table_full_pos(cls, v: Any) -> str:
-        return _normalize_full_position(v)
-
-    @field_validator("anchor_to", mode="before")
-    @classmethod
-    def validate_table_anchor_to(cls, v: Any) -> Optional[str]:
-        return _normalize_anchor_to(v)
     columns: list[TableColumn] = Field(
         default_factory=lambda: [
             TableColumn(field="col_1", title="Anlageklasse", align="left", width=33.4),
@@ -722,39 +625,33 @@ ContentBlock = Union[
 ]
 
 
+_KNOWN_BLOCK_TYPES = {
+    "heading",
+    "richtext",
+    "figure",
+    "db_chart",
+    "custom_chart",
+    "table",
+    "callout",
+    "box_start",
+    "box_end",
+    "spacer",
+    "colbreak",
+    "quote",
+    "divider",
+    "footnotes",
+    "glossary",
+    "publications",
+}
+
+_DISCRIMINATED_BLOCK_ADAPTER = TypeAdapter(Annotated[ContentBlock, Field(discriminator="type")])
+
+
 def parse_block(raw: dict[str, Any]) -> ContentBlock:
-    """Parst ein beliebiges Block-Dictionary anhand seines 'type'-Felds."""
-    btype = raw.get("type", "richtext")
-    if btype == "heading":
-        return HeadingBlock.model_validate(raw)
-    if btype == "figure":
-        return FigureBlock.model_validate(raw)
-    if btype == "db_chart":
-        return DbChartBlock.model_validate(raw)
-    if btype == "custom_chart":
-        return CustomChartBlock.model_validate(raw)
-    if btype == "table":
-        return TableBlock.model_validate(raw)
-    if btype == "callout":
-        return CalloutBlock.model_validate(raw)
-    if btype == "box_start":
-        return BoxStartBlock.model_validate(raw)
-    if btype == "box_end":
-        return BoxEndBlock.model_validate(raw)
-    if btype == "spacer":
-        return SpacerBlock.model_validate(raw)
-    if btype == "colbreak":
-        return ColbreakBlock.model_validate(raw)
-    if btype == "quote":
-        return QuoteBlock.model_validate(raw)
-    if btype == "divider":
-        return DividerBlock.model_validate(raw)
-    if btype == "footnotes":
-        return FootnotesBlock.model_validate(raw)
-    if btype == "glossary":
-        return GlossaryBlock.model_validate(raw)
-    if btype == "publications":
-        return PublicationsBlock.model_validate(raw)
+    """Parst ein beliebiges Block-Dictionary anhand seines 'type'-Felds via Pydantic-Core Discriminator."""
+    btype = raw.get("type")
+    if btype in _KNOWN_BLOCK_TYPES:
+        return _DISCRIMINATED_BLOCK_ADAPTER.validate_python(raw)
     return RichTextBlock.model_validate(raw)
 
 

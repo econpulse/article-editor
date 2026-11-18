@@ -48,7 +48,7 @@ def sidebar_ui() -> ui.Tag:
                     type="search",
                     class_="cms-input",
                     placeholder="Schnellfilter (Titel, Autor, Rubrik) …",
-                    oninput="Shiny.setInputValue('sidebar_search_query', this.value, {priority: 'event'})",
+                    oninput="clearTimeout(this._st);this._st=setTimeout(()=>Shiny.setInputValue('sidebar_search_query', this.value, {priority: 'event'}), 200)",
                 ),
                 ui.tags.select(
                     ui.tags.option("Alle aktiven Publikationen", value="all"),

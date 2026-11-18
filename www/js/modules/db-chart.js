@@ -12,18 +12,7 @@
 
   const LUKB_SERIES_COLORS = ["#037FDA", "#9CD4FB", "#431231", "#BA249D", "#F07E2C"];
 
-  const DB_CHART_PALETTES = [
-    {
-      id: "lukb_classic",
-      label: "LUKB Standard",
-      colors: ["#037FDA", "#9CD4FB", "#431231", "#BA249D", "#F07E2C"],
-    },
-    {
-      id: "lukb_blues",
-      label: "Blau-Abstufung",
-      colors: ["#002855", "#005A9C", "#009FE3", "#5BB8E8", "#9BD3F2"],
-    },
-  ];
+  const DB_CHART_PALETTES = E.CHART_PALETTES;
 
   function indexTickerItems(items) {
     if (!Array.isArray(items)) return;
@@ -502,65 +491,15 @@
     }
     delete blk.palette_colors;
 
-    const paletteBar = document.createElement("div");
-    paletteBar.className = "db-chart-palette-bar";
-
-    const paletteTop = document.createElement("div");
-    paletteTop.className = "db-chart-palette-top";
-
-    const paletteLbl = document.createElement("span");
-    paletteLbl.className = "field-label";
-    paletteLbl.style.margin = "0";
-    paletteLbl.textContent = "Farbpalette:";
-
-    const palettePresetsWrap = document.createElement("div");
-    palettePresetsWrap.className = "db-palette-presets";
-
-    function getActivePaletteColors() {
-      const presetObj =
-        DB_CHART_PALETTES.find(function (p) { return p.id === blk.palette; }) ||
-        DB_CHART_PALETTES[0];
-      return presetObj.colors;
-    }
-
-    function renderPaletteControls() {
-      palettePresetsWrap.innerHTML = "";
-      DB_CHART_PALETTES.forEach(function (preset) {
-        const pBtn = document.createElement("button");
-        pBtn.type = "button";
-        pBtn.className = "db-palette-preset-btn" + (blk.palette === preset.id ? " active" : "");
-        pBtn.title = "Farbpalette «" + preset.label + "» anwenden";
-
-        const swatches = document.createElement("span");
-        swatches.className = "db-palette-mini-swatches";
-        preset.colors.forEach(function (hex) {
-          const sw = document.createElement("span");
-          sw.className = "db-palette-mini-swatch";
-          sw.style.backgroundColor = hex;
-          swatches.appendChild(sw);
-        });
-
-        const lblSpan = document.createElement("span");
-        lblSpan.textContent = preset.label;
-
-        pBtn.appendChild(swatches);
-        pBtn.appendChild(lblSpan);
-        pBtn.addEventListener("click", function () {
-          blk.palette = preset.id;
-          renderPaletteControls();
-          renderSeriesRows();
-          requestDbChartPreview(blk, true);
-          markDirty();
-          if (typeof flushAutosave === "function") flushAutosave(false);
-        });
-        palettePresetsWrap.appendChild(pBtn);
-      });
-    }
-
-    paletteTop.appendChild(paletteLbl);
-    paletteTop.appendChild(palettePresetsWrap);
-    paletteBar.appendChild(paletteTop);
-    container.appendChild(paletteBar);
+    const paletteCtrl = E.createChartPaletteBar(blk, DB_CHART_PALETTES, function () {
+      renderSeriesRows();
+      requestDbChartPreview(blk, true);
+      markDirty();
+      if (typeof flushAutosave === "function") flushAutosave(false);
+    });
+    const getActivePaletteColors = paletteCtrl.getActiveColors;
+    const renderPaletteControls = paletteCtrl.render;
+    container.appendChild(paletteCtrl.element);
 
     // Zeile 4: Zeitreihen-Builder (maximal 5 Ticker)
     const seriesSection = document.createElement("div");
@@ -738,116 +677,11 @@
     container.appendChild(seriesSection);
 
     // Zeile 5: Eigener Container für Höhe der Chartfläche (Y-Achse in mm)
-    const heightBar = document.createElement("div");
-    heightBar.className = "db-chart-height-bar";
-
-    const heightLeft = document.createElement("div");
-    heightLeft.className = "db-chart-height-left";
-
-    const heightLbl = document.createElement("label");
-    heightLbl.className = "field-label";
-    heightLbl.style.margin = "0";
-    heightLbl.style.whiteSpace = "nowrap";
-    heightLbl.textContent = "Höhe Chartfläche (Y-Achse):";
-
-    const heightInp = document.createElement("input");
-    heightInp.type = "number";
-    heightInp.className = "cms-input font-medium";
-    heightInp.style.maxWidth = "70px";
-    heightInp.style.textAlign = "center";
-    heightInp.style.padding = "4px 8px";
-    heightInp.min = "20";
-    heightInp.max = "100";
-    heightInp.step = "2";
-    heightInp.value = blk.chart_height_mm || 36;
-
-    const presetButtons = [];
-
-    function updateChartHeight(newVal) {
-      let num = parseInt(newVal, 10);
-      if (isNaN(num)) num = 36;
-      num = Math.max(20, Math.min(100, Math.round(num / 2) * 2));
-      blk.chart_height_mm = num;
-      heightInp.value = num;
-      updatePresetActive();
+    const heightBar = E.createChartHeightBar(blk, null, function () {
       requestDbChartPreview(blk, true);
       markDirty();
       if (typeof flushAutosave === "function") flushAutosave(false);
-    }
-
-    function updatePresetActive() {
-      const cur = blk.chart_height_mm || 36;
-      presetButtons.forEach(function (pb) {
-        if (pb.val === cur) {
-          pb.btn.classList.add("active");
-          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
-          pb.btn.style.setProperty("color", "#FFFFFF", "important");
-          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
-        } else {
-          pb.btn.classList.remove("active");
-          pb.btn.style.removeProperty("background");
-          pb.btn.style.removeProperty("color");
-          pb.btn.style.removeProperty("border-color");
-        }
-      });
-    }
-
-    heightInp.addEventListener("change", function () {
-      updateChartHeight(heightInp.value);
     });
-
-    heightLeft.appendChild(heightLbl);
-    heightLeft.appendChild(heightInp);
-
-    const heightPresets = document.createElement("div");
-    heightPresets.className = "db-chart-height-presets";
-
-    const stepDownBtn = document.createElement("button");
-    stepDownBtn.type = "button";
-    stepDownBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
-    stepDownBtn.style.padding = "4px 8px";
-    stepDownBtn.textContent = "− 2 mm";
-    stepDownBtn.title = "Höhe um 2 mm verringern";
-    stepDownBtn.addEventListener("click", function () {
-      updateChartHeight((blk.chart_height_mm || 36) - 2);
-    });
-    heightPresets.appendChild(stepDownBtn);
-
-    const stepUpBtn = document.createElement("button");
-    stepUpBtn.type = "button";
-    stepUpBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
-    stepUpBtn.style.padding = "4px 8px";
-    stepUpBtn.textContent = "+ 2 mm";
-    stepUpBtn.title = "Höhe um 2 mm vergrössern";
-    stepUpBtn.addEventListener("click", function () {
-      updateChartHeight((blk.chart_height_mm || 36) + 2);
-    });
-    heightPresets.appendChild(stepUpBtn);
-
-    [
-      { label: "28 mm", val: 28, title: "Kompakt (28 mm)" },
-      { label: "36 mm (Standard)", val: 36, title: "Standardhöhe (36 mm)" },
-      { label: "46 mm", val: 46, title: "Erweitert (46 mm)" },
-      { label: "56 mm", val: 56, title: "Gross (56 mm)" },
-    ].forEach(function (preset) {
-      const pBtn = document.createElement("button");
-      pBtn.type = "button";
-      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn";
-      pBtn.style.padding = "4px 9px";
-      pBtn.style.fontSize = "11.5px";
-      pBtn.textContent = preset.label;
-      pBtn.title = preset.title;
-      pBtn.addEventListener("click", function () {
-        updateChartHeight(preset.val);
-      });
-      heightPresets.appendChild(pBtn);
-      presetButtons.push({ btn: pBtn, val: preset.val });
-    });
-
-    updatePresetActive();
-
-    heightBar.appendChild(heightLeft);
-    heightBar.appendChild(heightPresets);
     container.appendChild(heightBar);
 
     // Zeile 6: Live-SVG-Vorschau im Block

@@ -5,6 +5,7 @@ Behandelt Einreichung zur Prüfung (Review), Publikation auf das statische Porta
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from shiny import Inputs, Outputs, Session, reactive, ui
 
@@ -39,7 +40,8 @@ def register_workflow_handlers(
             return
         doc.status = "review"
         state.current_doc.set(doc)
-        save_article(
+        await asyncio.to_thread(
+            save_article,
             doc,
             user=state.current_user,
             create_revision=True,
@@ -68,7 +70,7 @@ def register_workflow_handlers(
             )
             return
         try:
-            res = publish_article_to_portal(doc.id, user=user)
+            res = await asyncio.to_thread(publish_article_to_portal, doc.id, user=user)
             if res.get("success"):
                 doc.status = "published"
                 state.current_doc.set(doc)
@@ -154,7 +156,12 @@ def register_workflow_handlers(
         if not doc:
             return
         try:
-            res = unpublish_article_from_portal(doc.id, user=state.current_user, new_status="draft")
+            res = await asyncio.to_thread(
+                unpublish_article_from_portal,
+                doc.id,
+                user=state.current_user,
+                new_status="draft",
+            )
             if res.get("success"):
                 doc.status = "draft"
                 state.current_doc.set(doc)

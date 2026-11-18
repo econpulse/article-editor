@@ -67,7 +67,7 @@ class SessionState:
         except Exception:
             pass
 
-    async def send_article_list(self, active_id: str) -> None:
+    async def send_article_list(self, active_id: str, include_all: bool = True) -> None:
         """Sendet die gefilterte Liste aller Artikel an die Sidebar und das Modal."""
         search_q = ""
         status_f = "all"
@@ -80,12 +80,17 @@ class SessionState:
         except Exception:
             pass
 
-        items = list_articles(search_query=search_q, status_filter=status_f)
-        all_items = (
-            items
-            if (not search_q.strip() and status_f == "all")
-            else list_articles(search_query="", status_filter="all")
-        )
+        def _fetch_lists():
+            filtered = list_articles(search_query=search_q, status_filter=status_f)
+            if not search_q.strip() and status_f == "all":
+                all_res = filtered
+            elif include_all:
+                all_res = list_articles(search_query="", status_filter="all")
+            else:
+                all_res = None
+            return filtered, all_res
+
+        items, all_items = await asyncio.to_thread(_fetch_lists)
         await self.session.send_custom_message(
             "lukb_update_article_list",
             {
@@ -144,14 +149,21 @@ class SessionState:
 
     async def load_and_broadcast_article(self, article_id: str) -> None:
         """Lädt einen Artikel, setzt den Session-Zustand und informiert andere Co-Autoren."""
-        doc = get_article(article_id)
-        if doc is None:
-            all_items = list_articles()
-            if all_items:
-                doc = get_article(all_items[0]["id"])
-            else:
-                doc = create_new_article(user=self.current_user)
+        def _load_doc_and_assets():
+            loaded_doc = get_article(article_id)
+            if loaded_doc is None:
+                all_items = list_articles()
+                if all_items:
+                    loaded_doc = get_article(all_items[0]["id"])
+                else:
+                    loaded_doc = create_new_article(user=self.current_user)
+            if loaded_doc is None:
+                return None, {}, []
+            a_map = collect_article_assets_map(loaded_doc)
+            tickers = list_available_tickers(limit=25)
+            return loaded_doc, a_map, tickers
 
+        doc, assets_map, available_tickers = await asyncio.to_thread(_load_doc_and_assets)
         if doc is None:
             return
 
@@ -159,13 +171,12 @@ class SessionState:
         self.current_article_id.set(doc.id)
         self.current_doc.set(doc)
 
-        assets_map = collect_article_assets_map(doc)
         await self.session.send_custom_message(
             "lukb_load_article",
             {
                 "article": doc.model_dump(),
                 "assets": assets_map,
-                "available_tickers": list_available_tickers(limit=25),
+                "available_tickers": available_tickers,
                 "self_session_id": self.session_id,
             },
         )

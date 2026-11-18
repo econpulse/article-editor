@@ -48,7 +48,8 @@ def register_editor_handlers(
         if not b64_str:
             return
         raw_bytes = base64.b64decode(b64_str)
-        save_asset(
+        await asyncio.to_thread(
+            save_asset,
             filename=payload.get("filename", "grafik.svg"),
             mime_type=payload.get("mime_type", "image/svg+xml"),
             data=raw_bytes,
@@ -103,12 +104,16 @@ def register_editor_handlers(
                 revision_note=str(payload.get("revision_note", "")),
                 base_doc=base_doc,
             )
-            merged_doc = ArticleDocument.model_validate(save_info["article"])
+            merged_doc = save_info.pop("doc_obj", None) or ArticleDocument.model_validate(save_info["article"])
             state.current_article_id.set(merged_doc.id)
             state.current_doc.set(merged_doc)
 
             known_asset_ids = payload.get("known_asset_ids")
-            assets_map = collect_article_assets_map(merged_doc, known_asset_ids=known_asset_ids)
+            assets_map = await asyncio.to_thread(
+                collect_article_assets_map,
+                merged_doc,
+                known_asset_ids=known_asset_ids,
+            )
             save_info["assets"] = assets_map
             await session.send_custom_message("lukb_autosave_ack", save_info)
 

@@ -5,7 +5,9 @@
   "use strict";
   const E = (window.LUKBEditor = window.LUKBEditor || {});
   function createFullLayoutControl() { return E.createFullLayoutControl.apply(this, arguments); }
+  function escapeHtml() { return E.escapeHtml.apply(this, arguments); }
   function markDirty() { return E.markDirty.apply(this, arguments); }
+  function parseDelimitedText() { return E.parseDelimitedText.apply(this, arguments); }
   function uid() { return E.uid.apply(this, arguments); }
 
   const tableEditorState = {
@@ -47,11 +49,7 @@
   }
 
   function escapeTableHtml(str) {
-    return String(str)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+    return escapeHtml(str);
   }
 
   function formatTsvCell(val) {
@@ -82,56 +80,15 @@
       const cellsHtml = [];
       for (let c = range.minCol; c <= range.maxCol && c < blk.columns.length; c++) {
         const val = rowObj[blk.columns[c].field] != null ? String(rowObj[blk.columns[c].field]) : "";
-        cellsHtml.push("<td>" + escapeTableHtml(val).replace(/\n/g, "<br>") + "</td>");
+        cellsHtml.push("<td>" + escapeHtml(val).replace(/\n/g, "<br>") + "</td>");
       }
       rowsHtml.push("<tr>" + cellsHtml.join("") + "</tr>");
     }
     return "<table><tbody>" + rowsHtml.join("") + "</tbody></table>";
   }
 
-  function parseClipboardTsv(clipText) {
-    const normalized = String(clipText || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-    const rows = [];
-    let currentRow = [];
-    let currentCell = "";
-    let inQuotes = false;
-
-    for (let i = 0; i < normalized.length; i++) {
-      const ch = normalized[i];
-      if (inQuotes) {
-        if (ch === '"') {
-          if (i + 1 < normalized.length && normalized[i + 1] === '"') {
-            currentCell += '"';
-            i++;
-          } else {
-            inQuotes = false;
-          }
-        } else {
-          currentCell += ch;
-        }
-      } else {
-        if (ch === '"' && currentCell === "") {
-          inQuotes = true;
-        } else if (ch === "\t") {
-          currentRow.push(currentCell);
-          currentCell = "";
-        } else if (ch === "\n") {
-          currentRow.push(currentCell);
-          rows.push(currentRow);
-          currentRow = [];
-          currentCell = "";
-        } else {
-          currentCell += ch;
-        }
-      }
-    }
-
-    if (currentCell !== "" || currentRow.length > 0) {
-      currentRow.push(currentCell);
-      rows.push(currentRow);
-    }
-
-    return rows;
+  function parseClipboardTsv(clipText, delimiter) {
+    return parseDelimitedText(clipText, delimiter || "\t");
   }
 
   function copyViaHiddenTextarea(text) {

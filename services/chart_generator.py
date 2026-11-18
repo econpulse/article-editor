@@ -59,6 +59,19 @@ def resolve_chart_palette(block_data: dict[str, Any]) -> list[str]:
     preset = CHART_PALETTES.get(palette_id, CHART_PALETTES["lukb_classic"])
     return list(preset["colors"])
 
+
+def compute_plot_height_px(block_data: dict[str, Any], is_column: bool) -> tuple[float, float]:
+    """Berechnet (chart_height_mm, plot_h_px) aus der konfigurierten Chartfläche-Höhe in 2mm-Schritten."""
+    chart_height_mm_raw = block_data.get("chart_height_mm")
+    try:
+        chart_height_mm = float(chart_height_mm_raw) if chart_height_mm_raw is not None else 36.0
+    except (ValueError, TypeError):
+        chart_height_mm = 36.0
+    chart_height_mm = max(20.0, min(120.0, round(chart_height_mm / 2.0) * 2.0))
+    px_per_mm = (680.0 / 87.1778) if is_column else (680.0 / 180.0)
+    plot_h = round(chart_height_mm * px_per_mm, 1)
+    return chart_height_mm, plot_h
+
 VALID_CHART_TYPES = ("line", "step", "dot", "area", "bar", "stacked_bar")
 
 FONT_WEIGHT_BODY = "300"
@@ -660,15 +673,7 @@ def generate_db_chart_svg(
     # Umrechnung von mm in SVG-Pixel bezogen auf die Druckbreite im Typst-PDF:
     # - 1-spaltig ('column'): 87.1778 mm Satzbreite bei 680 px SVG-Breite (~7.800 px/mm)
     # - 2-spaltig ('full')  : 180.0 mm Satzbreite bei 680 px SVG-Breite (~3.778 px/mm)
-    chart_height_mm_raw = block_data.get("chart_height_mm")
-    try:
-        chart_height_mm = float(chart_height_mm_raw) if chart_height_mm_raw is not None else 36.0
-    except (ValueError, TypeError):
-        chart_height_mm = 36.0
-    chart_height_mm = max(20.0, min(120.0, round(chart_height_mm / 2.0) * 2.0))
-
-    px_per_mm = (680.0 / 87.1778) if is_column_layout else (680.0 / 180.0)
-    plot_h = round(chart_height_mm * px_per_mm, 1)
+    _, plot_h = compute_plot_height_px(block_data, is_column_layout)
 
     svg_w = 680
     plot_left = y_label_right_x + y_axis_gap

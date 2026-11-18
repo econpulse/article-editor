@@ -1437,22 +1437,7 @@
     const layoutLbl = document.createElement("label");
     layoutLbl.className = "field-label";
     layoutLbl.textContent = "Satz-Breite im PDF";
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
-      markDirty();
-    });
+    const layoutSel = E.createSimpleLayoutSelect(blk);
     layoutWrap.appendChild(layoutLbl);
     layoutWrap.appendChild(layoutSel);
 
@@ -1644,22 +1629,7 @@
     const layoutLbl = document.createElement("label");
     layoutLbl.className = "field-label";
     layoutLbl.textContent = "Satz-Breite im PDF";
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
-      markDirty();
-    });
+    const layoutSel = E.createSimpleLayoutSelect(blk);
     layoutWrap.appendChild(layoutLbl);
     layoutWrap.appendChild(layoutSel);
 
@@ -1688,21 +1658,7 @@
     refreshBtn.title = "Lädt die 5 neuesten Publikationen aus dem System";
     refreshBtn.textContent = "🔄 Neueste 5 laden";
     refreshBtn.addEventListener("click", function () {
-      const currentId = state.article ? state.article.id : "";
-      const pool = (state.allArticles || []).filter(function (a) {
-        return a.id !== currentId && a.status === "published";
-      });
-      blk.items = pool.slice(0, 5).map(function (a) {
-        return {
-          article_id: a.id,
-          title: a.title || "Ohne Titel",
-          subtitle: a.subtitle || "",
-          date: a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
-          category: a.category || "",
-          url: a.url || "",
-          enabled: true,
-        };
-      });
+      blk.items = E.getLatestPublishedItemsForBlock(5);
       renderItems();
       markDirty();
     });
@@ -2513,7 +2469,9 @@
     // 2. Aktualisiert die Artikel-Liste in der linken Sidebar sowie den Modal-Katalog
     window.Shiny.addCustomMessageHandler("lukb_update_article_list", function (msg) {
       state.sidebarArticles = msg.articles || [];
-      state.allArticles = msg.all_articles || msg.articles || [];
+      state.allArticles = Array.isArray(msg.all_articles)
+        ? msg.all_articles
+        : (state.allArticles && state.allArticles.length ? state.allArticles : (msg.articles || []));
       state.activeArticleId = msg.active_id || "";
       renderArticleList(
         state.sidebarArticles,

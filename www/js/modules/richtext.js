@@ -4,6 +4,7 @@
 (function () {
   "use strict";
   const E = (window.LUKBEditor = window.LUKBEditor || {});
+  function createSimpleLayoutSelect() { return E.createSimpleLayoutSelect.apply(this, arguments); }
   function markDirty() { return E.markDirty.apply(this, arguments); }
   function sanitizeRichTextHtml() { return E.sanitizeRichTextHtml.apply(this, arguments); }
   const state = E.state;
@@ -39,8 +40,12 @@
     return res;
   }
 
+  let _glossaryPreviewTimer = null;
+
   function updateGlossaryBlockPreviews() {
-    document.querySelectorAll(".glossary-auto-detected-box").forEach(box => {
+    const boxes = document.querySelectorAll(".glossary-auto-detected-box");
+    if (!boxes || boxes.length === 0) return;
+    boxes.forEach(box => {
       const parent = box.closest(".cms-block-card");
       if (parent && parent.dataset.blockId) {
         const blk = (state.article.blocks || []).find(b => b.id === parent.dataset.blockId);
@@ -49,6 +54,14 @@
         }
       }
     });
+  }
+
+  function scheduleGlossaryBlockPreviewsUpdate(delayMs) {
+    if (_glossaryPreviewTimer) clearTimeout(_glossaryPreviewTimer);
+    _glossaryPreviewTimer = setTimeout(function () {
+      _glossaryPreviewTimer = null;
+      updateGlossaryBlockPreviews();
+    }, typeof delayMs === "number" ? delayMs : 180);
   }
 
   function renderGlossaryDetectedSection(container, blk) {
@@ -114,22 +127,7 @@
     const layoutLbl = document.createElement("label");
     layoutLbl.className = "field-label";
     layoutLbl.textContent = "Satz-Breite im PDF";
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
-      markDirty();
-    });
+    const layoutSel = createSimpleLayoutSelect(blk);
     layoutWrap.appendChild(layoutLbl);
     layoutWrap.appendChild(layoutSel);
 
@@ -847,7 +845,7 @@
 
     editable.addEventListener("input", function () {
       onChange(sanitizeRichTextHtml(editable.innerHTML));
-      updateGlossaryBlockPreviews();
+      scheduleGlossaryBlockPreviewsUpdate();
     });
 
     editable.addEventListener("blur", function () {
@@ -938,23 +936,7 @@
     topLbl.style.margin = "0";
     topLbl.textContent = "Zitat / Pull-Quote (LUKB Corporate Design)";
 
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    layoutSel.style.width = "180px";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
-      markDirty();
-    });
+    const layoutSel = createSimpleLayoutSelect(blk, 180);
 
     topRow.appendChild(topLbl);
     topRow.appendChild(layoutSel);

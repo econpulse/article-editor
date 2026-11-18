@@ -5,6 +5,7 @@ Behandelt Artikel-Auswahl, Erstellung, Duplizierung, Soft-Delete, Restore und Di
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from shiny import Inputs, Outputs, Session, reactive, ui
 
@@ -33,7 +34,7 @@ def register_article_handlers(
     # Initiales Laden beim Sitzungsstart
     @reactive.effect
     async def _init_session() -> None:
-        items = list_articles()
+        items = await asyncio.to_thread(list_articles)
         first_id = items[0]["id"] if items else ""
         await state.load_and_broadcast_article(first_id)
 
@@ -41,7 +42,7 @@ def register_article_handlers(
     @reactive.effect
     @reactive.event(input.sidebar_search_query, input.sidebar_status_val)
     async def _on_sidebar_filter() -> None:
-        await state.send_article_list(state.current_article_id.get())
+        await state.send_article_list(state.current_article_id.get(), include_all=False)
 
     # Klick auf einen anderen Artikel in der Sidebar
     @reactive.effect
@@ -58,7 +59,7 @@ def register_article_handlers(
     @reactive.effect
     @reactive.event(input.btn_new_article)
     async def _on_new_article() -> None:
-        new_doc = create_new_article(user=state.current_user)
+        new_doc = await asyncio.to_thread(create_new_article, user=state.current_user)
         await state.load_and_broadcast_article(new_doc.id)
         ui.notification_show("Neue Publikation wurde angelegt.", type="message", duration=3)
 
@@ -69,7 +70,7 @@ def register_article_handlers(
         aid = state.current_article_id.get()
         if not aid:
             return
-        dup_doc = duplicate_article(aid, user=state.current_user)
+        dup_doc = await asyncio.to_thread(duplicate_article, aid, user=state.current_user)
         if dup_doc:
             await state.load_and_broadcast_article(dup_doc.id)
             ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
@@ -123,7 +124,7 @@ def register_article_handlers(
             )
             return
 
-        all_items = list_articles()
+        all_items = await asyncio.to_thread(list_articles)
         if len(all_items) <= 1:
             ui.notification_show(
                 "Der letzte verbleibende Artikel kann nicht gelöscht werden.",
@@ -169,8 +170,8 @@ def register_article_handlers(
         aid = state.current_article_id.get()
         if not aid:
             return
-        delete_article(aid, user=state.current_user, force=True)
-        remaining = list_articles()
+        await asyncio.to_thread(delete_article, aid, user=state.current_user, force=True)
+        remaining = await asyncio.to_thread(list_articles)
         next_id = remaining[0]["id"] if remaining else ""
         if next_id:
             await state.load_and_broadcast_article(next_id)
@@ -193,7 +194,7 @@ def register_article_handlers(
                 duration=5,
             )
             return
-        ok = restore_article(aid, user=user)
+        ok = await asyncio.to_thread(restore_article, aid, user=user)
         if ok:
             await state.load_and_broadcast_article(aid)
             ui.notification_show("Publikation wurde aus dem Archiv wiederhergestellt (Status: Entwurf).", type="message", duration=4)
@@ -210,11 +211,11 @@ def register_article_handlers(
         action = payload.get("action", "")
         target_id = payload.get("id", "")
         if action == "create":
-            new_doc = create_new_article(user=state.current_user)
+            new_doc = await asyncio.to_thread(create_new_article, user=state.current_user)
             await state.load_and_broadcast_article(new_doc.id)
             ui.notification_show("Neue Publikation wurde angelegt.", type="message", duration=3)
         elif action == "duplicate" and target_id:
-            dup_doc = duplicate_article(target_id, user=state.current_user)
+            dup_doc = await asyncio.to_thread(duplicate_article, target_id, user=state.current_user)
             if dup_doc:
                 await state.load_and_broadcast_article(dup_doc.id)
                 ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
@@ -223,10 +224,10 @@ def register_article_handlers(
             if not can_delete(user):
                 ui.notification_show("Nur Administratoren oder Senior Editoren dürfen Publikationen löschen.", type="warning", duration=5)
                 return
-            target_doc = get_article(target_id)
+            target_doc = await asyncio.to_thread(get_article, target_id)
             if not target_doc:
                 return
-            all_items = list_articles()
+            all_items = await asyncio.to_thread(list_articles)
             if len(all_items) <= 1:
                 ui.notification_show(
                     "Der letzte verbleibende Artikel kann nicht gelöscht werden.",
@@ -234,9 +235,9 @@ def register_article_handlers(
                     duration=4,
                 )
                 return
-            delete_article(target_id, user=user, force=True)
+            await asyncio.to_thread(delete_article, target_id, user=user, force=True)
             if state.current_article_id.get() == target_id:
-                remaining = list_articles()
+                remaining = await asyncio.to_thread(list_articles)
                 next_id = remaining[0]["id"] if remaining else ""
                 await state.load_and_broadcast_article(next_id)
             else:

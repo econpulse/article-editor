@@ -472,6 +472,45 @@ def test_dual_output_typst_and_web_rendering():
     assert "db-series-color-dot" in js_src
 
 
+def test_custom_chart_svg_cache():
+    from services.custom_chart_generator import (
+        _CUSTOM_CHART_SVG_CACHE,
+        clear_custom_chart_cache,
+        generate_custom_chart_svg,
+    )
+
+    clear_custom_chart_cache()
+    assert len(_CUSTOM_CHART_SVG_CACHE) == 0
+
+    blk = {
+        "id": "cache_test_blk",
+        "type": "custom_chart",
+        "chart_type": "category_bar",
+        "raw_tsv": "Kategorie\tWert\nAktien\t45\nBonds\t55\n",
+    }
+    svg1 = generate_custom_chart_svg(blk)
+    assert isinstance(svg1, str) and "<svg" in svg1
+    assert len(_CUSTOM_CHART_SVG_CACHE) == 1
+
+    svg2 = generate_custom_chart_svg(blk)
+    assert svg2 is svg1
+    assert len(_CUSTOM_CHART_SVG_CACHE) == 1
+
+    blk_changed = dict(blk, chart_height_mm=46)
+    svg3 = generate_custom_chart_svg(blk_changed)
+    assert svg3 != svg1
+    assert len(_CUSTOM_CHART_SVG_CACHE) == 2
+
+    svg_plain1 = generate_custom_chart_svg(blk, embed_fonts=False)
+    svg_plain2 = generate_custom_chart_svg(blk, embed_fonts=False)
+    assert svg_plain2 is svg_plain1
+    assert svg_plain1 != svg1 or len(_CUSTOM_CHART_SVG_CACHE) == 3
+    assert len(_CUSTOM_CHART_SVG_CACHE) == 3
+
+    clear_custom_chart_cache()
+    assert len(_CUSTOM_CHART_SVG_CACHE) == 0
+
+
 if __name__ == "__main__":
     test_parsing_helpers()
     test_auto_detection()
@@ -481,4 +520,5 @@ if __name__ == "__main__":
     test_chart_height_scaling()
     test_pydantic_schema_validation()
     test_dual_output_typst_and_web_rendering()
+    test_custom_chart_svg_cache()
     print("ALL CUSTOM CHART TESTS PASSED SUCCESSFULLY!")

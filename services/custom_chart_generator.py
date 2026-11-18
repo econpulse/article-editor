@@ -12,8 +12,10 @@ Unterstützt Wide-Format-Daten aus Excel / Zwischenablage:
 from __future__ import annotations
 
 import csv
+import hashlib
 import html
 import io
+import json
 import math
 import re
 from datetime import date, datetime
@@ -29,6 +31,7 @@ from services.chart_generator import (
     _estimate_label_width_px,
     _format_ch_number,
     _render_empty_state_svg,
+    compute_plot_height_px,
     resolve_chart_palette,
 )
 
@@ -360,15 +363,7 @@ def _render_doughnut_pie_svg(
     row_height = 29.0 if is_column else 24.0
 
     # Höhe der Chartfläche aus Blockdaten auslesen und skalieren
-    chart_height_mm_raw = block_data.get("chart_height_mm")
-    try:
-        chart_height_mm = float(chart_height_mm_raw) if chart_height_mm_raw is not None else 36.0
-    except (ValueError, TypeError):
-        chart_height_mm = 36.0
-    chart_height_mm = max(20.0, min(120.0, round(chart_height_mm / 2.0) * 2.0))
-
-    px_per_mm = (680.0 / 87.1778) if is_column else (680.0 / 180.0)
-    target_plot_h = round(chart_height_mm * px_per_mm, 1)
+    _, target_plot_h = compute_plot_height_px(block_data, is_column)
 
     # Geometrie & Positionierung
     if is_legend_right:
@@ -612,28 +607,22 @@ def _wrap_category_label(text: str, max_width_px: float, font_size: float, max_l
     return lines
 
 
-def _render_vertical_category_bar_svg(
+def _extract_active_category_series_and_rows(
     block_data: dict[str, Any],
     columns: list[str],
     rows: list[list[str]],
+    active_palette: list[str],
     embed_fonts: bool = True,
-) -> str:
-    """Rendert ein vertikales Kategorie-Säulendiagramm (gruppiert oder gestapelt) mit Legende."""
-    layout_mode = str(block_data.get("layout") or "column").strip()
-    is_column = layout_mode != "full"
-    bar_mode = str(block_data.get("bar_mode") or "grouped").strip()
-    color_by_cat = bool(block_data.get("color_by_category", False))
-    active_palette = resolve_chart_palette(block_data)
-
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], str | None]:
+    """Extrahiert aktive Wert-Serien und Kategorien-Zeilen für Säulen- und Balkendiagramme."""
     x_col = str(block_data.get("x_col") or (columns[0] if columns else "")).strip()
     x_idx = columns.index(x_col) if x_col in columns else 0
 
-    # Aktive Serien ermitteln
     series_cfg = block_data.get("series") or []
     active_series: list[dict[str, Any]] = []
 
     if series_cfg:
-        for idx, s in enumerate(series_cfg):
+        for s in series_cfg:
             field = s.get("field") if isinstance(s, dict) else getattr(s, "field", "")
             enabled = s.get("enabled", True) if isinstance(s, dict) else getattr(s, "enabled", True)
             label = s.get("label") if isinstance(s, dict) else getattr(s, "label", "")
@@ -648,7 +637,6 @@ def _render_vertical_category_bar_svg(
                 )
 
     if not active_series:
-        # Fallback: alle Spalten ausser X
         for col_i, col in enumerate(columns):
             if col_i != x_idx:
                 active_series.append(
@@ -661,13 +649,12 @@ def _render_vertical_category_bar_svg(
                 )
 
     if not active_series:
-        return _render_empty_state_svg(
+        return [], [], _render_empty_state_svg(
             "Keine Wert-Spalten ausgewählt",
             "Bitte wählen Sie mindestens eine Spalte für die Werte aus.",
             embed_fonts=embed_fonts,
         )
 
-    # Daten extrahieren: [{category: "Aktien", values: [10.0, 15.0]}, ...]
     categories: list[dict[str, Any]] = []
     for r in rows:
         if len(r) <= x_idx:
@@ -683,11 +670,103 @@ def _render_vertical_category_bar_svg(
         categories.append({"category": cat_name, "values": vals})
 
     if not categories:
-        return _render_empty_state_svg(
+        return [], [], _render_empty_state_svg(
             "Keine Datenzeilen vorhanden",
             "Fügen Sie Tabellendaten mit Kategorien und Werten ein.",
             embed_fonts=embed_fonts,
         )
+
+    return active_series, categories, None
+
+
+def _build_category_chart_legend(
+    block_data: dict[str, Any],
+    categories: list[dict[str, Any]],
+    active_series: list[dict[str, Any]],
+    active_palette: list[str],
+    is_column: bool,
+    color_by_cat: bool,
+    plot_right: float,
+    axis_labels_bottom_y: float,
+    legend_font_size: float,
+    fallback_svg_h: int,
+) -> tuple[list[str], int]:
+    """Erstellt die SVG-Legende für Kategorie-Säulen- und Balkendiagramme und berechnet `svg_h`."""
+    legend_elements: list[str] = []
+    legend_rows = 0
+    items_per_legend_row = resolve_legend_columns(block_data, default_columns=2)
+    legend_row_gap = 28.0 if is_column else 22.0
+
+    if color_by_cat and len(active_series) == 1:
+        legend_rows = math.ceil(len(categories) / items_per_legend_row)
+    elif len(active_series) > 1:
+        legend_rows = math.ceil(len(active_series) / items_per_legend_row)
+
+    if legend_rows <= 0:
+        return legend_elements, fallback_svg_h
+
+    desired_gap = 32.0 if is_column else 22.0
+    external_gap = 12.0 if is_column else 8.0
+    legend_top = axis_labels_bottom_y + desired_gap
+    legend_start_y = round(legend_top + 13.0, 1)
+
+    legend_left_x = 0.0
+    col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
+
+    if color_by_cat and len(active_series) == 1:
+        for idx, cat in enumerate(categories):
+            r_idx = idx // items_per_legend_row
+            c_idx = idx % items_per_legend_row
+            lx = legend_left_x + c_idx * col_w
+            ly = legend_start_y + r_idx * legend_row_gap
+            cat_color = active_palette[idx % len(active_palette)]
+            safe_lbl = html.escape(cat["category"])
+            legend_elements.append(
+                f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{cat_color}"/>'
+            )
+            legend_elements.append(
+                f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
+                f'{safe_lbl}</text>'
+            )
+    elif len(active_series) > 1:
+        for idx, s in enumerate(active_series):
+            r_idx = idx // items_per_legend_row
+            c_idx = idx % items_per_legend_row
+            lx = legend_left_x + c_idx * col_w
+            ly = legend_start_y + r_idx * legend_row_gap
+            safe_lbl = html.escape(s["label"])
+            legend_elements.append(
+                f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{s["color"]}"/>'
+            )
+            legend_elements.append(
+                f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
+                f'{safe_lbl}</text>'
+            )
+
+    legend_bottom = legend_start_y + (legend_rows - 1) * legend_row_gap + 4.0
+    internal_bottom_pad = max(10.0, desired_gap - external_gap)
+    svg_h = int(round(legend_bottom + internal_bottom_pad))
+    return legend_elements, svg_h
+
+
+def _render_vertical_category_bar_svg(
+    block_data: dict[str, Any],
+    columns: list[str],
+    rows: list[list[str]],
+    embed_fonts: bool = True,
+) -> str:
+    """Rendert ein vertikales Kategorie-Säulendiagramm (gruppiert oder gestapelt) mit Legende."""
+    layout_mode = str(block_data.get("layout") or "column").strip()
+    is_column = layout_mode != "full"
+    bar_mode = str(block_data.get("bar_mode") or "grouped").strip()
+    color_by_cat = bool(block_data.get("color_by_category", False))
+    active_palette = resolve_chart_palette(block_data)
+
+    active_series, categories, empty_svg = _extract_active_category_series_and_rows(
+        block_data, columns, rows, active_palette, embed_fonts=embed_fonts
+    )
+    if empty_svg is not None:
+        return empty_svg
 
     # Y-Wertebereich ermitteln
     y_candidates: list[float] = [0.0]
@@ -723,15 +802,7 @@ def _render_vertical_category_bar_svg(
     y_label_right_x = max(12.0, round(max_y_label_w, 1))
     y_axis_gap = 10.0 if is_column else 8.0
 
-    chart_height_mm_raw = block_data.get("chart_height_mm")
-    try:
-        chart_height_mm = float(chart_height_mm_raw) if chart_height_mm_raw is not None else 36.0
-    except (ValueError, TypeError):
-        chart_height_mm = 36.0
-    chart_height_mm = max(20.0, min(120.0, round(chart_height_mm / 2.0) * 2.0))
-
-    px_per_mm = (680.0 / 87.1778) if is_column else (680.0 / 180.0)
-    plot_h = round(chart_height_mm * px_per_mm, 1)
+    _, plot_h = compute_plot_height_px(block_data, is_column)
 
     svg_w = 680
     plot_left = y_label_right_x + y_axis_gap
@@ -818,61 +889,18 @@ def _render_vertical_category_bar_svg(
                 )
 
     # Legende (exakt vertikal zentriert zwischen Achsenbeschriftung und Quellenangabe)
-    legend_elements: list[str] = []
-    legend_rows = 0
-    items_per_legend_row = resolve_legend_columns(block_data, default_columns=2)
-    legend_row_gap = 28.0 if is_column else 22.0
-
-    if color_by_cat and len(active_series) == 1:
-        legend_rows = math.ceil(len(categories) / items_per_legend_row)
-    elif len(active_series) > 1:
-        legend_rows = math.ceil(len(active_series) / items_per_legend_row)
-
-    if legend_rows > 0:
-        desired_gap = 32.0 if is_column else 22.0
-        external_gap = 12.0 if is_column else 8.0
-        legend_top = axis_labels_bottom_y + desired_gap
-        legend_start_y = round(legend_top + 13.0, 1)
-
-        legend_left_x = 0.0
-        col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
-
-        if color_by_cat and len(active_series) == 1:
-            for idx, cat in enumerate(categories):
-                r_idx = idx // items_per_legend_row
-                c_idx = idx % items_per_legend_row
-                lx = legend_left_x + c_idx * col_w
-                ly = legend_start_y + r_idx * legend_row_gap
-                cat_color = active_palette[idx % len(active_palette)]
-                safe_lbl = html.escape(cat["category"])
-                legend_elements.append(
-                    f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{cat_color}"/>'
-                )
-                legend_elements.append(
-                    f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
-                    f'{safe_lbl}</text>'
-                )
-        elif len(active_series) > 1:
-            for idx, s in enumerate(active_series):
-                r_idx = idx // items_per_legend_row
-                c_idx = idx % items_per_legend_row
-                lx = legend_left_x + c_idx * col_w
-                ly = legend_start_y + r_idx * legend_row_gap
-                safe_lbl = html.escape(s["label"])
-
-                legend_elements.append(
-                    f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{s["color"]}"/>'
-                )
-                legend_elements.append(
-                    f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
-                    f'{safe_lbl}</text>'
-                )
-
-        legend_bottom = legend_start_y + (legend_rows - 1) * legend_row_gap + 4.0
-        internal_bottom_pad = max(10.0, desired_gap - external_gap)
-        svg_h = int(round(legend_bottom + internal_bottom_pad))
-    else:
-        svg_h = int(round(axis_labels_bottom_y + (20.0 if is_column else 14.0)))
+    legend_elements, svg_h = _build_category_chart_legend(
+        block_data=block_data,
+        categories=categories,
+        active_series=active_series,
+        active_palette=active_palette,
+        is_column=is_column,
+        color_by_cat=color_by_cat,
+        plot_right=plot_right,
+        axis_labels_bottom_y=axis_labels_bottom_y,
+        legend_font_size=legend_font_size,
+        fallback_svg_h=int(round(axis_labels_bottom_y + (20.0 if is_column else 14.0))),
+    )
 
     # SVG assembeln
     svg_parts: list[str] = [
@@ -918,67 +946,11 @@ def _render_horizontal_bar_svg(
     color_by_cat = bool(block_data.get("color_by_category", False))
     active_palette = resolve_chart_palette(block_data)
 
-    x_col = str(block_data.get("x_col") or (columns[0] if columns else "")).strip()
-    x_idx = columns.index(x_col) if x_col in columns else 0
-
-    # Aktive Serien ermitteln
-    series_cfg = block_data.get("series") or []
-    active_series: list[dict[str, Any]] = []
-
-    if series_cfg:
-        for idx, s in enumerate(series_cfg):
-            field = s.get("field") if isinstance(s, dict) else getattr(s, "field", "")
-            enabled = s.get("enabled", True) if isinstance(s, dict) else getattr(s, "enabled", True)
-            label = s.get("label") if isinstance(s, dict) else getattr(s, "label", "")
-            if enabled and field in columns and field != x_col:
-                active_series.append(
-                    {
-                        "field": field,
-                        "col_idx": columns.index(field),
-                        "label": label if label else field,
-                        "color": active_palette[len(active_series) % len(active_palette)],
-                    }
-                )
-
-    if not active_series:
-        for col_i, col in enumerate(columns):
-            if col_i != x_idx:
-                active_series.append(
-                    {
-                        "field": col,
-                        "col_idx": col_i,
-                        "label": col,
-                        "color": active_palette[len(active_series) % len(active_palette)],
-                    }
-                )
-
-    if not active_series:
-        return _render_empty_state_svg(
-            "Keine Wert-Spalten ausgewählt",
-            "Bitte wählen Sie mindestens eine Spalte für die Werte aus.",
-            embed_fonts=embed_fonts,
-        )
-
-    categories: list[dict[str, Any]] = []
-    for r in rows:
-        if len(r) <= x_idx:
-            continue
-        cat_name = str(r[x_idx]).strip()
-        if not cat_name:
-            continue
-        vals: list[float] = []
-        for s in active_series:
-            c_idx = s["col_idx"]
-            val_f = parse_number(r[c_idx]) if len(r) > c_idx else None
-            vals.append(val_f if val_f is not None else 0.0)
-        categories.append({"category": cat_name, "values": vals})
-
-    if not categories:
-        return _render_empty_state_svg(
-            "Keine Datenzeilen vorhanden",
-            "Fügen Sie Tabellendaten mit Kategorien und Werten ein.",
-            embed_fonts=embed_fonts,
-        )
+    active_series, categories, empty_svg = _extract_active_category_series_and_rows(
+        block_data, columns, rows, active_palette, embed_fonts=embed_fonts
+    )
+    if empty_svg is not None:
+        return empty_svg
 
     x_candidates: list[float] = [0.0]
     for cat in categories:
@@ -1007,15 +979,7 @@ def _render_horizontal_bar_svg(
     plot_top = 18.0
 
     n_cats = max(1, len(categories))
-    chart_height_mm_raw = block_data.get("chart_height_mm")
-    try:
-        chart_height_mm = float(chart_height_mm_raw) if chart_height_mm_raw is not None else 36.0
-    except (ValueError, TypeError):
-        chart_height_mm = 36.0
-    chart_height_mm = max(20.0, min(120.0, round(chart_height_mm / 2.0) * 2.0))
-
-    px_per_mm = (680.0 / 87.1778) if is_column else (680.0 / 180.0)
-    target_plot_h = round(chart_height_mm * px_per_mm, 1)
+    _, target_plot_h = compute_plot_height_px(block_data, is_column)
 
     min_needed_h = n_cats * (24.0 if is_column else 18.0)
     plot_h = max(target_plot_h, min_needed_h)
@@ -1057,61 +1021,18 @@ def _render_horizontal_bar_svg(
             )
 
     # Legende (exakt vertikal zentriert zwischen Achsenbeschriftung und Quellenangabe)
-    legend_elements: list[str] = []
-    legend_rows = 0
-    items_per_legend_row = resolve_legend_columns(block_data, default_columns=2)
-    legend_row_gap = 28.0 if is_column else 22.0
-
-    if color_by_cat and len(active_series) == 1:
-        legend_rows = math.ceil(len(categories) / items_per_legend_row)
-    elif len(active_series) > 1:
-        legend_rows = math.ceil(len(active_series) / items_per_legend_row)
-
-    if legend_rows > 0:
-        desired_gap = 32.0 if is_column else 22.0
-        external_gap = 12.0 if is_column else 8.0
-        axis_labels_bottom_y = plot_bottom + 28.0
-        legend_top = axis_labels_bottom_y + desired_gap
-        legend_start_y = round(legend_top + 13.0, 1)
-
-        legend_left_x = 0.0
-        col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
-
-        if color_by_cat and len(active_series) == 1:
-            for idx, cat in enumerate(categories):
-                r_idx = idx // items_per_legend_row
-                c_idx = idx % items_per_legend_row
-                lx = legend_left_x + c_idx * col_w
-                ly = legend_start_y + r_idx * legend_row_gap
-                cat_color = active_palette[idx % len(active_palette)]
-                safe_lbl = html.escape(cat["category"])
-                legend_elements.append(
-                    f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{cat_color}"/>'
-                )
-                legend_elements.append(
-                    f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
-                    f'{safe_lbl}</text>'
-                )
-        elif len(active_series) > 1:
-            for idx, s in enumerate(active_series):
-                r_idx = idx // items_per_legend_row
-                c_idx = idx % items_per_legend_row
-                lx = legend_left_x + c_idx * col_w
-                ly = legend_start_y + r_idx * legend_row_gap
-                safe_lbl = html.escape(s["label"])
-                legend_elements.append(
-                    f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{s["color"]}"/>'
-                )
-                legend_elements.append(
-                    f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
-                    f'{safe_lbl}</text>'
-                )
-
-        legend_bottom = legend_start_y + (legend_rows - 1) * legend_row_gap + 4.0
-        internal_bottom_pad = max(10.0, desired_gap - external_gap)
-        svg_h = int(round(legend_bottom + internal_bottom_pad))
-    else:
-        svg_h = int(round(plot_bottom + (42.0 if is_column else 32.0)))
+    legend_elements, svg_h = _build_category_chart_legend(
+        block_data=block_data,
+        categories=categories,
+        active_series=active_series,
+        active_palette=active_palette,
+        is_column=is_column,
+        color_by_cat=color_by_cat,
+        plot_right=plot_right,
+        axis_labels_bottom_y=plot_bottom + 28.0,
+        legend_font_size=legend_font_size,
+        fallback_svg_h=int(round(plot_bottom + (42.0 if is_column else 32.0))),
+    )
 
     svg_parts: list[str] = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svg_w} {svg_h}" width="{svg_w}" height="{svg_h}" font-family="{FONT_BODY}">',
@@ -1282,15 +1203,7 @@ def _render_timeseries_svg(
     y_label_right_x = max(12.0, round(max_y_label_w, 1))
     y_axis_gap = 10.0 if is_column else 9.0
 
-    chart_height_mm_raw = block_data.get("chart_height_mm")
-    try:
-        chart_height_mm = float(chart_height_mm_raw) if chart_height_mm_raw is not None else 36.0
-    except (ValueError, TypeError):
-        chart_height_mm = 36.0
-    chart_height_mm = max(20.0, min(120.0, round(chart_height_mm / 2.0) * 2.0))
-
-    px_per_mm = (680.0 / 87.1778) if is_column else (680.0 / 180.0)
-    plot_h = round(chart_height_mm * px_per_mm, 1)
+    _, plot_h = compute_plot_height_px(block_data, is_column)
 
     svg_w = 680
     plot_left = y_label_right_x + y_axis_gap
@@ -1443,6 +1356,74 @@ def _render_timeseries_svg(
     return "\n".join(svg_parts)
 
 
+_CUSTOM_CHART_SVG_CACHE: dict[str, str] = {}
+_CUSTOM_CHART_CACHE_MAX_SIZE = 256
+
+
+def clear_custom_chart_cache() -> None:
+    """Leert den In-Memory-SVG-Cache für Custom-Charts."""
+    _CUSTOM_CHART_SVG_CACHE.clear()
+
+
+def _compute_custom_chart_cache_key(
+    block_data: dict[str, Any],
+    embed_fonts: bool,
+) -> str:
+    raw_tsv = str(block_data.get("raw_tsv") or "").strip()
+    raw_series = block_data.get("series") or []
+    normalized_series = []
+    for s in raw_series:
+        if isinstance(s, dict):
+            normalized_series.append(
+                {
+                    "field": str(s.get("field") or ""),
+                    "label": str(s.get("label") or ""),
+                    "chart_type": str(s.get("chart_type") or "line"),
+                    "enabled": bool(s.get("enabled", True)),
+                }
+            )
+        else:
+            normalized_series.append(
+                {
+                    "field": str(getattr(s, "field", "") or ""),
+                    "label": str(getattr(s, "label", "") or ""),
+                    "chart_type": str(getattr(s, "chart_type", "line") or "line"),
+                    "enabled": bool(getattr(s, "enabled", True)),
+                }
+            )
+
+    user_leg_cols = block_data.get("legend_columns")
+    if user_leg_cols is not None and user_leg_cols not in ("", "auto", 0):
+        try:
+            leg_cols_str = str(int(user_leg_cols))
+        except (ValueError, TypeError):
+            leg_cols_str = "auto"
+    else:
+        leg_cols_str = "auto"
+
+    key_payload = {
+        "raw_tsv": raw_tsv,
+        "has_header": bool(block_data.get("has_header", True)),
+        "data_columns": [] if raw_tsv else list(block_data.get("data_columns") or []),
+        "data_rows": [] if raw_tsv else [list(r) for r in (block_data.get("data_rows") or [])],
+        "chart_type": str(block_data.get("chart_type") or "category_bar").strip().lower(),
+        "x_col": str(block_data.get("x_col") or "").strip(),
+        "series": normalized_series,
+        "layout": str(block_data.get("layout") or "column").strip(),
+        "chart_height_mm": str(block_data.get("chart_height_mm") if block_data.get("chart_height_mm") is not None else "36").strip(),
+        "palette": resolve_chart_palette(block_data),
+        "doughnut_hole_pct": block_data.get("doughnut_hole_pct"),
+        "legend_position": str(block_data.get("legend_position") or "").strip().lower(),
+        "legend_columns": leg_cols_str,
+        "orientation": str(block_data.get("orientation") or "vertical").strip().lower(),
+        "color_by_category": bool(block_data.get("color_by_category", False)),
+        "bar_mode": str(block_data.get("bar_mode") or "grouped").strip(),
+        "embed_fonts": bool(embed_fonts),
+    }
+    raw_json = json.dumps(key_payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw_json.encode("utf-8")).hexdigest()
+
+
 def generate_custom_chart_svg(
     block_data: dict[str, Any],
     embed_fonts: bool = True,
@@ -1450,7 +1431,14 @@ def generate_custom_chart_svg(
     """
     Haupteinstiegspunkt: Generiert ein druckfertiges LUKB Corporate Design Vektor-SVG
     aus den Wide-Format-Daten eines `custom_chart`-Blocks.
+    Nutzt einen Content-Hash-Cache (`_CUSTOM_CHART_SVG_CACHE`), sodass unveränderte
+    `custom_chart`-Blöcke bei Autosave und Rendering in 0 ms bedient werden.
     """
+    cache_key = _compute_custom_chart_cache_key(block_data, embed_fonts)
+    cached_svg = _CUSTOM_CHART_SVG_CACHE.get(cache_key)
+    if cached_svg is not None:
+        return cached_svg
+
     raw_tsv = str(block_data.get("raw_tsv") or "").strip()
     has_header = bool(block_data.get("has_header", True))
 
@@ -1462,18 +1450,23 @@ def generate_custom_chart_svg(
         rows = list(block_data.get("data_rows") or [])
 
     if not columns or not rows:
-        return _render_empty_state_svg(
+        result_svg = _render_empty_state_svg(
             "Keine Diagrammdaten vorhanden",
             "Kopieren Sie Daten aus Excel oder einer Tabelle in den Zwischenablagen-Bereich.",
             embed_fonts=embed_fonts,
         )
-
-    chart_type = str(block_data.get("chart_type") or "category_bar").strip().lower()
-
-    if chart_type in ("doughnut", "pie"):
-        return _render_doughnut_pie_svg(block_data, columns, rows, embed_fonts=embed_fonts)
-    elif chart_type == "timeseries":
-        return _render_timeseries_svg(block_data, columns, rows, embed_fonts=embed_fonts)
     else:
-        # category_bar (Standard)
-        return _render_category_bar_svg(block_data, columns, rows, embed_fonts=embed_fonts)
+        chart_type = str(block_data.get("chart_type") or "category_bar").strip().lower()
+        if chart_type in ("doughnut", "pie"):
+            result_svg = _render_doughnut_pie_svg(block_data, columns, rows, embed_fonts=embed_fonts)
+        elif chart_type == "timeseries":
+            result_svg = _render_timeseries_svg(block_data, columns, rows, embed_fonts=embed_fonts)
+        else:
+            # category_bar (Standard)
+            result_svg = _render_category_bar_svg(block_data, columns, rows, embed_fonts=embed_fonts)
+
+    if len(_CUSTOM_CHART_SVG_CACHE) >= _CUSTOM_CHART_CACHE_MAX_SIZE:
+        oldest_key = next(iter(_CUSTOM_CHART_SVG_CACHE))
+        _CUSTOM_CHART_SVG_CACHE.pop(oldest_key, None)
+    _CUSTOM_CHART_SVG_CACHE[cache_key] = result_svg
+    return result_svg

@@ -71,6 +71,301 @@
       .replace(/'/g, "&#039;");
   }
 
+  function parseDelimitedText(text, delimiter) {
+    const delim = delimiter || "\t";
+    const normalized = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    const rows = [];
+    let currentRow = [];
+    let currentCell = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < normalized.length; i++) {
+      const ch = normalized[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (i + 1 < normalized.length && normalized[i + 1] === '"') {
+            currentCell += '"';
+            i++;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          currentCell += ch;
+        }
+      } else {
+        if (ch === '"' && currentCell === "") {
+          inQuotes = true;
+        } else if (ch === delim) {
+          currentRow.push(currentCell);
+          currentCell = "";
+        } else if (ch === "\n") {
+          currentRow.push(currentCell);
+          rows.push(currentRow);
+          currentRow = [];
+          currentCell = "";
+        } else {
+          currentCell += ch;
+        }
+      }
+    }
+
+    if (currentCell !== "" || currentRow.length > 0) {
+      currentRow.push(currentCell);
+      rows.push(currentRow);
+    }
+
+    return rows;
+  }
+
+  const CHART_PALETTES = [
+    {
+      id: "lukb_classic",
+      label: "LUKB Standard",
+      colors: ["#037FDA", "#9CD4FB", "#431231", "#BA249D", "#F07E2C"],
+    },
+    {
+      id: "lukb_blues",
+      label: "Blau-Abstufung",
+      colors: ["#002855", "#005A9C", "#009FE3", "#5BB8E8", "#9BD3F2"],
+    },
+  ];
+
+  const DEFAULT_CHART_HEIGHT_PRESETS = [
+    { label: "28 mm", val: 28, title: "Kompakt (28 mm)" },
+    { label: "36 mm (Standard)", val: 36, title: "Standardhöhe (36 mm)" },
+    { label: "46 mm", val: 46, title: "Erweitert (46 mm)" },
+    { label: "56 mm", val: 56, title: "Gross (56 mm)" },
+  ];
+
+  function createChartPaletteBar(blk, palettes, onChange) {
+    const paletteList = Array.isArray(palettes) && palettes.length > 0 ? palettes : CHART_PALETTES;
+    if (blk.palette !== "lukb_classic" && blk.palette !== "lukb_blues") {
+      blk.palette = "lukb_classic";
+    }
+    delete blk.palette_colors;
+
+    const paletteBar = document.createElement("div");
+    paletteBar.className = "db-chart-palette-bar";
+
+    const paletteTop = document.createElement("div");
+    paletteTop.className = "db-chart-palette-top";
+
+    const paletteLbl = document.createElement("span");
+    paletteLbl.className = "field-label";
+    paletteLbl.style.margin = "0";
+    paletteLbl.textContent = "Farbpalette:";
+
+    const palettePresetsWrap = document.createElement("div");
+    palettePresetsWrap.className = "db-palette-presets";
+
+    function getActiveColors() {
+      const found =
+        paletteList.find(function (p) { return p.id === blk.palette; }) ||
+        paletteList[0];
+      return found.colors;
+    }
+
+    function renderPaletteControls() {
+      palettePresetsWrap.innerHTML = "";
+      paletteList.forEach(function (preset) {
+        const pBtn = document.createElement("button");
+        pBtn.type = "button";
+        pBtn.className = "db-palette-preset-btn" + (blk.palette === preset.id ? " active" : "");
+        pBtn.title = "Farbpalette «" + preset.label + "» anwenden";
+
+        const swatches = document.createElement("span");
+        swatches.className = "db-palette-mini-swatches";
+        preset.colors.forEach(function (hex) {
+          const sw = document.createElement("span");
+          sw.className = "db-palette-mini-swatch";
+          sw.style.backgroundColor = hex;
+          swatches.appendChild(sw);
+        });
+
+        const lblSpan = document.createElement("span");
+        lblSpan.textContent = preset.label;
+
+        pBtn.appendChild(swatches);
+        pBtn.appendChild(lblSpan);
+        pBtn.addEventListener("click", function () {
+          blk.palette = preset.id;
+          renderPaletteControls();
+          if (typeof onChange === "function") {
+            onChange(preset.id);
+          }
+        });
+        palettePresetsWrap.appendChild(pBtn);
+      });
+    }
+
+    paletteTop.appendChild(paletteLbl);
+    paletteTop.appendChild(palettePresetsWrap);
+    paletteBar.appendChild(paletteTop);
+    renderPaletteControls();
+
+    return {
+      element: paletteBar,
+      getActiveColors: getActiveColors,
+      render: renderPaletteControls,
+    };
+  }
+
+  function createChartHeightBar(blk, presets, onChange) {
+    const heightPresetList =
+      Array.isArray(presets) && presets.length > 0 ? presets : DEFAULT_CHART_HEIGHT_PRESETS;
+
+    const heightBar = document.createElement("div");
+    heightBar.className = "db-chart-height-bar";
+
+    const heightLeft = document.createElement("div");
+    heightLeft.className = "db-chart-height-left";
+
+    const heightLbl = document.createElement("label");
+    heightLbl.className = "field-label";
+    heightLbl.style.margin = "0";
+    heightLbl.style.whiteSpace = "nowrap";
+    heightLbl.textContent = "Höhe Chartfläche (Y-Achse):";
+
+    const heightInp = document.createElement("input");
+    heightInp.type = "number";
+    heightInp.className = "cms-input font-medium";
+    heightInp.style.maxWidth = "70px";
+    heightInp.style.textAlign = "center";
+    heightInp.style.padding = "4px 8px";
+    heightInp.min = "20";
+    heightInp.max = "100";
+    heightInp.step = "2";
+    heightInp.value = blk.chart_height_mm || 36;
+
+    const presetButtons = [];
+
+    function updatePresetActive() {
+      const cur = blk.chart_height_mm || 36;
+      presetButtons.forEach(function (pb) {
+        if (pb.val === cur) {
+          pb.btn.classList.add("active");
+          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
+          pb.btn.style.setProperty("color", "#FFFFFF", "important");
+          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
+        } else {
+          pb.btn.classList.remove("active");
+          pb.btn.style.removeProperty("background");
+          pb.btn.style.removeProperty("color");
+          pb.btn.style.removeProperty("border-color");
+        }
+      });
+    }
+
+    function updateChartHeight(newVal) {
+      let num = parseInt(newVal, 10);
+      if (isNaN(num)) num = 36;
+      num = Math.max(20, Math.min(100, Math.round(num / 2) * 2));
+      blk.chart_height_mm = num;
+      heightInp.value = num;
+      updatePresetActive();
+      if (typeof onChange === "function") {
+        onChange(num);
+      }
+    }
+
+    heightInp.addEventListener("change", function () {
+      updateChartHeight(heightInp.value);
+    });
+
+    heightLeft.appendChild(heightLbl);
+    heightLeft.appendChild(heightInp);
+
+    const heightPresets = document.createElement("div");
+    heightPresets.className = "db-chart-height-presets";
+
+    const stepDownBtn = document.createElement("button");
+    stepDownBtn.type = "button";
+    stepDownBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    stepDownBtn.style.padding = "4px 8px";
+    stepDownBtn.textContent = "− 2 mm";
+    stepDownBtn.title = "Höhe um 2 mm verringern";
+    stepDownBtn.addEventListener("click", function () {
+      updateChartHeight((blk.chart_height_mm || 36) - 2);
+    });
+    heightPresets.appendChild(stepDownBtn);
+
+    const stepUpBtn = document.createElement("button");
+    stepUpBtn.type = "button";
+    stepUpBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    stepUpBtn.style.padding = "4px 8px";
+    stepUpBtn.textContent = "+ 2 mm";
+    stepUpBtn.title = "Höhe um 2 mm vergrössern";
+    stepUpBtn.addEventListener("click", function () {
+      updateChartHeight((blk.chart_height_mm || 36) + 2);
+    });
+    heightPresets.appendChild(stepUpBtn);
+
+    heightPresetList.forEach(function (preset) {
+      const pBtn = document.createElement("button");
+      pBtn.type = "button";
+      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn";
+      pBtn.style.padding = "4px 9px";
+      pBtn.style.fontSize = "11.5px";
+      pBtn.textContent = preset.label;
+      pBtn.title = preset.title;
+      pBtn.addEventListener("click", function () {
+        updateChartHeight(preset.val);
+      });
+      heightPresets.appendChild(pBtn);
+      presetButtons.push({ btn: pBtn, val: preset.val });
+    });
+
+    updatePresetActive();
+    heightBar.appendChild(heightLeft);
+    heightBar.appendChild(heightPresets);
+    return heightBar;
+  }
+
+  function createSimpleLayoutSelect(blk, widthPx, onChange) {
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    if (widthPx) {
+      layoutSel.style.width = widthPx;
+    }
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      markDirty();
+      if (typeof onChange === "function") {
+        onChange(blk.layout);
+      }
+    });
+    return layoutSel;
+  }
+
+  function getLatestPublishedItemsForBlock(maxItems) {
+    const limit = typeof maxItems === "number" && maxItems > 0 ? maxItems : 5;
+    const currentId = state.article ? state.article.id : "";
+    const pool = (state.allArticles || []).filter(function (a) {
+      return a.id !== currentId && a.status === "published";
+    });
+    return pool.slice(0, limit).map(function (a) {
+      return {
+        article_id: a.id,
+        title: a.title || "Ohne Titel",
+        subtitle: a.subtitle || "",
+        date: a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
+        category: a.category || "",
+        url: a.url || "",
+        enabled: true,
+      };
+    });
+  }
+
   // ==========================================================================
   // Undo-Stack & Interaktive Toast-Notification
   // ==========================================================================
@@ -615,26 +910,11 @@
       };
     }
     if (type === "publications") {
-      const currentId = state.article ? state.article.id : "";
-      const pool = (state.allArticles || []).filter(function (a) {
-        return a.id !== currentId && a.status === "published";
-      });
-      const initialItems = pool.slice(0, 5).map(function (a) {
-        return {
-          article_id: a.id,
-          title: a.title || "Ohne Titel",
-          subtitle: a.subtitle || "",
-          date: a.publication_date || (a.updated_at ? a.updated_at.split("T")[0] : ""),
-          category: a.category || "",
-          url: a.url || "",
-          enabled: true,
-        };
-      });
       return {
         id: uid("blk"),
         type: "publications",
         title: "Weitere Publikationen",
-        items: initialItems,
+        items: getLatestPublishedItemsForBlock(5),
         layout: "column",
       };
     }
@@ -900,20 +1180,27 @@
 
   Object.assign(E, {
     BLOCK_TYPE_CATALOG: BLOCK_TYPE_CATALOG,
+    CHART_PALETTES: CHART_PALETTES,
+    DEFAULT_CHART_HEIGHT_PRESETS: DEFAULT_CHART_HEIGHT_PRESETS,
     MAX_UNDO_STACK: MAX_UNDO_STACK,
     clearUndoStack: clearUndoStack,
     closeFigureContextMenu: closeFigureContextMenu,
+    createChartHeightBar: createChartHeightBar,
+    createChartPaletteBar: createChartPaletteBar,
     createDefaultBlock: createDefaultBlock,
     createFullLayoutControl: createFullLayoutControl,
+    createSimpleLayoutSelect: createSimpleLayoutSelect,
     deepClone: deepClone,
     ensureUndoToastContainer: ensureUndoToastContainer,
     escapeHtml: escapeHtml,
     flushAutosave: flushAutosave,
     getActiveFocusedBlockId: getActiveFocusedBlockId,
     getBlockTypeLabel: getBlockTypeLabel,
+    getLatestPublishedItemsForBlock: getLatestPublishedItemsForBlock,
     hideUndoToast: hideUndoToast,
     markDirty: markDirty,
     notifyFocusTarget: notifyFocusTarget,
+    parseDelimitedText: parseDelimitedText,
     performUndo: performUndo,
     pushUndo: pushUndo,
     sanitizeRichTextHtml: sanitizeRichTextHtml,

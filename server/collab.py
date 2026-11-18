@@ -11,9 +11,10 @@ import logging
 from typing import Any
 from shiny import Session
 
-from database.repository import get_asset
+from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
+from services.custom_chart_generator import generate_custom_chart_svg
 from services.renderer import render_preview_svg_pages, render_web_html
 
 logger = logging.getLogger("lukb_cms.collab")
@@ -34,17 +35,26 @@ def collect_article_assets_map(
     doc: ArticleDocument,
     known_asset_ids: set[str] | list[str] | None = None,
 ) -> dict[str, str]:
-    """Lädt für alle Grafik- und DB-Chart-Blöcke eines Artikels die zugehörigen Data-URIs.
+    """Lädt für alle Grafik-, DB-Chart- und Custom-Chart-Blöcke eines Artikels die zugehörigen Data-URIs.
     Überspringt Assets, die in known_asset_ids enthalten sind, um wiederholte Datenübertragungen zu vermeiden.
     """
     known_set = set(known_asset_ids) if known_asset_ids is not None else None
+    needed_figure_aids = {
+        blk.get("asset_id", "")
+        for blk in doc.blocks
+        if blk.get("type") == "figure"
+        and blk.get("asset_id", "")
+        and (known_set is None or blk.get("asset_id", "") not in known_set)
+    }
+    asset_records = get_assets_by_ids(needed_figure_aids) if needed_figure_aids else {}
+
     assets_map: dict[str, str] = {}
     for blk in doc.blocks:
         btype = blk.get("type")
         if btype == "figure":
             aid = blk.get("asset_id", "")
             if aid and (known_set is None or aid not in known_set) and aid not in assets_map:
-                rec = get_asset(aid)
+                rec = asset_records.get(aid)
                 if rec and rec.get("data"):
                     b64 = base64.b64encode(rec["data"]).decode("ascii")
                     mime = rec.get("mime_type", "image/svg+xml")
@@ -53,6 +63,12 @@ def collect_article_assets_map(
             bid = blk.get("id", "")
             if bid and (known_set is None or bid not in known_set):
                 svg_markup = generate_db_chart_svg(blk)
+                b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+                assets_map[bid] = f"data:image/svg+xml;base64,{b64}"
+        elif btype == "custom_chart":
+            bid = blk.get("id", "")
+            if bid and (known_set is None or bid not in known_set):
+                svg_markup = generate_custom_chart_svg(blk, embed_fonts=True)
                 b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
                 assets_map[bid] = f"data:image/svg+xml;base64,{b64}"
     return assets_map

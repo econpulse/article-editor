@@ -5,6 +5,7 @@ Behandelt DB-Chart-Vorschau, Ticker-Autovervollständigung, Auto-Typst-Toggling 
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from shiny import Inputs, Outputs, Session, reactive
@@ -42,7 +43,7 @@ def register_preview_handlers(
         bid = blk.get("id", "")
         if not bid:
             return
-        svg_markup = generate_db_chart_svg(blk)
+        svg_markup = await asyncio.to_thread(generate_db_chart_svg, blk)
         b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
         await session.send_custom_message(
             "lukb_db_chart_svg",
@@ -63,7 +64,7 @@ def register_preview_handlers(
         bid = blk.get("id", "")
         if not bid:
             return
-        svg_markup = generate_custom_chart_svg(blk, embed_fonts=True)
+        svg_markup = await asyncio.to_thread(generate_custom_chart_svg, blk, True)
         b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
         await session.send_custom_message(
             "lukb_custom_chart_svg",

@@ -12,7 +12,7 @@ import time
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import case, desc, func, or_, select
 
 logger = logging.getLogger(__name__)
 
@@ -320,10 +320,40 @@ def save_article(
         row = session.get(ArticleModel, doc.id)
 
         if row is not None and base_doc is not None:
-            current_db_doc = _row_to_document(row)
-            if current_db_doc.model_dump() != base_doc.model_dump():
-                doc = _merge_concurrent_documents(base_doc, doc, current_db_doc)
-                merged_from_other = True
+            # Schneller Rohfeld-Vergleich: überspringt teure JSON-/Pydantic-Revalidierung,
+            # falls die DB-Zeile seit base_doc unverändert ist.
+            base_authors_ser = json.dumps(
+                [a.model_dump() for a in base_doc.metadata.authors], ensure_ascii=False
+            )
+            base_tags_ser = json.dumps(
+                [str(t).strip() for t in (base_doc.metadata.tags or []) if str(t).strip()],
+                ensure_ascii=False,
+            )
+            base_blocks_ser = json.dumps(base_doc.blocks, ensure_ascii=False)
+            raw_matches_base = (
+                row.id == base_doc.id
+                and (row.template_id or "investment_focus") == base_doc.template_id
+                and (
+                    row.status
+                    if row.status in ("draft", "review", "published", "archived")
+                    else "draft"
+                ) == base_doc.status
+                and (row.title or "Unbenannte Publikation") == base_doc.metadata.title
+                and (row.subtitle or "") == base_doc.metadata.subtitle
+                and (row.lead or "") == base_doc.metadata.lead
+                and (row.publication_date or "") == base_doc.metadata.publication_date
+                and (row.category or "Anlagepolitik & Märkte") == base_doc.metadata.category
+                and (getattr(row, "header_series", None) or "Investment Office News") == base_doc.metadata.header_series
+                and (row.disclaimer or "") == base_doc.metadata.disclaimer
+                and (row.authors_json or "[]") == base_authors_ser
+                and (getattr(row, "tags_json", "[]") or "[]") == base_tags_ser
+                and (row.blocks_json or "[]") == base_blocks_ser
+            )
+            if not raw_matches_base:
+                current_db_doc = _row_to_document(row)
+                if current_db_doc.model_dump() != base_doc.model_dump():
+                    doc = _merge_concurrent_documents(base_doc, doc, current_db_doc)
+                    merged_from_other = True
 
         authors_serialized = json.dumps(
             [a.model_dump() for a in doc.metadata.authors], ensure_ascii=False
@@ -386,6 +416,7 @@ def save_article(
         "saved_date": now.strftime("%d.%m.%Y %H:%M:%S"),
         "merged": merged_from_other,
         "article": doc.model_dump(),
+        "doc_obj": doc,
     }
 
 
@@ -678,17 +709,106 @@ def get_active_published_snapshots() -> list[dict[str, Any]]:
         return result
 
 
-def get_article_snapshot_history(article_id: str) -> list[dict[str, Any]]:
+def get_active_published_snapshots_metadata() -> list[dict[str, Any]]:
     """
-    Liefert die lückenlose Versionen-Historie aller publizierten Snapshots eines Artikels.
+    Liefert die Metadaten aller aktuell aktiven Snapshots ohne HTML-/PDF-Blobs,
+    um unnötigen MSSQL-Netzwerktransfer beim Abgleich bereits materialisierter Dateien zu vermeiden.
     """
     with get_db_session() as session:
         stmt = (
-            select(PublishedSnapshotModel)
+            select(
+                PublishedSnapshotModel.id,
+                PublishedSnapshotModel.article_id,
+                PublishedSnapshotModel.version,
+                PublishedSnapshotModel.slug,
+                PublishedSnapshotModel.title,
+                PublishedSnapshotModel.publication_date,
+                PublishedSnapshotModel.metadata_json,
+                PublishedSnapshotModel.published_at,
+                PublishedSnapshotModel.published_by,
+                PublishedSnapshotModel.change_note,
+                case((PublishedSnapshotModel.pdf_bytes.is_not(None), True), else_=False).label("has_pdf"),
+            )
+            .where(PublishedSnapshotModel.is_active == True)
+            .order_by(
+                desc(PublishedSnapshotModel.publication_date),
+                desc(PublishedSnapshotModel.published_at),
+            )
+        )
+        rows = session.execute(stmt).all()
+        result: list[dict[str, Any]] = []
+        for r in rows:
+            try:
+                meta = json.loads(r.metadata_json or "{}")
+            except Exception:
+                meta = {}
+            result.append(
+                {
+                    "id": r.id,
+                    "article_id": r.article_id,
+                    "version": r.version,
+                    "slug": r.slug,
+                    "title": r.title,
+                    "publication_date": r.publication_date,
+                    "metadata": meta,
+                    "has_pdf": bool(r.has_pdf),
+                    "published_at": r.published_at.isoformat() if r.published_at else "",
+                    "published_by": r.published_by,
+                    "change_note": r.change_note,
+                }
+            )
+        return result
+
+
+def get_published_snapshot_blobs(
+    article_id: str,
+    version: int | None = None,
+) -> dict[str, Any] | None:
+    """Lädt gezielt HTML- und PDF-Blobs für einen einzelnen aktiven (oder versionierten) Snapshot."""
+    with get_db_session() as session:
+        stmt = select(
+            PublishedSnapshotModel.html_content,
+            PublishedSnapshotModel.pdf_bytes,
+        ).where(PublishedSnapshotModel.article_id == article_id)
+        if version is not None:
+            stmt = stmt.where(PublishedSnapshotModel.version == version)
+        else:
+            stmt = stmt.where(PublishedSnapshotModel.is_active == True).order_by(
+                desc(PublishedSnapshotModel.version)
+            )
+        row = session.execute(stmt).first()
+        if not row:
+            return None
+        return {
+            "html_content": row.html_content,
+            "pdf_bytes": row.pdf_bytes,
+        }
+
+
+def get_article_snapshot_history(article_id: str) -> list[dict[str, Any]]:
+    """
+    Liefert die lückenlose Versionen-Historie aller publizierten Snapshots eines Artikels
+    (ohne unnötige HTML-/PDF-Blob-Übertragung).
+    """
+    with get_db_session() as session:
+        stmt = (
+            select(
+                PublishedSnapshotModel.id,
+                PublishedSnapshotModel.article_id,
+                PublishedSnapshotModel.version,
+                PublishedSnapshotModel.is_active,
+                PublishedSnapshotModel.slug,
+                PublishedSnapshotModel.title,
+                PublishedSnapshotModel.publication_date,
+                PublishedSnapshotModel.published_at,
+                PublishedSnapshotModel.published_by,
+                PublishedSnapshotModel.change_note,
+                case((PublishedSnapshotModel.pdf_bytes.is_not(None), True), else_=False).label("has_pdf"),
+            )
             .where(PublishedSnapshotModel.article_id == article_id)
             .order_by(desc(PublishedSnapshotModel.version))
         )
-        rows = session.scalars(stmt).all()
+        rows = session.execute(stmt).all()
         result: list[dict[str, Any]] = []
         for r in rows:
             result.append(
@@ -704,7 +824,7 @@ def get_article_snapshot_history(article_id: str) -> list[dict[str, Any]]:
                     "published_at_iso": r.published_at.isoformat() if r.published_at else "",
                     "published_by": r.published_by,
                     "change_note": r.change_note,
-                    "has_pdf": bool(r.pdf_bytes),
+                    "has_pdf": bool(r.has_pdf),
                 }
             )
         return result
@@ -796,13 +916,32 @@ def get_asset(asset_id: str) -> dict[str, Any] | None:
         }
 
 
+def get_assets_by_ids(asset_ids: set[str] | list[str]) -> dict[str, dict[str, Any]]:
+    """Lädt mehrere Grafik-Assets in einer einzigen SQL-Abfrage (vermeidet N+1 Queries)."""
+    cleaned_ids = [aid for aid in set(asset_ids) if aid]
+    if not cleaned_ids:
+        return {}
+    with get_db_session() as session:
+        stmt = select(AssetModel).where(AssetModel.id.in_(cleaned_ids))
+        rows = session.scalars(stmt).all()
+        return {
+            r.id: {
+                "id": r.id,
+                "filename": r.filename,
+                "mime_type": r.mime_type,
+                "data": r.data,
+            }
+            for r in rows
+        }
+
+
 # ============================================================================
 # Zeitreihen-Abfragen für `ts_db` (DB-Chart Inhaltsblock)
 # ============================================================================
 
 
 def _coerce_to_date(val: Any) -> date | None:
-    """Konvertiert DATE, DATETIME oder ISO-String sicher in ein `datetime.date`-Objekt."""
+    """Konvertiert DATE, DATETIME oder Datums-String sicher in ein `datetime.date`-Objekt."""
     if val is None:
         return None
     if isinstance(val, datetime):
@@ -813,14 +952,19 @@ def _coerce_to_date(val: Any) -> date | None:
         s = val.strip()
         if not s:
             return None
+        from services.custom_chart_generator import parse_flexible_date
+
+        parsed = parse_flexible_date(s)
+        if parsed is not None:
+            return parsed
+        if len(s) > 10:
+            parsed_prefix = parse_flexible_date(s[:10])
+            if parsed_prefix is not None:
+                return parsed_prefix
         try:
-            return date.fromisoformat(s[:10])
+            return datetime.strptime(s[:10], "%m/%d/%Y").date()
         except ValueError:
-            for fmt in ("%d.%m.%Y", "%Y/%m/%d", "%m/%d/%Y"):
-                try:
-                    return datetime.strptime(s[:10], fmt).date()
-                except ValueError:
-                    pass
+            return None
     return None
 
 
@@ -934,6 +1078,16 @@ def query_timeseries_data(
     start_dt = _coerce_to_date(start_date)
     end_dt = _coerce_to_date(end_date)
 
+    # Exakte DB-Ticker-Namen aus dem In-Memory-Katalog auflösen für direkten Index-Seek auf (ticker, date)
+    canonical_tickers: list[str] = []
+    all_resolved_via_catalog = False
+    catalog = _get_cached_ticker_catalog()
+    if catalog:
+        catalog_upper_to_exact = {it["_t_upper"]: it["ticker"] for it in catalog}
+        if all(u in catalog_upper_to_exact for u in upper_map):
+            canonical_tickers = [catalog_upper_to_exact[u] for u in upper_map]
+            all_resolved_via_catalog = True
+
     result: dict[str, dict[str, Any]] = {}
     with get_db_session() as session:
         stmt = select(
@@ -941,7 +1095,11 @@ def query_timeseries_data(
             TimeSeriesModel.date,
             TimeSeriesModel.name,
             TimeSeriesModel.value,
-        ).where(func.upper(TimeSeriesModel.ticker).in_(list(upper_map.keys())))
+        )
+        if all_resolved_via_catalog:
+            stmt = stmt.where(TimeSeriesModel.ticker.in_(canonical_tickers))
+        else:
+            stmt = stmt.where(func.upper(TimeSeriesModel.ticker).in_(list(upper_map.keys())))
 
         if start_dt is not None:
             stmt = stmt.where(TimeSeriesModel.date >= start_dt)
@@ -1312,29 +1470,32 @@ def init_db_and_seed() -> None:
     _ensure_schema_columns()
     _seed_sample_timeseries()
 
-    # Lege Beispiel-Assets an
-    save_asset(
-        filename="lukb_leitzinsen_vergleich.svg",
-        mime_type="image/svg+xml",
-        data=SAMPLE_SVG_RATES.encode("utf-8"),
-        asset_id="asset_sample_rates",
-    )
-    save_asset(
-        filename="lukb_schweizer_sektoren.svg",
-        mime_type="image/svg+xml",
-        data=SAMPLE_SVG_EQUITY.encode("utf-8"),
-        asset_id="asset_sample_equity",
-    )
+    # Lege Beispiel-Assets an, falls noch nicht vorhanden
+    existing_sample_assets = get_assets_by_ids(["asset_sample_rates", "asset_sample_equity"])
+    if "asset_sample_rates" not in existing_sample_assets:
+        save_asset(
+            filename="lukb_leitzinsen_vergleich.svg",
+            mime_type="image/svg+xml",
+            data=SAMPLE_SVG_RATES.encode("utf-8"),
+            asset_id="asset_sample_rates",
+        )
+    if "asset_sample_equity" not in existing_sample_assets:
+        save_asset(
+            filename="lukb_schweizer_sektoren.svg",
+            mime_type="image/svg+xml",
+            data=SAMPLE_SVG_EQUITY.encode("utf-8"),
+            asset_id="asset_sample_equity",
+        )
 
     existing = list_articles()
     if existing:
         # Selbstheilung für Artikel, deren Blöcke durch den früheren Tuple-Bug geleert wurden,
-        # sowie Aktualisierung des Standard-Disclaimers auf die aktuelle LUKB-Fassung
+        # sowie Aktualisierung des Standard-Disclaimers auf die aktuelle LUKB-Fassung (in einem Batch-Query)
         with get_db_session() as session:
-            for item in existing:
-                row = session.get(ArticleModel, item["id"])
-                if not row:
-                    continue
+            all_rows = session.scalars(
+                select(ArticleModel).where(ArticleModel.status != "archived")
+            ).all()
+            for row in all_rows:
                 if not row.disclaimer or row.disclaimer.strip() == LEGACY_LUKB_DISCLAIMER:
                     row.disclaimer = DEFAULT_LUKB_DISCLAIMER
                 if not row.blocks_json or row.blocks_json.strip() == "[]":
