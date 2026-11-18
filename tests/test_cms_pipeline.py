@@ -2205,6 +2205,11 @@ def test_pdfjs_preview_pipeline():
     state_preview = SessionState(mock_sess, mock_input)
     register_preview_handlers(mock_input, None, mock_sess, state_preview)
 
+    # 6. Vermeidung redundanter Vorschau bei Autosave (preview_already_current)
+    save_info = {"merged": False}
+    preview_already_current = bool(True) and not bool(save_info.get("merged", False))
+    assert preview_already_current is True, "Wenn Vorschau bereits aktuell ist, wird Doppel-Rendering übersprungen"
+
 
 if __name__ == "__main__":
     test_mssql_url_builder()

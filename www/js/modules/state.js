@@ -29,6 +29,7 @@
     customChartTimers: {}, // block_id -> timeoutId
     isDirty: false,
     autosaveTimer: null,
+    lastPreviewedArticleJson: "",
     sortableInstance: null,
     selectedBlockIds: new Set(),
     lastSelectedBlockId: null,
@@ -657,6 +658,7 @@
       clearTimeout(previewDebounceTimer);
       previewDebounceTimer = null;
     }
+    state.lastPreviewedArticleJson = JSON.stringify(state.article);
     const currentMode = state.previewMode || "pdf";
     if (window.Shiny && window.Shiny.setInputValue) {
       window.Shiny.setInputValue(
@@ -753,6 +755,8 @@
 
     const knownAssets = Object.keys(state.assetCache || {});
     const currentMode = state.previewMode || "pdf";
+    const currentArticleJson = JSON.stringify(state.article);
+    const previewAlreadyCurrent = !!(state.lastPreviewedArticleJson && state.lastPreviewedArticleJson === currentArticleJson);
 
     if (window.Shiny && window.Shiny.setInputValue) {
       window.Shiny.setInputValue(
@@ -764,6 +768,7 @@
           revision_note: revisionNote || "",
           auto_preview: state.autoPreview,
           preview_mode: currentMode,
+          preview_already_current: previewAlreadyCurrent,
           known_asset_ids: knownAssets,
           ts: Date.now(),
         },

@@ -137,14 +137,19 @@ def register_editor_handlers(
             preview_mode = str(payload.get("preview_mode", get_peer_preview_mode(state.session_id, default="pdf")))
             set_peer_preview_mode(state.session_id, preview_mode)
 
-            include_typst = auto_preview and (preview_mode == "pdf")
-            include_web = auto_preview and (preview_mode == "web")
+            # Vorschau für den Sender nur rendern, wenn sie nicht bereits aktuell ist (vermeidet Doppel-Rendering bei Autosave)
+            preview_already_current = bool(payload.get("preview_already_current", False)) and not bool(save_info.get("merged", False))
 
-            pdf_base64, web_html = await state.send_preview(
-                merged_doc,
-                include_typst=include_typst,
-                include_web=include_web,
-            )
+            pdf_base64 = None
+            web_html = None
+            if not preview_already_current:
+                include_typst = auto_preview and (preview_mode == "pdf")
+                include_web = auto_preview and (preview_mode == "web")
+                pdf_base64, web_html = await state.send_preview(
+                    merged_doc,
+                    include_typst=include_typst,
+                    include_web=include_web,
+                )
 
             # Synchronisiere alle Co-Autoren (und bei erfolgtem DB-Merge auch den Sender selbst)
             await broadcast_article_sync(

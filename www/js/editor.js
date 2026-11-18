@@ -2447,6 +2447,7 @@
       state.isDirty = false;
       state.article = msg.article;
       state.baseArticle = deepClone(msg.article);
+      state.lastPreviewedArticleJson = JSON.stringify(msg.article);
       if (Array.isArray(msg.available_tickers)) {
         state.availableTickers = msg.available_tickers;
         indexTickerItems(msg.available_tickers);
@@ -2826,6 +2827,7 @@
         }
 
         _lastRenderedPdfBase64 = pdfBase64;
+        state.lastPreviewedArticleJson = JSON.stringify(state.article);
         state.lastKnownPageCount = numPages;
         state.previewPending = false;
         if (refreshBtn) refreshBtn.classList.remove("has-pending-preview");
