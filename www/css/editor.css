@@ -644,6 +644,20 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 140px;
+}
+
+.cms-block-card.sortable-drag,
+.cms-block-card.sortable-ghost,
+.cms-block-card:focus-within {
+  content-visibility: visible;
+}
+
+/* Reduziere teure Shadow/Paint-Berechnungen während des Sortable Drag & Drop */
+#lukb-blocks-canvas.is-sortable-dragging .cms-block-card {
+  box-shadow: none !important;
+  transition: transform 0.15s ease !important;
 }
 
 .cms-block-card:hover {

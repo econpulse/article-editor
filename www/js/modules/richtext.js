@@ -926,12 +926,311 @@
     container.appendChild(rt.wrapper);
   }
 
+  function buildQuoteBlockBody(container, blk) {
+    const topRow = document.createElement("div");
+    topRow.style.display = "flex";
+    topRow.style.justifyContent = "space-between";
+    topRow.style.alignItems = "center";
+    topRow.style.marginBottom = "8px";
+
+    const topLbl = document.createElement("label");
+    topLbl.className = "field-label";
+    topLbl.style.margin = "0";
+    topLbl.textContent = "Zitat / Pull-Quote (LUKB Corporate Design)";
+
+    const layoutSel = document.createElement("select");
+    layoutSel.className = "cms-select";
+    layoutSel.style.width = "180px";
+    [
+      { val: "column", label: "1-spaltig (Spaltenbreite)" },
+      { val: "full", label: "2-spaltig (Seitenbreite)" },
+    ].forEach(function (o) {
+      const opt = document.createElement("option");
+      opt.value = o.val;
+      opt.textContent = o.label;
+      if ((blk.layout || "column") === o.val) opt.selected = true;
+      layoutSel.appendChild(opt);
+    });
+    layoutSel.addEventListener("change", function () {
+      blk.layout = layoutSel.value;
+      markDirty();
+    });
+
+    topRow.appendChild(topLbl);
+    topRow.appendChild(layoutSel);
+    container.appendChild(topRow);
+
+    const qWrap = document.createElement("div");
+    qWrap.className = "quote-editor-box";
+    qWrap.style.marginBottom = "10px";
+
+    const qTextarea = document.createElement("textarea");
+    qTextarea.className = "cms-textarea";
+    qTextarea.rows = 3;
+    qTextarea.style.fontStyle = "italic";
+    qTextarea.style.fontSize = "13.5px";
+    qTextarea.placeholder = "Zitattext eingeben (ohne Anführungszeichen, werden automatisch formatiert) …";
+    qTextarea.value = blk.quote || "";
+    qTextarea.addEventListener("input", function () {
+      blk.quote = qTextarea.value;
+      markDirty();
+    });
+    qTextarea.addEventListener("paste", function (e) {
+      e.preventDefault();
+      const rawText = (e.clipboardData || window.clipboardData).getData("text/plain");
+      const cleaned = cleanPdfPastedText(rawText);
+      if (!document.execCommand("insertText", false, cleaned)) {
+        const start = qTextarea.selectionStart;
+        const end = qTextarea.selectionEnd;
+        qTextarea.setRangeText(cleaned, start, end, "end");
+      }
+      blk.quote = qTextarea.value;
+      markDirty();
+    });
+    qWrap.appendChild(qTextarea);
+    container.appendChild(qWrap);
+
+    const metaGrid = document.createElement("div");
+    metaGrid.style.display = "grid";
+    metaGrid.style.gridTemplateColumns = "1fr 1fr";
+    metaGrid.style.gap = "10px";
+
+    const authWrap = document.createElement("div");
+    const authLbl = document.createElement("label");
+    authLbl.className = "field-label";
+    authLbl.textContent = "Urheber / Zitatgeber (z.B. Name & Titel)";
+    const authInp = document.createElement("input");
+    authInp.type = "text";
+    authInp.className = "cms-input font-medium";
+    authInp.placeholder = "z.B. Thomas Grüter";
+    authInp.value = blk.author || "";
+    authInp.addEventListener("input", function () {
+      blk.author = authInp.value;
+      markDirty();
+    });
+    authWrap.appendChild(authLbl);
+    authWrap.appendChild(authInp);
+
+    const srcWrap = document.createElement("div");
+    const srcLbl = document.createElement("label");
+    srcLbl.className = "field-label";
+    srcLbl.textContent = "Kontext / Quelle / Funktion";
+    const srcInp = document.createElement("input");
+    srcInp.type = "text";
+    srcInp.className = "cms-input";
+    srcInp.placeholder = "z.B. Chief Investment Officer";
+    srcInp.value = blk.source || "";
+    srcInp.addEventListener("input", function () {
+      blk.source = srcInp.value;
+      markDirty();
+    });
+    srcWrap.appendChild(srcLbl);
+    srcWrap.appendChild(srcInp);
+
+    metaGrid.appendChild(authWrap);
+    metaGrid.appendChild(srcWrap);
+    container.appendChild(metaGrid);
+  }
+
+  function buildDividerBlockBody(container, blk) {
+    if (!blk.style) blk.style = "solid";
+
+    const row = document.createElement("div");
+    row.className = "divider-style-selector";
+
+    const lbl = document.createElement("label");
+    lbl.className = "field-label";
+    lbl.style.margin = "0";
+    lbl.textContent = "Stil der Trennlinie:";
+    row.appendChild(lbl);
+
+    const btnGroup = document.createElement("div");
+    btnGroup.style.display = "flex";
+    btnGroup.style.gap = "6px";
+
+    const previewLine = document.createElement("div");
+    previewLine.className = "divider-preview-line";
+
+    const updatePreview = () => {
+      previewLine.style.borderTop =
+        blk.style === "dashed"
+          ? "2px dashed #94A3B8"
+          : blk.style === "dots"
+          ? "2.5px dotted #94A3B8"
+          : "1.5px solid #94A3B8";
+    };
+
+    [
+      { style: "solid", label: "Durchgezogen —" },
+      { style: "dashed", label: "Gestrichelt - - -" },
+      { style: "dots", label: "Gepunktet · · ·" },
+    ].forEach(function (opt) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className =
+        "btn-lukb btn-lukb-sm " +
+        (blk.style === opt.style ? "btn-lukb-navy" : "btn-lukb-ghost");
+      btn.textContent = opt.label;
+      btn.addEventListener("click", function () {
+        blk.style = opt.style;
+        Array.from(btnGroup.children).forEach(b => {
+          b.className = "btn-lukb btn-lukb-sm btn-lukb-ghost";
+        });
+        btn.className = "btn-lukb btn-lukb-sm btn-lukb-navy";
+        updatePreview();
+        markDirty();
+      });
+      btnGroup.appendChild(btn);
+    });
+
+    row.appendChild(btnGroup);
+    container.appendChild(row);
+    updatePreview();
+    container.appendChild(previewLine);
+  }
+
+  function buildSpacerBlockBody(container, blk) {
+    if (!blk.height_mm) blk.height_mm = 8;
+
+    const row = document.createElement("div");
+    row.className = "db-spacer-editor-row";
+
+    const label = document.createElement("label");
+    label.className = "field-label";
+    label.style.margin = "0";
+    label.style.whiteSpace = "nowrap";
+    label.textContent = "Abstandshöhe:";
+
+    const numInp = document.createElement("input");
+    numInp.type = "number";
+    numInp.className = "cms-input font-medium";
+    numInp.style.maxWidth = "70px";
+    numInp.style.textAlign = "center";
+    numInp.style.padding = "4px 8px";
+    numInp.min = "2";
+    numInp.max = "80";
+    numInp.step = "2";
+    numInp.value = blk.height_mm;
+
+    const unit = document.createElement("span");
+    unit.style.fontSize = "12.5px";
+    unit.style.color = "var(--lukb-navy)";
+    unit.style.fontWeight = "500";
+    unit.textContent = "mm";
+
+    const previewLine = document.createElement("div");
+    previewLine.className = "db-spacer-preview-line";
+
+    const presetButtons = [];
+
+    function updateHeight(val) {
+      let num = parseInt(val, 10);
+      if (isNaN(num)) num = 8;
+      num = Math.max(2, Math.min(80, Math.round(num / 2) * 2));
+      blk.height_mm = num;
+      numInp.value = num;
+      updateVisual();
+      updatePresetActive();
+      markDirty();
+    }
+
+    function updateVisual() {
+      const hMm = blk.height_mm || 8;
+      const hPx = Math.round(hMm * 3.78);
+      previewLine.style.height = Math.max(14, hPx) + "px";
+      previewLine.textContent = "↕ " + hMm + " mm vertikaler Leerraum im Satz";
+    }
+
+    function updatePresetActive() {
+      const cur = blk.height_mm || 8;
+      presetButtons.forEach(function (pb) {
+        if (pb.val === cur) {
+          pb.btn.classList.add("active");
+          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
+          pb.btn.style.setProperty("color", "#FFFFFF", "important");
+          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
+        } else {
+          pb.btn.classList.remove("active");
+          pb.btn.style.removeProperty("background");
+          pb.btn.style.removeProperty("color");
+          pb.btn.style.removeProperty("border-color");
+        }
+      });
+    }
+
+    numInp.addEventListener("change", function () {
+      updateHeight(numInp.value);
+    });
+
+    const presetsWrap = document.createElement("div");
+    presetsWrap.className = "db-spacer-presets";
+
+    [
+      { label: "4 mm", val: 4 },
+      { label: "8 mm (Std)", val: 8 },
+      { label: "12 mm", val: 12 },
+      { label: "16 mm", val: 16 },
+      { label: "24 mm", val: 24 },
+    ].forEach(function (preset) {
+      const pBtn = document.createElement("button");
+      pBtn.type = "button";
+      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn";
+      pBtn.style.padding = "3px 8px";
+      pBtn.style.fontSize = "11px";
+      pBtn.textContent = preset.label;
+      pBtn.addEventListener("click", function () {
+        updateHeight(preset.val);
+      });
+      presetsWrap.appendChild(pBtn);
+      presetButtons.push({ btn: pBtn, val: preset.val });
+    });
+
+    row.appendChild(label);
+    row.appendChild(numInp);
+    row.appendChild(unit);
+    row.appendChild(presetsWrap);
+
+    container.appendChild(row);
+    container.appendChild(previewLine);
+    updateVisual();
+    updatePresetActive();
+  }
+
+  function buildColbreakBlockBody(container, blk) {
+    const wrap = document.createElement("div");
+    wrap.className = "db-colbreak-editor-box";
+
+    const icon = document.createElement("span");
+    icon.className = "db-colbreak-icon";
+    icon.textContent = "⇥";
+
+    const textWrap = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "db-colbreak-title";
+    title.textContent = "Manueller Spaltenumbruch";
+
+    const desc = document.createElement("div");
+    desc.className = "db-colbreak-desc";
+    desc.textContent = "Erzwingt an dieser Position den Wechsel in Spalte 2 (bzw. auf die Folgeseite in Spalte 1).";
+
+    textWrap.appendChild(title);
+    textWrap.appendChild(desc);
+
+    wrap.appendChild(icon);
+    wrap.appendChild(textWrap);
+    container.appendChild(wrap);
+  }
+
 
   Object.assign(E, {
     activePopover: activePopover,
     buildCalloutBlockBody: buildCalloutBlockBody,
+    buildColbreakBlockBody: buildColbreakBlockBody,
+    buildDividerBlockBody: buildDividerBlockBody,
     buildGlossaryBlockBody: buildGlossaryBlockBody,
+    buildQuoteBlockBody: buildQuoteBlockBody,
     buildRichTextBlockBody: buildRichTextBlockBody,
+    buildSpacerBlockBody: buildSpacerBlockBody,
     cleanPdfPastedText: cleanPdfPastedText,
     closeActivePopover: closeActivePopover,
     createRichTextWidget: createRichTextWidget,

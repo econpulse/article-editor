@@ -10,10 +10,14 @@
   function bindFocusTrackingListeners() { return E.bindFocusTrackingListeners.apply(this, arguments); }
   function bindSidebarAndModalListeners() { return E.bindSidebarAndModalListeners.apply(this, arguments); }
   function buildCalloutBlockBody() { return E.buildCalloutBlockBody.apply(this, arguments); }
+  function buildColbreakBlockBody() { return E.buildColbreakBlockBody.apply(this, arguments); }
   function buildCustomChartBlockBody() { return E.buildCustomChartBlockBody.apply(this, arguments); }
   function buildDbChartBlockBody() { return E.buildDbChartBlockBody.apply(this, arguments); }
+  function buildDividerBlockBody() { return E.buildDividerBlockBody.apply(this, arguments); }
   function buildGlossaryBlockBody() { return E.buildGlossaryBlockBody.apply(this, arguments); }
+  function buildQuoteBlockBody() { return E.buildQuoteBlockBody.apply(this, arguments); }
   function buildRichTextBlockBody() { return E.buildRichTextBlockBody.apply(this, arguments); }
+  function buildSpacerBlockBody() { return E.buildSpacerBlockBody.apply(this, arguments); }
   function buildTableBlockBody() { return E.buildTableBlockBody.apply(this, arguments); }
   function cleanPdfPastedText() { return E.cleanPdfPastedText.apply(this, arguments); }
   function clearUndoStack() { return E.clearUndoStack.apply(this, arguments); }
@@ -200,40 +204,91 @@
     }
   }
 
+  function getCardCurrentIndex(cardOrId) {
+    if (!state.article || !state.article.blocks) return -1;
+    const id = typeof cardOrId === "string" ? cardOrId : (cardOrId && cardOrId.dataset ? cardOrId.dataset.blockId : null);
+    if (!id) return -1;
+    return state.article.blocks.findIndex(function (b) { return b.id === id; });
+  }
+
+  function highlightInsertedBlock(id) {
+    if (!id) return;
+    setTimeout(function () {
+      const el = document.querySelector('[data-block-id="' + id + '"]');
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.classList.add("sortable-ghost");
+        setTimeout(function () {
+          el.classList.remove("sortable-ghost");
+        }, 500);
+      }
+    }, 50);
+  }
+
   function insertBlockAt(targetIndex, blockType) {
     if (!state.article) return;
     if (!state.article.blocks) state.article.blocks = [];
 
+    const canvas = document.getElementById("lukb-blocks-canvas");
+    const existingCards = canvas ? Array.from(canvas.querySelectorAll(":scope > .cms-block-card")) : [];
+
+    // Falls Canvas noch leer ist (Empty-State aktiv) oder noch nicht gerendert wurde: volles Rendering
+    if (!canvas || existingCards.length === 0 || existingCards.length !== state.article.blocks.length) {
+      const createdIds = [];
+      if (blockType === "textbox_pair") {
+        const bStart = createDefaultBlock("box_start");
+        const bEnd = createDefaultBlock("box_end");
+        state.article.blocks.splice(targetIndex, 0, bStart, bEnd);
+        createdIds.push(bStart.id, bEnd.id);
+      } else {
+        const newBlk = createDefaultBlock(blockType);
+        state.article.blocks.splice(targetIndex, 0, newBlk);
+        createdIds.push(newBlk.id);
+      }
+      renderBlocksCanvas();
+      markDirty();
+      highlightInsertedBlock(createdIds[0]);
+      return;
+    }
+
     if (targetIndex < 0) targetIndex = 0;
     if (targetIndex > state.article.blocks.length) targetIndex = state.article.blocks.length;
 
+    const refCard = targetIndex < existingCards.length ? existingCards[targetIndex] : null;
     const createdIds = [];
+
     if (blockType === "textbox_pair") {
       const bStart = createDefaultBlock("box_start");
       const bEnd = createDefaultBlock("box_end");
       state.article.blocks.splice(targetIndex, 0, bStart, bEnd);
       createdIds.push(bStart.id, bEnd.id);
+
+      const cardStart = buildBlockCardElement(bStart, targetIndex, false);
+      const cardEnd = buildBlockCardElement(bEnd, targetIndex + 1, true);
+
+      if (refCard) {
+        canvas.insertBefore(cardStart, refCard);
+        canvas.insertBefore(cardEnd, refCard);
+      } else {
+        canvas.appendChild(cardStart);
+        canvas.appendChild(cardEnd);
+      }
     } else {
       const newBlk = createDefaultBlock(blockType);
       state.article.blocks.splice(targetIndex, 0, newBlk);
       createdIds.push(newBlk.id);
+
+      const newCard = buildBlockCardElement(newBlk, targetIndex, false);
+      if (refCard) {
+        canvas.insertBefore(newCard, refCard);
+      } else {
+        canvas.appendChild(newCard);
+      }
     }
 
-    renderBlocksCanvas();
+    reindexCanvasCards(canvas);
     markDirty();
-
-    if (createdIds.length > 0) {
-      setTimeout(function () {
-        const el = document.querySelector('[data-block-id="' + createdIds[0] + '"]');
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          el.classList.add("sortable-ghost");
-          setTimeout(function () {
-            el.classList.remove("sortable-ghost");
-          }, 500);
-        }
-      }, 50);
-    }
+    highlightInsertedBlock(createdIds[0]);
   }
 
   let activePickerPopover = null;
@@ -356,7 +411,17 @@
     btn.title = "Neuen Block an dieser Stelle einfügen";
     btn.addEventListener("click", function (e) {
       e.stopPropagation();
-      openBlockPickerPopup(btn, targetIndex);
+      let idx = parseInt(wrap.dataset.targetIndex, 10);
+      if (isNaN(idx)) {
+        const parentCard = wrap.closest(".cms-block-card");
+        if (parentCard) {
+          const cardIdx = getCardCurrentIndex(parentCard);
+          idx = isTop ? cardIdx : cardIdx + 1;
+        } else {
+          idx = 0;
+        }
+      }
+      openBlockPickerPopup(btn, idx);
     });
 
     wrap.appendChild(line);
@@ -367,6 +432,9 @@
   // Multi-Selection State & Helpers
   function toggleBlockSelection(blockId, isShift, currentIndex) {
     if (!state.article || !state.article.blocks) return;
+    if (typeof currentIndex !== "number" || currentIndex < 0) {
+      currentIndex = getCardCurrentIndex(blockId);
+    }
 
     if (isShift && state.lastSelectedBlockId) {
       const lastIdx = state.article.blocks.findIndex(function (b) {
@@ -463,7 +531,7 @@
     remaining.splice(targetIdx, 0, ...selected);
     state.article.blocks = remaining;
 
-    renderBlocksCanvas();
+    reorderCanvasCardsFromState();
     markDirty();
     updateFloatingSelectionBar();
   }
@@ -483,15 +551,20 @@
     remaining.splice(targetIndex, 0, ...selected);
     state.article.blocks = remaining;
 
-    renderBlocksCanvas();
+    reorderCanvasCardsFromState();
     markDirty();
     updateFloatingSelectionBar();
   }
 
   function duplicateSelectedBlocks() {
     if (!state.article || !state.article.blocks) return;
+    const canvas = document.getElementById("lukb-blocks-canvas");
+    if (!canvas) return;
+
     const newBlocks = [];
     const newSelectedIds = new Set();
+    const insertions = [];
+
     state.article.blocks.forEach(function (b) {
       newBlocks.push(b);
       if (state.selectedBlockIds.has(b.id)) {
@@ -499,12 +572,26 @@
         clone.id = uid("blk");
         newBlocks.push(clone);
         newSelectedIds.add(clone.id);
+        const newCard = buildBlockCardElement(clone, newBlocks.length - 1, false);
+        insertions.push({ origId: b.id, newCard: newCard });
       }
     });
+
     state.article.blocks = newBlocks;
     state.selectedBlockIds = newSelectedIds;
-    renderBlocksCanvas();
+
+    insertions.forEach(function (ins) {
+      const origCard = canvas.querySelector(':scope > [data-block-id="' + ins.origId + '"]');
+      if (origCard && origCard.nextElementSibling) {
+        canvas.insertBefore(ins.newCard, origCard.nextElementSibling);
+      } else {
+        canvas.appendChild(ins.newCard);
+      }
+    });
+
+    reindexCanvasCards(canvas);
     markDirty();
+    updateBlockSelectionVisuals();
     updateFloatingSelectionBar();
   }
 
@@ -516,19 +603,39 @@
       return;
     }
 
+    const canvas = document.getElementById("lukb-blocks-canvas");
     const deletedItems = [];
+    const selectedIds = new Set(state.selectedBlockIds);
+
     state.article.blocks.forEach(function (b, idx) {
-      if (state.selectedBlockIds.has(b.id)) {
+      if (selectedIds.has(b.id)) {
         deletedItems.push({ index: idx, block: deepClone(b) });
+        if (canvas) {
+          const card = canvas.querySelector(':scope > [data-block-id="' + b.id + '"]');
+          if (card) card.remove();
+        }
       }
     });
 
     state.article.blocks = state.article.blocks.filter(function (b) {
-      return !state.selectedBlockIds.has(b.id);
+      return !selectedIds.has(b.id);
     });
+    // Clear anchor references to deleted blocks
+    state.article.blocks.forEach(function (b) {
+      if (b && selectedIds.has(b.anchor_to)) {
+        b.anchor_to = null;
+      }
+    });
+
     state.selectedBlockIds.clear();
     state.lastSelectedBlockId = null;
-    renderBlocksCanvas();
+
+    if (state.article.blocks.length === 0) {
+      renderBlocksCanvas();
+    } else {
+      reindexCanvasCards(canvas);
+    }
+
     markDirty();
     updateFloatingSelectionBar();
 
@@ -879,10 +986,12 @@
       scrollSpeed: 24,
       bubbleScroll: true,
       onStart: function () {
+        canvas.classList.add("is-sortable-dragging");
         closeBlockPickerPopup();
         startEditorAutoScroll(editorPane);
       },
       onEnd: function () {
+        canvas.classList.remove("is-sortable-dragging");
         stopEditorAutoScroll();
         syncBlockOrderFromDOM(canvas);
         markDirty();
@@ -891,22 +1000,85 @@
     });
   }
 
-  function syncBlockOrderFromDOM(canvas) {
+  function updateCardAnchorBadges(card, blk) {
+    const headerLeft = card.querySelector(".block-header-left");
+    if (!headerLeft) return;
+
+    // 1. Anchor-Pill auf dem Randelement selbst
+    let anchorPill = headerLeft.querySelector(".block-anchor-pill");
+    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "custom_chart" || blk.type === "table") && (blk.layout || "column") === "column";
+
+    if (isMarginType && blk.anchor_to) {
+      if (!anchorPill) {
+        anchorPill = document.createElement("span");
+        anchorPill.className = "block-anchor-pill";
+        anchorPill.title = "Dieses Element ist an einen Textabsatz verankert. Klicken, um zum Ziel zu springen.";
+        anchorPill.textContent = "⚓ Verankert";
+
+        anchorPill.addEventListener("mouseenter", function () {
+          const curBlk = state.article ? state.article.blocks.find(function (b) { return b.id === card.dataset.blockId; }) : blk;
+          const targetId = curBlk ? curBlk.anchor_to : blk.anchor_to;
+          const targetCard = document.querySelector('[data-block-id="' + targetId + '"]');
+          if (targetCard) targetCard.classList.add("anchor-target-highlight");
+        });
+        anchorPill.addEventListener("mouseleave", function () {
+          const curBlk = state.article ? state.article.blocks.find(function (b) { return b.id === card.dataset.blockId; }) : blk;
+          const targetId = curBlk ? curBlk.anchor_to : blk.anchor_to;
+          const targetCard = document.querySelector('[data-block-id="' + targetId + '"]');
+          if (targetCard) targetCard.classList.remove("anchor-target-highlight");
+        });
+        anchorPill.addEventListener("click", function (e) {
+          e.stopPropagation();
+          const curBlk = state.article ? state.article.blocks.find(function (b) { return b.id === card.dataset.blockId; }) : blk;
+          const targetId = curBlk ? curBlk.anchor_to : blk.anchor_to;
+          const targetCard = document.querySelector('[data-block-id="' + targetId + '"]');
+          if (targetCard) {
+            targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
+            targetCard.classList.add("anchor-target-highlight");
+            setTimeout(function () {
+              targetCard.classList.remove("anchor-target-highlight");
+            }, 1600);
+          }
+        });
+        headerLeft.appendChild(anchorPill);
+      }
+    } else {
+      if (anchorPill) anchorPill.remove();
+    }
+
+    // 2. Target-Pill auf dem Zielabsatz
+    let targetPill = headerLeft.querySelector(".block-anchor-target-pill");
+    const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
+    const attachedMarginCount = blocksList.filter(function (o) {
+      return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column";
+    }).length;
+
+    if (attachedMarginCount > 0) {
+      if (!targetPill) {
+        targetPill = document.createElement("span");
+        targetPill.className = "block-anchor-target-pill";
+        headerLeft.appendChild(targetPill);
+      }
+      targetPill.title = attachedMarginCount + " Randelement(e) an diesen Absatz verankert.";
+      targetPill.textContent = "⚓ " + attachedMarginCount + " verankert";
+    } else {
+      if (targetPill) targetPill.remove();
+    }
+  }
+
+  function reindexCanvasCards(canvas) {
     if (!canvas) canvas = document.getElementById("lukb-blocks-canvas");
     if (!canvas || !state.article || !state.article.blocks) return;
 
     const cardElements = Array.from(canvas.querySelectorAll(":scope > .cms-block-card"));
-    const newOrderIds = cardElements.map(function (el) { return el.dataset.blockId; });
-    const blockMap = new Map();
-    state.article.blocks.forEach(function (b) { blockMap.set(b.id, b); });
+    const total = cardElements.length;
 
-    state.article.blocks = newOrderIds.map(function (id) { return blockMap.get(id); }).filter(Boolean);
-
-    // Bestehende DOM-Karten ohne destruktives Re-Rendering in-place anpassen
     let insideBox = false;
     cardElements.forEach(function (card, index) {
       const blk = state.article.blocks[index];
       if (!blk) return;
+      card.dataset.blockIndex = index;
+
       const isMarker = blk.type === "box_start" || blk.type === "box_end";
       if (blk.type === "box_start") insideBox = true;
 
@@ -922,6 +1094,12 @@
         pill.textContent = (index + 1) + ". " + getBlockTypeLabel(blk.type);
       }
 
+      // Up/Down Buttons
+      const upBtn = card.querySelector(".btn-block-up");
+      if (upBtn) upBtn.disabled = (index === 0);
+      const downBtn = card.querySelector(".btn-block-down");
+      if (downBtn) downBtn.disabled = (index === total - 1);
+
       // Top-Inserter: Nur an erster Karte führen
       const existingTopInserter = card.querySelector(":scope > .top-inserter");
       if (index === 0) {
@@ -934,8 +1112,43 @@
         }
       }
 
+      // Bottom-Inserter Datensatz anpassen
+      const bottomInserter = card.querySelector(":scope > .bottom-inserter");
+      if (bottomInserter) {
+        bottomInserter.dataset.targetIndex = index + 1;
+      }
+
+      // Verankerungs-Badges aktualisieren
+      updateCardAnchorBadges(card, blk);
+
       if (blk.type === "box_end") insideBox = false;
     });
+  }
+
+  function reorderCanvasCardsFromState(canvas) {
+    if (!canvas) canvas = document.getElementById("lukb-blocks-canvas");
+    if (!canvas || !state.article || !state.article.blocks) return;
+    const frag = document.createDocumentFragment();
+    state.article.blocks.forEach(function (blk) {
+      const card = canvas.querySelector(':scope > [data-block-id="' + blk.id + '"]');
+      if (card) frag.appendChild(card);
+    });
+    canvas.appendChild(frag);
+    reindexCanvasCards(canvas);
+  }
+
+  function syncBlockOrderFromDOM(canvas) {
+    if (!canvas) canvas = document.getElementById("lukb-blocks-canvas");
+    if (!canvas || !state.article || !state.article.blocks) return;
+
+    const cardElements = Array.from(canvas.querySelectorAll(":scope > .cms-block-card"));
+    const newOrderIds = cardElements.map(function (el) { return el.dataset.blockId; });
+    const blockMap = new Map();
+    state.article.blocks.forEach(function (b) { blockMap.set(b.id, b); });
+
+    state.article.blocks = newOrderIds.map(function (id) { return blockMap.get(id); }).filter(Boolean);
+
+    reindexCanvasCards(canvas);
   }
 
   function buildBlockCardElement(blk, index, insideBox) {
@@ -949,6 +1162,7 @@
       (isMarker ? " block-textbox-marker" : "") +
       (isSelected ? " is-selected sortable-selected" : "");
     card.dataset.blockId = blk.id;
+    card.dataset.blockIndex = index;
 
     card.addEventListener("click", function (e) {
       if (e.ctrlKey || e.metaKey) {
@@ -958,7 +1172,7 @@
         }
         e.preventDefault();
         e.stopPropagation();
-        toggleBlockSelection(blk.id, e.shiftKey, index);
+        toggleBlockSelection(blk.id, e.shiftKey, getCardCurrentIndex(card));
       }
     });
 
@@ -979,7 +1193,7 @@
     selectCb.checked = isSelected;
     selectCb.addEventListener("click", function (e) {
       e.stopPropagation();
-      toggleBlockSelection(blk.id, e.shiftKey, index);
+      toggleBlockSelection(blk.id, e.shiftKey, getCardCurrentIndex(card));
     });
 
     const dragHandle = document.createElement("span");
@@ -995,49 +1209,6 @@
     headerLeft.appendChild(dragHandle);
     headerLeft.appendChild(typePill);
 
-    // Verankerungs-Badge für Randelemente
-    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "custom_chart" || blk.type === "table") && (blk.layout || "column") === "column";
-    if (isMarginType && blk.anchor_to) {
-      const anchorPill = document.createElement("span");
-      anchorPill.className = "block-anchor-pill";
-      anchorPill.title = "Dieses Element ist an einen Textabsatz verankert. Klicken, um zum Ziel zu springen.";
-      anchorPill.textContent = "⚓ Verankert";
-
-      anchorPill.addEventListener("mouseenter", function () {
-        const targetCard = document.querySelector('[data-block-id="' + blk.anchor_to + '"]');
-        if (targetCard) targetCard.classList.add("anchor-target-highlight");
-      });
-      anchorPill.addEventListener("mouseleave", function () {
-        const targetCard = document.querySelector('[data-block-id="' + blk.anchor_to + '"]');
-        if (targetCard) targetCard.classList.remove("anchor-target-highlight");
-      });
-      anchorPill.addEventListener("click", function (e) {
-        e.stopPropagation();
-        const targetCard = document.querySelector('[data-block-id="' + blk.anchor_to + '"]');
-        if (targetCard) {
-          targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
-          targetCard.classList.add("anchor-target-highlight");
-          setTimeout(function () {
-            targetCard.classList.remove("anchor-target-highlight");
-          }, 1600);
-        }
-      });
-      headerLeft.appendChild(anchorPill);
-    }
-
-    // Badge für den Zielabsatz (wenn Randelemente an diesen Absatz verankert sind)
-    const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
-    const attachedMarginCount = blocksList.filter(function (o) {
-      return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column";
-    }).length;
-    if (attachedMarginCount > 0) {
-      const targetPill = document.createElement("span");
-      targetPill.className = "block-anchor-target-pill";
-      targetPill.title = attachedMarginCount + " Randelement(e) an diesen Absatz verankert.";
-      targetPill.textContent = "⚓ " + attachedMarginCount + " verankert";
-      headerLeft.appendChild(targetPill);
-    }
-
     const peerBadge = document.createElement("span");
     peerBadge.className = "block-peer-badge";
     peerBadge.style.display = "none";
@@ -1048,31 +1219,47 @@
 
     const upBtn = document.createElement("button");
     upBtn.type = "button";
-    upBtn.className = "btn-icon-only";
+    upBtn.className = "btn-icon-only btn-block-up";
     upBtn.title = "Block nach oben schieben";
     upBtn.textContent = "↑";
     upBtn.disabled = index === 0;
     upBtn.addEventListener("click", function () {
-      if (index <= 0) return;
-      const tmp = state.article.blocks[index - 1];
-      state.article.blocks[index - 1] = state.article.blocks[index];
-      state.article.blocks[index] = tmp;
-      renderBlocksCanvas();
+      const currentIdx = getCardCurrentIndex(card);
+      if (currentIdx <= 0) return;
+      const targetIdx = currentIdx - 1;
+      const tmp = state.article.blocks[targetIdx];
+      state.article.blocks[targetIdx] = state.article.blocks[currentIdx];
+      state.article.blocks[currentIdx] = tmp;
+
+      const canvas = document.getElementById("lukb-blocks-canvas");
+      const prevCard = card.previousElementSibling;
+      if (prevCard && canvas) {
+        canvas.insertBefore(card, prevCard);
+      }
+      reindexCanvasCards(canvas);
       markDirty();
     });
 
     const downBtn = document.createElement("button");
     downBtn.type = "button";
-    downBtn.className = "btn-icon-only";
+    downBtn.className = "btn-icon-only btn-block-down";
     downBtn.title = "Block nach unten schieben";
     downBtn.textContent = "↓";
-    downBtn.disabled = index === state.article.blocks.length - 1;
+    downBtn.disabled = index >= (state.article && state.article.blocks ? state.article.blocks.length - 1 : 0);
     downBtn.addEventListener("click", function () {
-      if (index >= state.article.blocks.length - 1) return;
-      const tmp = state.article.blocks[index + 1];
-      state.article.blocks[index + 1] = state.article.blocks[index];
-      state.article.blocks[index] = tmp;
-      renderBlocksCanvas();
+      const currentIdx = getCardCurrentIndex(card);
+      if (currentIdx < 0 || currentIdx >= state.article.blocks.length - 1) return;
+      const targetIdx = currentIdx + 1;
+      const tmp = state.article.blocks[targetIdx];
+      state.article.blocks[targetIdx] = state.article.blocks[currentIdx];
+      state.article.blocks[currentIdx] = tmp;
+
+      const canvas = document.getElementById("lukb-blocks-canvas");
+      const nextCard = card.nextElementSibling;
+      if (nextCard && canvas) {
+        canvas.insertBefore(nextCard, card);
+      }
+      reindexCanvasCards(canvas);
       markDirty();
     });
 
@@ -1085,7 +1272,8 @@
     insertBelowBtn.style.color = "var(--lukb-navy)";
     insertBelowBtn.addEventListener("click", function (e) {
       e.stopPropagation();
-      openBlockPickerPopup(insertBelowBtn, index + 1);
+      const currentIdx = getCardCurrentIndex(card);
+      openBlockPickerPopup(insertBelowBtn, currentIdx !== -1 ? currentIdx + 1 : 0);
     });
 
     const dupBtn = document.createElement("button");
@@ -1094,11 +1282,29 @@
     dupBtn.title = "Block duplizieren";
     dupBtn.textContent = "⧉";
     dupBtn.addEventListener("click", function () {
-      const clone = JSON.parse(JSON.stringify(blk));
+      const currentIdx = getCardCurrentIndex(card);
+      if (currentIdx === -1) return;
+      const blkToDup = state.article.blocks[currentIdx];
+      const clone = JSON.parse(JSON.stringify(blkToDup));
       clone.id = uid("blk");
-      state.article.blocks.splice(index + 1, 0, clone);
-      renderBlocksCanvas();
+      state.article.blocks.splice(currentIdx + 1, 0, clone);
+
+      const canvas = document.getElementById("lukb-blocks-canvas");
+      const newCard = buildBlockCardElement(clone, currentIdx + 1, false);
+      if (card.nextElementSibling) {
+        canvas.insertBefore(newCard, card.nextElementSibling);
+      } else {
+        canvas.appendChild(newCard);
+      }
+
+      reindexCanvasCards(canvas);
       markDirty();
+
+      newCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      newCard.classList.add("sortable-ghost");
+      setTimeout(function () {
+        newCard.classList.remove("sortable-ghost");
+      }, 500);
     });
 
     const delBtn = document.createElement("button");
@@ -1107,18 +1313,30 @@
     delBtn.title = "Block löschen";
     delBtn.textContent = "✕";
     delBtn.addEventListener("click", function () {
-      const deletedBlock = deepClone(blk);
-      const deletedIndex = index;
-      const typeLabel = getBlockTypeLabel(blk.type);
+      const currentIdx = getCardCurrentIndex(card);
+      if (currentIdx === -1) return;
+      const blkToDelete = state.article.blocks[currentIdx];
+      const deletedBlock = deepClone(blkToDelete);
+      const deletedIndex = currentIdx;
+      const typeLabel = getBlockTypeLabel(blkToDelete.type);
 
-      state.selectedBlockIds.delete(blk.id);
-      state.article.blocks.splice(index, 1);
+      state.selectedBlockIds.delete(blkToDelete.id);
+      state.article.blocks.splice(currentIdx, 1);
       state.article.blocks.forEach(function (b) {
-        if (b && b.anchor_to === blk.id) {
+        if (b && b.anchor_to === blkToDelete.id) {
           b.anchor_to = null;
         }
       });
-      renderBlocksCanvas();
+
+      card.remove();
+
+      const canvas = document.getElementById("lukb-blocks-canvas");
+      if (state.article.blocks.length === 0) {
+        renderBlocksCanvas();
+      } else {
+        reindexCanvasCards(canvas);
+      }
+
       markDirty();
       updateFloatingSelectionBar();
 
@@ -1138,6 +1356,9 @@
     header.appendChild(headerLeft);
     header.appendChild(headerActions);
     card.appendChild(header);
+
+    // Verankerungs-Badges initialisieren
+    updateCardAnchorBadges(card, blk);
 
     if (isMarker) {
       card.appendChild(createInlineInserterElement(index + 1, false));
@@ -1184,171 +1405,8 @@
   }
 
   // ==========================================================================
-  // Spezifische Block-Editoren
+  // Spezifische Block-Editoren (Zitate, Divider, Spacer, Colbreak -> richtext.js)
   // ==========================================================================
-
-  function buildQuoteBlockBody(container, blk) {
-    const topRow = document.createElement("div");
-    topRow.style.display = "flex";
-    topRow.style.justifyContent = "space-between";
-    topRow.style.alignItems = "center";
-    topRow.style.marginBottom = "8px";
-
-    const topLbl = document.createElement("label");
-    topLbl.className = "field-label";
-    topLbl.style.margin = "0";
-    topLbl.textContent = "Zitat / Pull-Quote (LUKB Corporate Design)";
-
-    const layoutSel = document.createElement("select");
-    layoutSel.className = "cms-select";
-    layoutSel.style.width = "180px";
-    [
-      { val: "column", label: "1-spaltig (Spaltenbreite)" },
-      { val: "full", label: "2-spaltig (Seitenbreite)" },
-    ].forEach(function (o) {
-      const opt = document.createElement("option");
-      opt.value = o.val;
-      opt.textContent = o.label;
-      if ((blk.layout || "column") === o.val) opt.selected = true;
-      layoutSel.appendChild(opt);
-    });
-    layoutSel.addEventListener("change", function () {
-      blk.layout = layoutSel.value;
-      markDirty();
-    });
-
-    topRow.appendChild(topLbl);
-    topRow.appendChild(layoutSel);
-    container.appendChild(topRow);
-
-    const qWrap = document.createElement("div");
-    qWrap.className = "quote-editor-box";
-    qWrap.style.marginBottom = "10px";
-
-    const qTextarea = document.createElement("textarea");
-    qTextarea.className = "cms-textarea";
-    qTextarea.rows = 3;
-    qTextarea.style.fontStyle = "italic";
-    qTextarea.style.fontSize = "13.5px";
-    qTextarea.placeholder = "Zitattext eingeben (ohne Anführungszeichen, werden automatisch formatiert) …";
-    qTextarea.value = blk.quote || "";
-    qTextarea.addEventListener("input", function () {
-      blk.quote = qTextarea.value;
-      markDirty();
-    });
-    qTextarea.addEventListener("paste", function (e) {
-      e.preventDefault();
-      const rawText = (e.clipboardData || window.clipboardData).getData("text/plain");
-      const cleaned = cleanPdfPastedText(rawText);
-      if (!document.execCommand("insertText", false, cleaned)) {
-        const start = qTextarea.selectionStart;
-        const end = qTextarea.selectionEnd;
-        qTextarea.setRangeText(cleaned, start, end, "end");
-      }
-      blk.quote = qTextarea.value;
-      markDirty();
-    });
-    qWrap.appendChild(qTextarea);
-    container.appendChild(qWrap);
-
-    const metaGrid = document.createElement("div");
-    metaGrid.style.display = "grid";
-    metaGrid.style.gridTemplateColumns = "1fr 1fr";
-    metaGrid.style.gap = "10px";
-
-    const authWrap = document.createElement("div");
-    const authLbl = document.createElement("label");
-    authLbl.className = "field-label";
-    authLbl.textContent = "Urheber / Zitatgeber (z.B. Name & Titel)";
-    const authInp = document.createElement("input");
-    authInp.type = "text";
-    authInp.className = "cms-input font-medium";
-    authInp.placeholder = "z.B. Thomas Grüter";
-    authInp.value = blk.author || "";
-    authInp.addEventListener("input", function () {
-      blk.author = authInp.value;
-      markDirty();
-    });
-    authWrap.appendChild(authLbl);
-    authWrap.appendChild(authInp);
-
-    const srcWrap = document.createElement("div");
-    const srcLbl = document.createElement("label");
-    srcLbl.className = "field-label";
-    srcLbl.textContent = "Kontext / Quelle / Funktion";
-    const srcInp = document.createElement("input");
-    srcInp.type = "text";
-    srcInp.className = "cms-input";
-    srcInp.placeholder = "z.B. Chief Investment Officer";
-    srcInp.value = blk.source || "";
-    srcInp.addEventListener("input", function () {
-      blk.source = srcInp.value;
-      markDirty();
-    });
-    srcWrap.appendChild(srcLbl);
-    srcWrap.appendChild(srcInp);
-
-    metaGrid.appendChild(authWrap);
-    metaGrid.appendChild(srcWrap);
-    container.appendChild(metaGrid);
-  }
-
-  function buildDividerBlockBody(container, blk) {
-    if (!blk.style) blk.style = "solid";
-
-    const row = document.createElement("div");
-    row.className = "divider-style-selector";
-
-    const lbl = document.createElement("label");
-    lbl.className = "field-label";
-    lbl.style.margin = "0";
-    lbl.textContent = "Stil der Trennlinie:";
-    row.appendChild(lbl);
-
-    const btnGroup = document.createElement("div");
-    btnGroup.style.display = "flex";
-    btnGroup.style.gap = "6px";
-
-    const previewLine = document.createElement("div");
-    previewLine.className = "divider-preview-line";
-
-    const updatePreview = () => {
-      previewLine.style.borderTop =
-        blk.style === "dashed"
-          ? "2px dashed #94A3B8"
-          : blk.style === "dots"
-          ? "2.5px dotted #94A3B8"
-          : "1.5px solid #94A3B8";
-    };
-
-    [
-      { style: "solid", label: "Durchgezogen —" },
-      { style: "dashed", label: "Gestrichelt - - -" },
-      { style: "dots", label: "Gepunktet · · ·" },
-    ].forEach(function (opt) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className =
-        "btn-lukb btn-lukb-sm " +
-        (blk.style === opt.style ? "btn-lukb-navy" : "btn-lukb-ghost");
-      btn.textContent = opt.label;
-      btn.addEventListener("click", function () {
-        blk.style = opt.style;
-        Array.from(btnGroup.children).forEach(b => {
-          b.className = "btn-lukb btn-lukb-sm btn-lukb-ghost";
-        });
-        btn.className = "btn-lukb btn-lukb-sm btn-lukb-navy";
-        updatePreview();
-        markDirty();
-      });
-      btnGroup.appendChild(btn);
-    });
-
-    row.appendChild(btnGroup);
-    container.appendChild(row);
-    updatePreview();
-    container.appendChild(previewLine);
-  }
 
   function buildFootnotesBlockBody(container, blk) {
     if (!blk.title) blk.title = "Anmerkungen & Quellen";
@@ -1465,138 +1523,6 @@
       markDirty();
     });
     container.appendChild(addBtn);
-  }
-
-  function buildSpacerBlockBody(container, blk) {
-    if (!blk.height_mm) blk.height_mm = 8;
-
-    const row = document.createElement("div");
-    row.className = "db-spacer-editor-row";
-
-    const label = document.createElement("label");
-    label.className = "field-label";
-    label.style.margin = "0";
-    label.style.whiteSpace = "nowrap";
-    label.textContent = "Abstandshöhe:";
-
-    const numInp = document.createElement("input");
-    numInp.type = "number";
-    numInp.className = "cms-input font-medium";
-    numInp.style.maxWidth = "70px";
-    numInp.style.textAlign = "center";
-    numInp.style.padding = "4px 8px";
-    numInp.min = "2";
-    numInp.max = "80";
-    numInp.step = "2";
-    numInp.value = blk.height_mm;
-
-    const unit = document.createElement("span");
-    unit.style.fontSize = "12.5px";
-    unit.style.color = "var(--lukb-navy)";
-    unit.style.fontWeight = "500";
-    unit.textContent = "mm";
-
-    const previewLine = document.createElement("div");
-    previewLine.className = "db-spacer-preview-line";
-
-    const presetButtons = [];
-
-    function updateHeight(val) {
-      let num = parseInt(val, 10);
-      if (isNaN(num)) num = 8;
-      num = Math.max(2, Math.min(80, Math.round(num / 2) * 2));
-      blk.height_mm = num;
-      numInp.value = num;
-      updateVisual();
-      updatePresetActive();
-      markDirty();
-    }
-
-    function updateVisual() {
-      const hMm = blk.height_mm || 8;
-      const hPx = Math.round(hMm * 3.78);
-      previewLine.style.height = Math.max(14, hPx) + "px";
-      previewLine.textContent = "↕ " + hMm + " mm vertikaler Leerraum im Satz";
-    }
-
-    function updatePresetActive() {
-      const cur = blk.height_mm || 8;
-      presetButtons.forEach(function (pb) {
-        if (pb.val === cur) {
-          pb.btn.classList.add("active");
-          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
-          pb.btn.style.setProperty("color", "#FFFFFF", "important");
-          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
-        } else {
-          pb.btn.classList.remove("active");
-          pb.btn.style.removeProperty("background");
-          pb.btn.style.removeProperty("color");
-          pb.btn.style.removeProperty("border-color");
-        }
-      });
-    }
-
-    numInp.addEventListener("change", function () {
-      updateHeight(numInp.value);
-    });
-
-    const presetsWrap = document.createElement("div");
-    presetsWrap.className = "db-spacer-presets";
-
-    [
-      { label: "4 mm", val: 4 },
-      { label: "8 mm (Std)", val: 8 },
-      { label: "12 mm", val: 12 },
-      { label: "16 mm", val: 16 },
-      { label: "24 mm", val: 24 },
-    ].forEach(function (preset) {
-      const pBtn = document.createElement("button");
-      pBtn.type = "button";
-      pBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm db-height-preset-btn";
-      pBtn.style.padding = "3px 8px";
-      pBtn.style.fontSize = "11px";
-      pBtn.textContent = preset.label;
-      pBtn.addEventListener("click", function () {
-        updateHeight(preset.val);
-      });
-      presetsWrap.appendChild(pBtn);
-      presetButtons.push({ btn: pBtn, val: preset.val });
-    });
-
-    row.appendChild(label);
-    row.appendChild(numInp);
-    row.appendChild(unit);
-    row.appendChild(presetsWrap);
-
-    container.appendChild(row);
-    container.appendChild(previewLine);
-    updateVisual();
-    updatePresetActive();
-  }
-
-  function buildColbreakBlockBody(container, blk) {
-    const wrap = document.createElement("div");
-    wrap.className = "db-colbreak-editor-box";
-
-    const icon = document.createElement("span");
-    icon.className = "db-colbreak-icon";
-    icon.textContent = "⇥";
-
-    const textWrap = document.createElement("div");
-    const title = document.createElement("div");
-    title.className = "db-colbreak-title";
-    title.textContent = "Manueller Spaltenumbruch";
-
-    const desc = document.createElement("div");
-    desc.className = "db-colbreak-desc";
-    desc.textContent = "Erzwingt an dieser Position den Wechsel in Spalte 2 (bzw. auf die Folgeseite in Spalte 1).";
-
-    textWrap.appendChild(title);
-    textWrap.appendChild(desc);
-
-    wrap.appendChild(icon);
-    wrap.appendChild(textWrap);
-    container.appendChild(wrap);
   }
 
   function buildHeadingBlockBody(container, blk) {
@@ -2870,7 +2796,7 @@
     if (state._initialized) return;
     state._initialized = true;
     window.lukbRefreshCanvasDecorations = function () {
-      renderBlocksCanvas();
+      reindexCanvasCards();
     };
     bindMetadataStaticListeners();
     bindAddBlockButtons();
@@ -2904,6 +2830,7 @@
     deleteSelectedBlocks: deleteSelectedBlocks,
     duplicateSelectedBlocks: duplicateSelectedBlocks,
     ensureFloatingSelectionBar: ensureFloatingSelectionBar,
+    getCardCurrentIndex: getCardCurrentIndex,
     initEditorApp: initEditorApp,
     initSortable: initSortable,
     insertBlockAt: insertBlockAt,
@@ -2912,6 +2839,8 @@
     openBlockPickerPopup: openBlockPickerPopup,
     openMoveToDialog: openMoveToDialog,
     registerShinyHandlers: registerShinyHandlers,
+    reindexCanvasCards: reindexCanvasCards,
+    reorderCanvasCardsFromState: reorderCanvasCardsFromState,
     renderAuthorsList: renderAuthorsList,
     renderBlocksCanvas: renderBlocksCanvas,
     renderMetadataForm: renderMetadataForm,
@@ -2921,6 +2850,7 @@
     syncBlockOrderFromDOM: syncBlockOrderFromDOM,
     toggleBlockSelection: toggleBlockSelection,
     updateBlockSelectionVisuals: updateBlockSelectionVisuals,
+    updateCardAnchorBadges: updateCardAnchorBadges,
     updateFloatingSelectionBar: updateFloatingSelectionBar,
   });
   if (document.readyState === "loading") {
