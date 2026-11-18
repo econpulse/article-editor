@@ -544,6 +544,12 @@ def render_pdf_bytes(doc: ArticleDocument) -> bytes:
     return pdf_bytes
 
 
+def render_preview_pdf_base64(doc: ArticleDocument) -> str:
+    """Kompiliert ein ArticleDocument in-memory zu einem PDF und gibt dieses als Base64-String zurück."""
+    pdf_bytes = render_pdf_bytes(doc)
+    return base64.b64encode(pdf_bytes).decode("ascii")
+
+
 def render_preview_svg_pages(doc: ArticleDocument) -> list[str]:
     """
     Kompiliert ein ArticleDocument in-memory zu einer Liste von SVG-Strings (eine SVG pro PDF-Seite).

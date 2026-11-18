@@ -140,7 +140,7 @@ def register_editor_handlers(
             include_typst = auto_preview and (preview_mode == "pdf")
             include_web = auto_preview and (preview_mode == "web")
 
-            svg_pages, web_html = await state.send_preview(
+            pdf_base64, web_html = await state.send_preview(
                 merged_doc,
                 include_typst=include_typst,
                 include_web=include_web,
@@ -159,7 +159,7 @@ def register_editor_handlers(
             await broadcast_preview_to_coauthors(
                 state.session_id,
                 merged_doc,
-                pre_rendered_svg=svg_pages,
+                pre_rendered_pdf_base64=pdf_base64,
                 pre_rendered_html=web_html,
             )
         except Exception as exc:

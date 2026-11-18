@@ -2676,14 +2676,173 @@
       applyPeerFocusDecorations();
     });
 
-    // 4. Aktualisiert die Live-Preview (Typst SVG Seiten + Web HTML)
+    // 4. PDF.js Live-Preview & Web HTML
+    if (typeof window !== "undefined" && window.pdfjsLib) {
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = "js/vendor/pdf.worker.min.js";
+    }
+
+    function base64ToUint8Array(base64) {
+      const raw = window.atob(base64);
+      const rawLength = raw.length;
+      const array = new Uint8Array(rawLength);
+      for (let i = 0; i < rawLength; i++) {
+        array[i] = raw.charCodeAt(i);
+      }
+      return array;
+    }
+
+    let _currentPdfRenderSeq = 0;
+    let _activeRenderTasks = [];
+
+    async function renderPdfPreview(pdfBase64) {
+      if (typeof window !== "undefined" && window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "js/vendor/pdf.worker.min.js";
+      }
+
+      const pdfContainer = document.getElementById("preview-container-pdf");
+      const pageBadge = document.getElementById("preview-page-count");
+      const refreshBtn = document.getElementById("btn_refresh_preview");
+      if (!pdfContainer) return;
+
+      const renderSeq = ++_currentPdfRenderSeq;
+
+      // Laufende Render-Tasks aus vorherigen Updates abbrechen
+      for (let i = 0; i < _activeRenderTasks.length; i++) {
+        try {
+          if (_activeRenderTasks[i] && typeof _activeRenderTasks[i].cancel === "function") {
+            _activeRenderTasks[i].cancel();
+          }
+        } catch (_) {}
+      }
+      _activeRenderTasks = [];
+
+      if (!window.pdfjsLib) {
+        console.error("PDF.js ist nicht geladen.");
+        return;
+      }
+
+      try {
+        const pdfData = base64ToUint8Array(pdfBase64);
+        const loadingTask = window.pdfjsLib.getDocument({
+          data: pdfData,
+          isEvalSupported: false,
+        });
+        const pdfDoc = await loadingTask.promise;
+
+        if (renderSeq !== _currentPdfRenderSeq) {
+          return; // Ein neueres Update hat diesen Render-Vorgang überholt
+        }
+
+        const numPages = pdfDoc.numPages;
+
+        // Eventuelle alte SVG-Seiten-Elemente oder Fehlermeldungen abräumen
+        const svgPages = pdfContainer.querySelectorAll(":scope > .typst-svg-page, :scope > .preview-error-box");
+        if (svgPages.length > 0) {
+          svgPages.forEach(function (el) { el.remove(); });
+        }
+
+        // Bestehende PDF-Seiten-Container ermitteln
+        const existingPages = Array.from(pdfContainer.querySelectorAll(":scope > .typst-pdf-page"));
+
+        // Überzählige Seiten vom Ende entfernen
+        while (existingPages.length > numPages) {
+          const toRemove = existingPages.pop();
+          if (toRemove) toRemove.remove();
+        }
+
+        // Fehlende Seiten-Container anhängen
+        while (existingPages.length < numPages) {
+          const pageWrap = document.createElement("div");
+          pageWrap.className = "typst-pdf-page";
+          pdfContainer.appendChild(pageWrap);
+          existingPages.push(pageWrap);
+        }
+
+        const targetWidth = Math.min(
+          pdfContainer.clientWidth > 40 ? pdfContainer.clientWidth - 40 : 760,
+          760
+        );
+        const dpr = Math.max(window.devicePixelRatio || 1, 1.5);
+
+        for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+          if (renderSeq !== _currentPdfRenderSeq) return;
+
+          const page = await pdfDoc.getPage(pageNum);
+          if (renderSeq !== _currentPdfRenderSeq) return;
+
+          const pageWrap = existingPages[pageNum - 1];
+          if (!pageWrap) continue;
+
+          const unscaled = page.getViewport({ scale: 1.0 });
+          pageWrap.style.aspectRatio = unscaled.width + " / " + unscaled.height;
+
+          const cssScale = (targetWidth > 0 ? targetWidth : 760) / unscaled.width;
+          const renderScale = cssScale * dpr;
+          const viewport = page.getViewport({ scale: renderScale });
+
+          let canvas = pageWrap.querySelector("canvas");
+          if (!canvas) {
+            canvas = document.createElement("canvas");
+            pageWrap.innerHTML = "";
+            pageWrap.appendChild(canvas);
+          }
+
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          canvas.style.width = "100%";
+          canvas.style.height = "auto";
+          canvas.style.display = "block";
+
+          const ctx = canvas.getContext("2d", { alpha: false });
+          const renderTask = page.render({
+            canvasContext: ctx,
+            viewport: viewport,
+          });
+          _activeRenderTasks.push(renderTask);
+
+          try {
+            await renderTask.promise;
+          } catch (err) {
+            if (err && err.name === "RenderingCancelledException") {
+              return;
+            }
+            throw err;
+          }
+        }
+
+        state.lastKnownPageCount = numPages;
+        state.previewPending = false;
+        if (refreshBtn) refreshBtn.classList.remove("has-pending-preview");
+        if (pageBadge) {
+          const baseLabel =
+            numPages + (numPages === 1 ? " PDF-Seite (Typst)" : " PDF-Seiten (Typst)");
+          pageBadge.textContent = state.autoPreview ? baseLabel : baseLabel + " · Pausiert";
+        }
+      } catch (err) {
+        if (renderSeq !== _currentPdfRenderSeq) return;
+        console.error("PDF.js Live-Preview Render-Fehler:", err);
+      }
+    }
+
+    // 4. Aktualisiert die Live-Preview (Typst PDF via PDF.js + Web HTML)
     window.Shiny.addCustomMessageHandler("lukb_update_preview", function (msg) {
       const pdfContainer = document.getElementById("preview-container-pdf");
       const webIframe = document.getElementById("preview-iframe-web");
       const pageBadge = document.getElementById("preview-page-count");
       const refreshBtn = document.getElementById("btn_refresh_preview");
 
-      if (pdfContainer && Array.isArray(msg.svg_pages)) {
+      if (msg.error) {
+        if (pdfContainer) {
+          const escMsg = E.escapeHtml ? E.escapeHtml(msg.error) : msg.error;
+          pdfContainer.innerHTML =
+            '<div class="preview-error-box" style="margin:20px;padding:16px;background:#FEF2F2;border:1px solid #FCA5A5;border-radius:6px;color:#991B1B;font-family:var(--font-heading);font-size:13px;">' +
+            '<strong>Typst Vorschau-Hinweis:</strong>' +
+            '<div style="margin-top:6px;font-family:monospace;font-size:12px;white-space:pre-wrap;">' + escMsg + '</div>' +
+            '</div>';
+        }
+      } else if (pdfContainer && typeof msg.pdf_base64 === "string" && msg.pdf_base64) {
+        renderPdfPreview(msg.pdf_base64);
+      } else if (pdfContainer && Array.isArray(msg.svg_pages)) {
         const existingPages = Array.from(pdfContainer.querySelectorAll(":scope > .typst-svg-page"));
 
         // Überzählige Seiten vom Ende entfernen

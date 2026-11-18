@@ -55,6 +55,7 @@ def build_app_ui() -> ui.Tag:
             ui.tags.title("LUKB Investment Office — Publikations-Editor & CMS"),
             ui.tags.link(rel="stylesheet", href=f"css/editor.css?v={asset_ver}"),
             ui.tags.script(src="js/vendor/Sortable.min.js"),
+            ui.tags.script(src="js/vendor/pdf.min.js"),
             *[ui.tags.script(src=f"{mod}?v={asset_ver}") for mod in JS_MODULES],
             ui.tags.script(src=f"js/editor.js?v={asset_ver}"),
         ),

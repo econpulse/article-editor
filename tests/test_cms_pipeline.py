@@ -2115,6 +2115,72 @@ def test_typst_pdf_outline_hierarchy():
     assert b"/Outlines" not in pdf_empty
 
 
+def test_pdfjs_preview_pipeline():
+    """
+    Testet die PDF.js-basierte Vorschau-Pipeline:
+    1. render_preview_pdf_base64 liefert ein valides, dekodierbares PDF als Base64
+    2. Die Base64-PDF-Nutzlast ist massiv schlanker als die SVG-Vorschau
+    3. SessionState.send_preview() versendet pdf_base64 in lukb_update_preview
+    4. ui/__init__.py bindet pdf.min.js ein
+    """
+    import asyncio
+    import base64
+    from schemas.article import ArticleDocument, ArticleMetadata, RichTextBlock
+    from services.renderer import render_preview_pdf_base64, render_preview_svg_pages
+    from ui import build_app_ui
+
+    doc = ArticleDocument(
+        metadata=ArticleMetadata(title="PDF.js Preview Test"),
+        template_id="investment_focus",
+        blocks=[
+            RichTextBlock(id="p1", html="<p>Testen der schnellen PDF.js Vorschau.</p>").model_dump(),
+        ],
+    )
+
+    # 1. Base64 PDF Render
+    pdf_b64 = render_preview_pdf_base64(doc)
+    assert isinstance(pdf_b64, str)
+    assert len(pdf_b64) > 100
+    pdf_raw = base64.b64decode(pdf_b64.encode("ascii"))
+    assert pdf_raw.startswith(b"%PDF-")
+
+    # 2. Grössenvergleich
+    svg_pages = render_preview_svg_pages(doc)
+    svg_size = sum(len(p.encode("utf-8")) for p in svg_pages)
+    assert len(pdf_raw) < svg_size, "PDF muss signifikant kompakter sein als SVG"
+
+    # 3. UI-Einbindung
+    page = build_app_ui()
+    div = page.children[1].children[-1]
+    hc = div.children[0]
+    assert "js/vendor/pdf.min.js" in str(hc.head)
+
+    # 4. SessionState.send_preview Meldung
+    from server.state import SessionState
+    messages = []
+
+    class MockSession:
+        def __init__(self):
+            self.id = "mock_session_123"
+
+        def on_ended(self, fn):
+            pass
+
+        async def send_custom_message(self, typ, payload):
+            messages.append((typ, payload))
+
+    state = SessionState(MockSession(), None)
+    res_pdf, res_html = asyncio.run(state.send_preview(doc, include_typst=True, include_web=False))
+    assert res_pdf is not None
+    assert len(messages) == 1
+    msg_type, msg_payload = messages[0]
+    assert msg_type == "lukb_update_preview"
+    assert "pdf_base64" in msg_payload
+    assert msg_payload["pdf_base64"] == res_pdf
+    assert msg_payload["typst_skipped"] is False
+    assert msg_payload["error"] is None
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -2141,6 +2207,7 @@ if __name__ == "__main__":
     test_priority_2_tags_caching_and_deduplication()
     test_priority_3_modular_js_footnotes_and_html_hardening()
     test_typst_pdf_outline_hierarchy()
+    test_pdfjs_preview_pipeline()
     test_full_cms_workflow()
     import tests.test_custom_chart as tcc
     tcc.test_parsing_helpers()

@@ -2259,17 +2259,21 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
   gap: 20px;
 }
 
-.typst-svg-page {
+.typst-svg-page,
+.typst-pdf-page {
   background: #FFFFFF;
   box-shadow: 0 6px 24px rgba(0, 27, 58, 0.16);
   border-radius: 2px;
   width: 100%;
   max-width: 760px;
   flex-shrink: 0;
+  position: relative;
   transition: width 0.2s ease;
+  overflow: hidden;
 }
 
-.typst-svg-page svg {
+.typst-svg-page svg,
+.typst-pdf-page canvas {
   width: 100% !important;
   height: auto !important;
   display: block;

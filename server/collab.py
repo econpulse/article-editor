@@ -15,7 +15,7 @@ from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
 from services.custom_chart_generator import generate_custom_chart_svg
-from services.renderer import render_preview_svg_pages, render_web_html
+from services.renderer import render_preview_pdf_base64, render_preview_svg_pages, render_web_html
 
 logger = logging.getLogger("lukb_cms.collab")
 
@@ -189,12 +189,13 @@ async def broadcast_article_sync(
 async def broadcast_preview_to_coauthors(
     sender_session_id: str,
     doc: ArticleDocument,
-    pre_rendered_svg: list[str] | None = None,
+    pre_rendered_pdf_base64: str | None = None,
     pre_rendered_html: str | None = None,
+    pre_rendered_svg: list[str] | None = None,
 ) -> None:
     """
     Aktualisiert die Live-Vorschau bei allen anderen Co-Autoren im selben Artikel.
-    Wiederverwendet bereits berechnete `pre_rendered_svg`- und `pre_rendered_html`-Ergebnisse
+    Wiederverwendet bereits berechnete `pre_rendered_pdf_base64`- und `pre_rendered_html`-Ergebnisse
     bzw. berechnet sie asynchron im Worker-Thread höchstens einmal pro Speichervorgang.
     Rendert HTML nur, falls mindestens ein Co-Autor die Web-Vorschau aktiv betrachtet.
     """
@@ -223,12 +224,12 @@ async def broadcast_preview_to_coauthors(
         bool(info.get("auto_preview", True)) and info.get("preview_mode", "pdf") == "pdf"
         for _, info in coauthor_targets
     )
-    shared_svg = pre_rendered_svg
-    if any_peer_needs_typst and shared_svg is None:
+    shared_pdf_base64 = pre_rendered_pdf_base64
+    if any_peer_needs_typst and shared_pdf_base64 is None:
         try:
-            shared_svg = await asyncio.to_thread(render_preview_svg_pages, doc)
+            shared_pdf_base64 = await asyncio.to_thread(render_preview_pdf_base64, doc)
         except Exception:
-            shared_svg = None
+            shared_pdf_base64 = None
 
     for _sid, info in coauthor_targets:
         peer_sess: Session | None = info.get("session")
@@ -239,7 +240,7 @@ async def broadcast_preview_to_coauthors(
                 await peer_sess.send_custom_message(
                     "lukb_update_preview",
                     {
-                        "svg_pages": shared_svg if (peer_auto and peer_mode == "pdf") else None,
+                        "pdf_base64": shared_pdf_base64 if (peer_auto and peer_mode == "pdf") else None,
                         "web_html": shared_html if peer_mode == "web" else None,
                         "typst_skipped": not (peer_auto and peer_mode == "pdf"),
                         "web_skipped": peer_mode != "web",

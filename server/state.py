@@ -20,7 +20,7 @@ from server.collab import (
     register_peer,
     set_peer_article,
 )
-from services.renderer import render_preview_svg_pages, render_web_html
+from services.renderer import render_preview_pdf_base64, render_preview_svg_pages, render_web_html
 
 logger = logging.getLogger("lukb_cms.state")
 
@@ -107,26 +107,21 @@ class SessionState:
         doc: ArticleDocument | None = None,
         include_typst: bool = True,
         include_web: bool = False,
-    ) -> tuple[list[str] | None, str | None]:
-        """Rendert die SVG- und/oder HTML-Vorschau asynchron im Worker-Thread, sendet sie an den Client und gibt (svg_pages, web_html) zurück."""
+    ) -> tuple[str | None, str | None]:
+        """Rendert die PDF- (PDF.js) und/oder HTML-Vorschau asynchron im Worker-Thread, sendet sie an den Client und gibt (pdf_base64, web_html) zurück."""
         if doc is None:
             doc = self.current_doc.get()
         if doc is None:
             return None, None
 
-        svg_pages: list[str] | None = None
+        pdf_base64: str | None = None
+        preview_error: str | None = None
         if include_typst:
             try:
-                svg_pages = await asyncio.to_thread(render_preview_svg_pages, doc)
+                pdf_base64 = await asyncio.to_thread(render_preview_pdf_base64, doc)
             except Exception as exc:
                 logger.exception("Typst Preview-Fehler")
-                err_svg = (
-                    f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 200">'
-                    f'<rect width="600" height="200" fill="#FEF2F2"/>'
-                    f'<text x="24" y="50" fill="#B91C1C" font-size="14">'
-                    f"Typst Vorschau-Hinweis: {str(exc)[:90]}</text></svg>"
-                )
-                svg_pages = [err_svg]
+                preview_error = f"Typst Vorschau-Hinweis: {str(exc)[:180]}"
 
         web_html: str | None = None
         if include_web:
@@ -139,13 +134,14 @@ class SessionState:
         await self.session.send_custom_message(
             "lukb_update_preview",
             {
-                "svg_pages": svg_pages,
+                "pdf_base64": pdf_base64,
                 "web_html": web_html,
                 "typst_skipped": not include_typst,
                 "web_skipped": not include_web,
+                "error": preview_error,
             },
         )
-        return svg_pages, web_html
+        return pdf_base64, web_html
 
     async def load_and_broadcast_article(self, article_id: str) -> None:
         """Lädt einen Artikel, setzt den Session-Zustand und informiert andere Co-Autoren."""
