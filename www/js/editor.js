@@ -2693,6 +2693,7 @@
 
     let _currentPdfRenderSeq = 0;
     let _activeRenderTasks = [];
+    let _lastRenderedPdfBase64 = "";
 
     async function renderPdfPreview(pdfBase64) {
       if (typeof window !== "undefined" && window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
@@ -2703,6 +2704,20 @@
       const pageBadge = document.getElementById("preview-page-count");
       const refreshBtn = document.getElementById("btn_refresh_preview");
       if (!pdfContainer) return;
+
+      if (refreshBtn && !refreshBtn._hasPdfResetListener) {
+        refreshBtn._hasPdfResetListener = true;
+        refreshBtn.addEventListener("click", function () {
+          _lastRenderedPdfBase64 = "";
+        });
+      }
+
+      // Redundantes Neuzeichnen vermeiden, wenn dieser exakte PDF-Stand bereits auf dem Canvas liegt
+      if (pdfBase64 && pdfBase64 === _lastRenderedPdfBase64) {
+        state.previewPending = false;
+        if (refreshBtn) refreshBtn.classList.remove("has-pending-preview");
+        return;
+      }
 
       const renderSeq = ++_currentPdfRenderSeq;
 
@@ -2810,6 +2825,7 @@
           }
         }
 
+        _lastRenderedPdfBase64 = pdfBase64;
         state.lastKnownPageCount = numPages;
         state.previewPending = false;
         if (refreshBtn) refreshBtn.classList.remove("has-pending-preview");

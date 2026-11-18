@@ -620,6 +620,7 @@
   }
 
   let statsDebounceTimer = null;
+  let previewDebounceTimer = null;
 
   function markDirty() {
     if (!state.article) return;
@@ -629,12 +630,45 @@
       clearTimeout(statsDebounceTimer);
     }
     statsDebounceTimer = setTimeout(updateLiveStatsCounter, 500);
+
+    // 1. Schneller Live-Preview Debounce (350 ms): Entkoppelt von DB-Speicherung für sofortiges PDF-Feedback
+    if (state.autoPreview) {
+      if (previewDebounceTimer) {
+        clearTimeout(previewDebounceTimer);
+      }
+      previewDebounceTimer = setTimeout(function () {
+        previewDebounceTimer = null;
+        requestLivePreview();
+      }, 350);
+    }
+
+    // 2. Ruhiger DB-Autosave Debounce (3000 ms): Persistiert im Hintergrund in die SQL-Datenbank
     if (state.autosaveTimer) {
       clearTimeout(state.autosaveTimer);
     }
     state.autosaveTimer = setTimeout(function () {
       flushAutosave(false);
     }, 3000);
+  }
+
+  function requestLivePreview() {
+    if (!state.article || !state.autoPreview) return;
+    if (previewDebounceTimer) {
+      clearTimeout(previewDebounceTimer);
+      previewDebounceTimer = null;
+    }
+    const currentMode = state.previewMode || "pdf";
+    if (window.Shiny && window.Shiny.setInputValue) {
+      window.Shiny.setInputValue(
+        "lukb_request_live_preview",
+        {
+          article: state.article,
+          preview_mode: currentMode,
+          ts: Date.now(),
+        },
+        { priority: "event" }
+      );
+    }
   }
 
   function updateLiveStatsCounter() {
@@ -709,6 +743,10 @@
     if (state.autosaveTimer) {
       clearTimeout(state.autosaveTimer);
       state.autosaveTimer = null;
+    }
+    if (previewDebounceTimer) {
+      clearTimeout(previewDebounceTimer);
+      previewDebounceTimer = null;
     }
     state.isDirty = false;
     setAutosaveIndicator("saving", "Speichert in Datenbank …");
@@ -1203,6 +1241,7 @@
     parseDelimitedText: parseDelimitedText,
     performUndo: performUndo,
     pushUndo: pushUndo,
+    requestLivePreview: requestLivePreview,
     sanitizeRichTextHtml: sanitizeRichTextHtml,
     setAutosaveIndicator: setAutosaveIndicator,
     showRestoredToast: showRestoredToast,

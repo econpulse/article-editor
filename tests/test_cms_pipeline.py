@@ -2180,6 +2180,31 @@ def test_pdfjs_preview_pipeline():
     assert msg_payload["typst_skipped"] is False
     assert msg_payload["error"] is None
 
+    # 5. Entkoppelte Sofort-Vorschau ohne DB-Write (Test des Handlers)
+    from server.preview_handlers import register_preview_handlers
+
+    class MockInput:
+        def __init__(self, data):
+            self._data = data
+
+        def lukb_preview_db_chart(self): return None
+        def lukb_preview_custom_chart(self): return None
+        def lukb_search_tickers(self): return None
+        def lukb_auto_preview_toggle(self): return None
+        def lukb_preview_mode_change(self): return None
+        def btn_refresh_preview(self): return None
+        def lukb_request_live_preview(self): return self._data
+
+    preview_payload = {
+        "article": doc.model_dump(),
+        "preview_mode": "pdf",
+        "ts": 123456789,
+    }
+    mock_input = MockInput(preview_payload)
+    mock_sess = MockSession()
+    state_preview = SessionState(mock_sess, mock_input)
+    register_preview_handlers(mock_input, None, mock_sess, state_preview)
+
 
 if __name__ == "__main__":
     test_mssql_url_builder()

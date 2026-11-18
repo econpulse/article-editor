@@ -11,6 +11,7 @@ import logging
 from shiny import Inputs, Outputs, Session, reactive
 
 from database.repository import search_tickers
+from schemas.article import ArticleDocument
 from server.collab import (
     get_peer_preview_mode,
     is_peer_auto_preview,
@@ -92,6 +93,32 @@ def register_preview_handlers(
                 "results": results,
             },
         )
+
+    # Entkoppelte Sofort-Vorschau (schneller Debounce ohne DB-Schreiboperation)
+    @reactive.effect
+    @reactive.event(input.lukb_request_live_preview)
+    async def _on_request_live_preview() -> None:
+        payload = input.lukb_request_live_preview()
+        if not isinstance(payload, dict) or "article" not in payload:
+            return
+        article_data = payload["article"]
+        if not isinstance(article_data, dict):
+            return
+        preview_mode = str(payload.get("preview_mode", get_peer_preview_mode(state.session_id, default="pdf"))).strip().lower()
+        auto_preview = is_peer_auto_preview(state.session_id, default=True)
+        if not auto_preview:
+            return
+
+        try:
+            doc = ArticleDocument.model_validate(article_data)
+            state.current_doc.set(doc)
+            await state.send_preview(
+                doc,
+                include_typst=(preview_mode == "pdf"),
+                include_web=(preview_mode == "web"),
+            )
+        except Exception as exc:
+            logger.warning(f"Fehler bei entkoppelter Live-Vorschau: {exc}")
 
     # Umschalten der kontinuierlichen Typst-Vorschau (Auto-Typst)
     @reactive.effect
