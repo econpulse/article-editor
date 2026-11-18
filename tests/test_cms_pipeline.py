@@ -1793,6 +1793,64 @@ def test_priority_3_modular_js_footnotes_and_html_hardening():
     assert resilient_pdf.startswith(b"%PDF-")
 
 
+def test_option_a_paragraph_keep_together():
+    """
+    Testet Option A: Typografisches Zusammenhalten von Absätzen unter 6 Zeilen (~65 Wörter),
+    um Schusterjungen und Hurenkinder (Witwen) mit weniger als 3 Zeilen am Seitenwechsel
+    sowohl im 2-Column- als auch im Tufte-Layout zuverlässig zu verhindern.
+    """
+    from services.html_to_typst import html_to_typst, PARAGRAPH_KEEP_TOGETHER_MAX_WORDS
+    from services.renderer import render_pdf_bytes
+    from schemas.article import ArticleDocument, ArticleMetadata
+
+    # 1. Kurzer Absatz (< 65 Wörter) muss als unteilbarer Block formatiert werden
+    short_html = "<p>Dies ist ein kompakter Analyse-Absatz der LUKB mit genau elf Wörtern.</p>"
+    typ_short = html_to_typst(short_html)
+    assert typ_short.startswith("#block(breakable: false)[")
+    assert typ_short.endswith("]")
+    assert "Dies ist ein kompakter Analyse-Absatz" in typ_short
+
+    # 2. Langer Absatz (> 65 Wörter) muss fliessfähig (ohne block(breakable: false)) bleiben
+    words = [f"Wort{i}" for i in range(80)]
+    long_html = f"<p>{' '.join(words)}.</p>"
+    typ_long = html_to_typst(long_html)
+    assert "#block(breakable: false)" not in typ_long
+    assert "Wort0 Wort1" in typ_long
+
+    # 3. Gemischter HTML-Inhalt: Kurzer Absatz, Liste und langer Absatz
+    mixed_html = (
+        "<p>Kurze Einleitung.</p>"
+        "<ul><li>Punkt Eins</li><li>Punkt Zwei</li></ul>"
+        f"<p>{' '.join(words)}.</p>"
+        "<p>Kurzes Fazit.</p>"
+    )
+    typ_mixed = html_to_typst(mixed_html)
+    assert "#block(breakable: false)[Kurze Einleitung.]" in typ_mixed
+    assert "- Punkt Eins\n- Punkt Zwei" in typ_mixed
+    assert "#block(breakable: false)[- Punkt Eins" not in typ_mixed
+    assert "#block(breakable: false)[Kurzes Fazit.]" in typ_mixed
+
+    # 4. Deaktivierungsmöglichkeit via keep_together_max_words=0
+    typ_disabled = html_to_typst(short_html, keep_together_max_words=0)
+    assert "#block(breakable: false)" not in typ_disabled
+    assert typ_disabled == "Dies ist ein kompakter Analyse-Absatz der LUKB mit genau elf Wörtern."
+
+    # 5. Volle PDF-Kompilierung in 2-Column und Tufte-Layout
+    for tpl_id in ("investment_focus", "investment_tufte"):
+        doc = ArticleDocument(
+            id=f"art-test-opt-a-{tpl_id}",
+            template_id=tpl_id,
+            metadata=ArticleMetadata(title="Absatz-Zusammenhalte-Test"),
+            blocks=[
+                {"id": "b_intro", "type": "richtext", "html": short_html},
+                {"id": "b_long", "type": "richtext", "html": long_html},
+                {"id": "b_mixed", "type": "richtext", "html": mixed_html},
+            ],
+        )
+        pdf = render_pdf_bytes(doc)
+        assert pdf.startswith(b"%PDF-"), f"PDF-Kompilierung für Template {tpl_id} fehlgeschlagen"
+
+
 def test_tufte_colbreak_pagebreak_container_fix():
     """
     Verifiziert, dass bei Tufte-Artikeln mit Spalten-/Seitenumbrüchen (`colbreak`)
@@ -1988,6 +2046,7 @@ if __name__ == "__main__":
     test_hybrid_full_width_float_and_overflow_fallback()
     test_header_series_selection_and_rendering()
     test_tufte_template_pipeline()
+    test_option_a_paragraph_keep_together()
     test_tufte_colbreak_pagebreak_container_fix()
     test_tufte_anchor_to_and_spacer_synchronization()
     test_sources_never_orphaned_across_templates()
