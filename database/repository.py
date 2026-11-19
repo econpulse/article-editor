@@ -8,11 +8,12 @@ from __future__ import annotations
 import json
 import logging
 import math
+import threading
 import time
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any
-from sqlalchemy import case, desc, func, or_, select
+from sqlalchemy import case, desc, func, or_, select, update
 
 logger = logging.getLogger(__name__)
 
@@ -245,17 +246,19 @@ def _merge_concurrent_documents(
             combined_ids.append(bid)
 
     # Falls im anderen Stand neue Blöcke hinzugekommen sind, an passender Stelle einfügen
+    combined_set = set(combined_ids)
     for idx, bid in enumerate(secondary_order):
-        if bid not in all_deleted and bid not in combined_ids:
+        if bid not in all_deleted and bid not in combined_set:
             if idx == 0:
                 combined_ids.insert(0, bid)
             else:
                 prev_id = secondary_order[idx - 1]
-                if prev_id in combined_ids:
+                if prev_id in combined_set:
                     insert_pos = combined_ids.index(prev_id) + 1
                     combined_ids.insert(insert_pos, bid)
                 else:
                     combined_ids.append(bid)
+            combined_set.add(bid)
 
     # Inhalt jedes einzelnen Blocks zusammenführen
     merged_blocks: list[dict[str, Any]] = []
@@ -400,10 +403,11 @@ def save_article(
             row.updated_at = now
             row.updated_by = user
 
+        doc_dict = doc.model_dump()
         if create_revision:
             rev = ArticleRevisionModel(
                 article_id=doc.id,
-                snapshot_json=doc.model_dump_json(),
+                snapshot_json=json.dumps(doc_dict, ensure_ascii=False),
                 saved_at=now,
                 saved_by=user,
                 note=revision_note or "Manueller Snapshot",
@@ -415,7 +419,7 @@ def save_article(
         "saved_at": now.strftime("%H:%M:%S"),
         "saved_date": now.strftime("%d.%m.%Y %H:%M:%S"),
         "merged": merged_from_other,
-        "article": doc.model_dump(),
+        "article": doc_dict,
         "doc_obj": doc,
     }
 
@@ -487,6 +491,55 @@ def duplicate_article(article_id: str, user: str = "Investment Office") -> Artic
     return orig
 
 
+def count_articles(include_archived: bool = False) -> int:
+    """Zählt die Artikel in der Datenbank ohne JSON-Deserialisierung."""
+    with get_db_session() as session:
+        stmt = select(func.count(ArticleModel.id))
+        if not include_archived:
+            stmt = stmt.where(ArticleModel.status != "archived")
+        return int(session.scalar(stmt) or 0)
+
+
+def get_first_article_id(include_archived: bool = False) -> str | None:
+    """Liefert die ID des zuletzt aktualisierten Artikels ohne JSON-Deserialisierung."""
+    with get_db_session() as session:
+        stmt = select(ArticleModel.id).order_by(desc(ArticleModel.updated_at)).limit(1)
+        if not include_archived:
+            stmt = stmt.where(ArticleModel.status != "archived")
+        return session.scalar(stmt)
+
+
+def _transition_article_status(
+    article_id: str,
+    new_status: str,
+    user: str,
+    revision_note: str,
+    expected_status: str | None = None,
+) -> ArticleDocument | None:
+    """Setzt den Artikelstatus in einer einzelnen Transaktion und legt eine Revision an."""
+    now = _utc_now()
+    with get_db_session() as session:
+        row = session.get(ArticleModel, article_id)
+        if not row:
+            return None
+        if expected_status is not None and row.status != expected_status:
+            return None
+        row.status = new_status
+        row.updated_at = now
+        row.updated_by = user
+        doc = _row_to_document(row)
+        session.add(
+            ArticleRevisionModel(
+                article_id=article_id,
+                snapshot_json=doc.model_dump_json(),
+                saved_at=now,
+                saved_by=user,
+                note=revision_note,
+            )
+        )
+        return doc
+
+
 def delete_article(
     article_id: str,
     user: str = "Investment Office",
@@ -497,47 +550,49 @@ def delete_article(
     Schutzregel: Ein Artikel, der im Portal 'published' ist, darf NICHT gelöscht werden.
     Er muss zuerst explizit vom Portal zurückgezogen werden.
     """
-    doc = get_article(article_id)
-    if not doc:
-        return False
-
-    # Schutz vor Löschung publizierter Dokumente ohne force
-    if doc.status == "published":
-        if not force:
-            logger.warning(
-                f"Löschversuch für publizierten Artikel {article_id} abgelehnt. Artikel muss zuerst zurückgezogen werden."
-            )
+    now = _utc_now()
+    with get_db_session() as session:
+        row = session.get(ArticleModel, article_id)
+        if not row:
             return False
-        try:
-            from services.portal_publisher import unpublish_article
-            unpublish_article(article_id)
-        except Exception as exc:
-            logger.warning(f"unpublish_article bei force-delete fehlgeschlagen: {exc}")
+        if row.status == "published":
+            if not force:
+                logger.warning(
+                    f"Löschversuch für publizierten Artikel {article_id} abgelehnt. Artikel muss zuerst zurückgezogen werden."
+                )
+                return False
+            try:
+                from services.portal_publisher import unpublish_article
+                unpublish_article(article_id)
+            except Exception as exc:
+                logger.warning(f"unpublish_article bei force-delete fehlgeschlagen: {exc}")
 
-    # Standard: Soft-Delete (Status auf 'archived' setzen, Revision ablegen)
-    doc.status = "archived"
-    save_article(
-        doc,
-        user=user,
-        create_revision=True,
-        revision_note="Publikation archiviert (Soft-Delete / Papierkorb)",
-    )
-    return True
+        row.status = "archived"
+        row.updated_at = now
+        row.updated_by = user
+        doc = _row_to_document(row)
+        session.add(
+            ArticleRevisionModel(
+                article_id=article_id,
+                snapshot_json=doc.model_dump_json(),
+                saved_at=now,
+                saved_by=user,
+                note="Publikation archiviert (Soft-Delete / Papierkorb)",
+            )
+        )
+        return True
 
 
 def restore_article(article_id: str, user: str = "Investment Office") -> bool:
     """Stellt einen archivierten Artikel wieder in den Arbeitsstatus 'draft' her."""
-    doc = get_article(article_id)
-    if not doc or doc.status != "archived":
-        return False
-    doc.status = "draft"
-    save_article(
-        doc,
+    doc = _transition_article_status(
+        article_id,
+        "draft",
         user=user,
-        create_revision=True,
         revision_note="Publikation aus Archiv wiederhergestellt",
+        expected_status="archived",
     )
-    return True
+    return doc is not None
 
 
 def publish_article_to_portal(
@@ -552,13 +607,11 @@ def publish_article_to_portal(
     - Speichert einen versionierten Snapshot in MSSQL (io_published_snapshots)
     - Aktualisiert Portal-Übersicht & Volltext-Suchindex
     """
-    doc = get_article(article_id)
+    rev_note = change_note or "Auf statischem Portal publiziert"
+    doc = _transition_article_status(article_id, "published", user=user, revision_note=rev_note)
     if not doc:
         return {"success": False, "error": f"Artikel {article_id} nicht gefunden"}
 
-    doc.status = "published"
-    rev_note = change_note or "Auf statischem Portal publiziert"
-    save_article(doc, user=user, create_revision=True, revision_note=rev_note)
     from services.portal_publisher import publish_article
     return publish_article(doc, user=user, change_note=change_note)
 
@@ -574,10 +627,12 @@ def unpublish_article_from_portal(
     - Deaktiviert den aktiven Snapshot in MSSQL
     - Entfernt die statischen Dateien und aktualisiert Portal-Übersicht & Suchindex
     """
-    doc = get_article(article_id)
-    if doc:
-        doc.status = new_status
-        save_article(doc, user=user, create_revision=True, revision_note="Vom statischen Portal zurückgezogen")
+    _transition_article_status(
+        article_id,
+        new_status,
+        user=user,
+        revision_note="Vom statischen Portal zurückgezogen",
+    )
     from services.portal_publisher import unpublish_article
     return unpublish_article(article_id)
 
@@ -622,15 +677,15 @@ def save_published_snapshot(
         current_max = session.scalar(stmt) or 0
         next_ver = int(current_max) + 1
 
-        # Bisherige aktive Versionen dieses Artikels deaktivieren
-        existing_active = session.scalars(
-            select(PublishedSnapshotModel).where(
+        # Bisherige aktive Versionen dieses Artikels in einem Bulk-Update deaktivieren
+        session.execute(
+            update(PublishedSnapshotModel)
+            .where(
                 PublishedSnapshotModel.article_id == article_id,
                 PublishedSnapshotModel.is_active == True,
             )
-        ).all()
-        for s in existing_active:
-            s.is_active = False
+            .values(is_active=False)
+        )
 
         # Neuen Snapshot anlegen
         new_snap = PublishedSnapshotModel(
@@ -783,6 +838,36 @@ def get_published_snapshot_blobs(
             "html_content": row.html_content,
             "pdf_bytes": row.pdf_bytes,
         }
+
+
+def get_published_snapshot_blobs_by_ids(
+    article_ids: set[str] | list[str],
+) -> dict[str, dict[str, Any]]:
+    """Lädt aktive HTML- und PDF-Blobs für mehrere publizierte Artikel in einem einzigen Batch-Query."""
+    ids = [str(aid).strip() for aid in article_ids if aid]
+    if not ids:
+        return {}
+    with get_db_session() as session:
+        stmt = (
+            select(
+                PublishedSnapshotModel.article_id,
+                PublishedSnapshotModel.html_content,
+                PublishedSnapshotModel.pdf_bytes,
+            )
+            .where(
+                PublishedSnapshotModel.article_id.in_(ids),
+                PublishedSnapshotModel.is_active == True,
+            )
+            .order_by(desc(PublishedSnapshotModel.version))
+        )
+        res: dict[str, dict[str, Any]] = {}
+        for row in session.execute(stmt).all():
+            if row.article_id not in res:
+                res[row.article_id] = {
+                    "html_content": row.html_content,
+                    "pdf_bytes": row.pdf_bytes,
+                }
+        return res
 
 
 def get_article_snapshot_history(article_id: str) -> list[dict[str, Any]]:
@@ -971,6 +1056,7 @@ def _coerce_to_date(val: Any) -> date | None:
 _TICKER_CATALOG_CACHE: list[dict[str, str]] | None = None
 _TICKER_CACHE_TS: float = 0.0
 _TICKER_CACHE_TTL_SEC: float = 900.0  # 15 Minuten In-Memory-Cache für Tausende Ticker
+_TICKER_CACHE_LOCK = threading.Lock()
 
 
 def _get_cached_ticker_catalog(force_refresh: bool = False) -> list[dict[str, str]]:
@@ -988,32 +1074,41 @@ def _get_cached_ticker_catalog(force_refresh: bool = False) -> list[dict[str, st
     ):
         return _TICKER_CATALOG_CACHE
 
-    try:
-        with get_db_session() as session:
-            stmt = select(TimeSeriesModel.ticker, TimeSeriesModel.name).distinct()
-            rows = session.execute(stmt).all()
-            by_upper: dict[str, dict[str, str]] = {}
-            for r in rows:
-                if not r.ticker:
-                    continue
-                t_clean = str(r.ticker).strip()
-                if not t_clean:
-                    continue
-                u_key = t_clean.upper()
-                n_clean = str(r.name or "").strip()
-                if u_key not in by_upper or (not by_upper[u_key]["name"] and n_clean):
-                    by_upper[u_key] = {
-                        "ticker": t_clean,
-                        "name": n_clean or t_clean,
-                        "_t_upper": u_key,
-                        "_n_upper": (n_clean or t_clean).upper(),
-                    }
-            catalog = sorted(by_upper.values(), key=lambda x: x["_t_upper"])
-            _TICKER_CATALOG_CACHE = catalog
-            _TICKER_CACHE_TS = now_ts
-            return catalog
-    except Exception:
-        return _TICKER_CATALOG_CACHE or []
+    with _TICKER_CACHE_LOCK:
+        now_ts = time.monotonic()
+        if (
+            not force_refresh
+            and _TICKER_CATALOG_CACHE is not None
+            and (now_ts - _TICKER_CACHE_TS) < _TICKER_CACHE_TTL_SEC
+        ):
+            return _TICKER_CATALOG_CACHE
+
+        try:
+            with get_db_session() as session:
+                stmt = select(TimeSeriesModel.ticker, TimeSeriesModel.name).distinct()
+                rows = session.execute(stmt).all()
+                by_upper: dict[str, dict[str, str]] = {}
+                for r in rows:
+                    if not r.ticker:
+                        continue
+                    t_clean = str(r.ticker).strip()
+                    if not t_clean:
+                        continue
+                    u_key = t_clean.upper()
+                    n_clean = str(r.name or "").strip()
+                    if u_key not in by_upper or (not by_upper[u_key]["name"] and n_clean):
+                        by_upper[u_key] = {
+                            "ticker": t_clean,
+                            "name": n_clean or t_clean,
+                            "_t_upper": u_key,
+                            "_n_upper": (n_clean or t_clean).upper(),
+                        }
+                catalog = sorted(by_upper.values(), key=lambda x: x["_t_upper"])
+                _TICKER_CATALOG_CACHE = catalog
+                _TICKER_CACHE_TS = now_ts
+                return catalog
+        except Exception:
+            return _TICKER_CATALOG_CACHE or []
 
 
 def search_tickers(query: str = "", limit: int = 15) -> list[dict[str, str]]:
@@ -1487,27 +1582,43 @@ def init_db_and_seed() -> None:
             asset_id="asset_sample_equity",
         )
 
-    existing = list_articles()
-    if existing:
-        # Selbstheilung für Artikel, deren Blöcke durch den früheren Tuple-Bug geleert wurden,
-        # sowie Aktualisierung des Standard-Disclaimers auf die aktuelle LUKB-Fassung (in einem Batch-Query)
-        with get_db_session() as session:
-            all_rows = session.scalars(
-                select(ArticleModel).where(ArticleModel.status != "archived")
-            ).all()
+    has_existing = False
+    has_factsheet = False
+    with get_db_session() as session:
+        all_rows = session.scalars(
+            select(ArticleModel).where(ArticleModel.status != "archived")
+        ).all()
+        if all_rows:
+            has_existing = True
+            has_factsheet = any((row.template_id or "") == "factsheet" for row in all_rows)
+            empty_ids = [
+                row.id
+                for row in all_rows
+                if not row.blocks_json or row.blocks_json.strip() == "[]"
+            ]
+            revs_by_aid: dict[str, list[str]] = {}
+            if empty_ids:
+                rev_rows = session.execute(
+                    select(ArticleRevisionModel.article_id, ArticleRevisionModel.snapshot_json)
+                    .where(ArticleRevisionModel.article_id.in_(empty_ids))
+                    .order_by(desc(ArticleRevisionModel.saved_at))
+                ).all()
+                for aid, snap_json in rev_rows:
+                    revs_by_aid.setdefault(aid, []).append(snap_json)
             for row in all_rows:
                 if not row.disclaimer or row.disclaimer.strip() == LEGACY_LUKB_DISCLAIMER:
                     row.disclaimer = DEFAULT_LUKB_DISCLAIMER
-                if not row.blocks_json or row.blocks_json.strip() == "[]":
-                    for rev in row.revisions:
+                if row.id in revs_by_aid:
+                    for snap_json in revs_by_aid[row.id]:
                         try:
-                            snap = json.loads(rev.snapshot_json)
+                            snap = json.loads(snap_json)
                             if snap.get("blocks"):
                                 row.blocks_json = json.dumps(snap["blocks"], ensure_ascii=False)
                                 break
                         except Exception:
                             pass
-        has_factsheet = any(item.get("template_id") == "factsheet" for item in existing)
+
+    if has_existing:
         if not has_factsheet:
             factsheet_json_path = TEMPLATES_DIR / "factsheet" / "default_article.json"
             if factsheet_json_path.exists():

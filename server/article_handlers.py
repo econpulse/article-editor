@@ -11,11 +11,12 @@ from shiny import Inputs, Outputs, Session, reactive, ui
 
 from config import can_delete
 from database.repository import (
+    count_articles,
     create_new_article,
     delete_article,
     duplicate_article,
     get_article,
-    list_articles,
+    get_first_article_id,
     restore_article,
 )
 from server.state import SessionState
@@ -34,9 +35,7 @@ def register_article_handlers(
     # Initiales Laden beim Sitzungsstart
     @reactive.effect
     async def _init_session() -> None:
-        items = await asyncio.to_thread(list_articles)
-        first_id = items[0]["id"] if items else ""
-        await state.load_and_broadcast_article(first_id)
+        await state.load_and_broadcast_article("")
 
     # Filter- oder Sucheingabe in der linken Sidebar
     @reactive.effect
@@ -124,8 +123,8 @@ def register_article_handlers(
             )
             return
 
-        all_items = await asyncio.to_thread(list_articles)
-        if len(all_items) <= 1:
+        total_articles = await asyncio.to_thread(count_articles)
+        if total_articles <= 1:
             ui.notification_show(
                 "Der letzte verbleibende Artikel kann nicht gelöscht werden.",
                 type="warning",
@@ -171,8 +170,7 @@ def register_article_handlers(
         if not aid:
             return
         await asyncio.to_thread(delete_article, aid, user=state.current_user, force=True)
-        remaining = await asyncio.to_thread(list_articles)
-        next_id = remaining[0]["id"] if remaining else ""
+        next_id = await asyncio.to_thread(get_first_article_id)
         if next_id:
             await state.load_and_broadcast_article(next_id)
         else:
@@ -227,8 +225,8 @@ def register_article_handlers(
             target_doc = await asyncio.to_thread(get_article, target_id)
             if not target_doc:
                 return
-            all_items = await asyncio.to_thread(list_articles)
-            if len(all_items) <= 1:
+            total_articles = await asyncio.to_thread(count_articles)
+            if total_articles <= 1:
                 ui.notification_show(
                     "Der letzte verbleibende Artikel kann nicht gelöscht werden.",
                     type="warning",
@@ -237,9 +235,8 @@ def register_article_handlers(
                 return
             await asyncio.to_thread(delete_article, target_id, user=user, force=True)
             if state.current_article_id.get() == target_id:
-                remaining = await asyncio.to_thread(list_articles)
-                next_id = remaining[0]["id"] if remaining else ""
-                await state.load_and_broadcast_article(next_id)
+                next_id = await asyncio.to_thread(get_first_article_id)
+                await state.load_and_broadcast_article(next_id or "")
             else:
                 await state.send_article_list(state.current_article_id.get())
             ui.notification_show("Publikation wurde in das Archiv verschoben (Soft-Delete).", type="message", duration=3)

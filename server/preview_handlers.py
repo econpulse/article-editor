@@ -33,47 +33,43 @@ def register_preview_handlers(
 ) -> None:
     """Registriert alle Vorschau- und Diagramm-Events an der Session."""
 
-    # Einzelne DB-Chart-Vorschau im Block sofort aktualisieren
-    @reactive.effect
-    @reactive.event(input.lukb_preview_db_chart)
-    async def _on_preview_db_chart() -> None:
-        payload = input.lukb_preview_db_chart()
+    async def _send_single_chart_preview(
+        payload: Any,
+        message_name: str,
+        is_db_chart: bool,
+    ) -> None:
         if not isinstance(payload, dict) or "block" not in payload:
             return
         blk = payload["block"]
         bid = blk.get("id", "")
         if not bid:
             return
-        svg_markup = await asyncio.to_thread(generate_db_chart_svg, blk)
+        if is_db_chart:
+            cur_doc = state.current_doc.get()
+            max_date = cur_doc.metadata.publication_date if cur_doc else None
+            svg_markup = await asyncio.to_thread(generate_db_chart_svg, blk, True, max_date)
+        else:
+            svg_markup = await asyncio.to_thread(generate_custom_chart_svg, blk, True)
         b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
         await session.send_custom_message(
-            "lukb_db_chart_svg",
+            message_name,
             {
                 "block_id": bid,
                 "data_uri": f"data:image/svg+xml;base64,{b64}",
             },
         )
 
+    # Einzelne DB-Chart-Vorschau im Block sofort aktualisieren
+    @reactive.effect
+    @reactive.event(input.lukb_preview_db_chart)
+    async def _on_preview_db_chart() -> None:
+        await _send_single_chart_preview(input.lukb_preview_db_chart(), "lukb_db_chart_svg", True)
+
     # Einzelne Custom-Chart-Vorschau (Clipboard) im Block sofort aktualisieren
     @reactive.effect
     @reactive.event(input.lukb_preview_custom_chart)
     async def _on_preview_custom_chart() -> None:
-        payload = input.lukb_preview_custom_chart()
-        if not isinstance(payload, dict) or "block" not in payload:
-            return
-        blk = payload["block"]
-        bid = blk.get("id", "")
-        if not bid:
-            return
-        svg_markup = await asyncio.to_thread(generate_custom_chart_svg, blk, True)
-        b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
-        await session.send_custom_message(
-            "lukb_custom_chart_svg",
-            {
-                "block_id": bid,
-                "data_uri": f"data:image/svg+xml;base64,{b64}",
-            },
-        )
+        await _send_single_chart_preview(input.lukb_preview_custom_chart(), "lukb_custom_chart_svg", False)
 
     # Schnelle Ticker-Autovervollständigung für tausende Ticker in ts_db
     @reactive.effect
@@ -84,7 +80,7 @@ def register_preview_handlers(
             return
         query = str(payload.get("query", ""))
         req_id = payload.get("request_id", 0)
-        results = search_tickers(query=query, limit=15)
+        results = await asyncio.to_thread(search_tickers, query=query, limit=15)
         await session.send_custom_message(
             "lukb_ticker_suggestions",
             {
@@ -105,18 +101,13 @@ def register_preview_handlers(
         if not isinstance(article_data, dict):
             return
         preview_mode = str(payload.get("preview_mode", get_peer_preview_mode(state.session_id, default="pdf"))).strip().lower()
-        auto_preview = is_peer_auto_preview(state.session_id, default=True)
-        if not auto_preview:
+        if not is_peer_auto_preview(state.session_id, default=True):
             return
 
         try:
             doc = ArticleDocument.model_validate(article_data)
             state.current_doc.set(doc)
-            await state.send_preview(
-                doc,
-                include_typst=(preview_mode == "pdf"),
-                include_web=(preview_mode == "web"),
-            )
+            await state.send_active_preview(doc, respect_auto_preview=False, preview_mode=preview_mode)
         except Exception as exc:
             logger.warning(f"Fehler bei entkoppelter Live-Vorschau: {exc}")
 
@@ -130,14 +121,7 @@ def register_preview_handlers(
         enabled = bool(payload.get("enabled", True))
         set_peer_auto_preview(state.session_id, enabled)
         if enabled and payload.get("refresh_now"):
-            doc = state.current_doc.get()
-            if doc is not None:
-                preview_mode = get_peer_preview_mode(state.session_id, default="pdf")
-                await state.send_preview(
-                    doc,
-                    include_typst=(preview_mode == "pdf"),
-                    include_web=(preview_mode == "web"),
-                )
+            await state.send_active_preview(respect_auto_preview=False)
 
     # Umschalten des Vorschau-Modus (PDF Typst vs. Web HTML5)
     @reactive.effect
@@ -148,24 +132,14 @@ def register_preview_handlers(
             return
         mode = str(payload.get("mode", "pdf")).strip().lower()
         set_peer_preview_mode(state.session_id, mode)
-        doc = state.current_doc.get()
-        if doc is not None:
-            if mode == "web":
-                await state.send_preview(doc, include_typst=False, include_web=True)
-            elif mode == "pdf":
-                auto_preview = is_peer_auto_preview(state.session_id, default=True)
-                if auto_preview:
-                    await state.send_preview(doc, include_typst=True, include_web=False)
+        if mode in ("web", "pdf"):
+            await state.send_active_preview(
+                respect_auto_preview=(mode == "pdf"),
+                preview_mode=mode,
+            )
 
     # Manueller Preview-Refresh
     @reactive.effect
     @reactive.event(input.btn_refresh_preview)
     async def _on_refresh_preview() -> None:
-        doc = state.current_doc.get()
-        if doc is not None:
-            preview_mode = get_peer_preview_mode(state.session_id, default="pdf")
-            await state.send_preview(
-                doc,
-                include_typst=(preview_mode == "pdf"),
-                include_web=(preview_mode == "web"),
-            )
+        await state.send_active_preview(respect_auto_preview=False)

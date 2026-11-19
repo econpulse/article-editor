@@ -207,14 +207,6 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   50% { opacity: 0.4; transform: scale(0.8); }
 }
 
-.db-badge {
-  font-size: 11.5px;
-  color: #B6CBE3;
-  background: rgba(0, 0, 0, 0.22);
-  padding: 4px 10px;
-  border-radius: var(--radius-sm);
-}
-
 .editor-stats-badge {
   font-size: 11.5px;
   color: #FFFFFF;
@@ -556,13 +548,6 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   margin-bottom: 12px;
 }
 
-.meta-grid-3 {
-  display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
 .field-group {
   margin-bottom: 12px;
 }
@@ -665,7 +650,6 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   border-left-color: var(--lukb-navy);
 }
 
-.cms-block-card.block-type-heading { border-left-color: var(--lukb-navy); }
 .cms-block-card.block-type-richtext { border-left-color: var(--lukb-blue); }
 .cms-block-card.block-type-figure { border-left-color: var(--lukb-cyan); }
 .cms-block-card.block-type-db_chart { border-left-color: #0284C7; }
@@ -1108,7 +1092,7 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 /* Block Picker Popover */
 .block-picker-popover {
   position: absolute;
-  z-index: 1000;
+  z-index: 1300;
   width: 330px;
   max-width: 92vw;
   background: #ffffff;
@@ -1677,22 +1661,7 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 
 .btn-lukb.active,
 .btn-lukb.active:hover,
-.btn-lukb.active:focus,
-.btn-lukb-ghost.active,
-.btn-lukb-ghost.active:hover,
-.btn-lukb-ghost.active:focus,
-.custom-chart-preset-btn.active,
-.custom-chart-preset-btn.active:hover,
-.custom-chart-preset-btn.active:focus,
-.custom-chart-type-btn.active,
-.custom-chart-type-btn.active:hover,
-.custom-chart-type-btn.active:focus,
-.db-height-preset-btn.active,
-.db-height-preset-btn.active:hover,
-.db-height-preset-btn.active:focus,
-.btn-lukb.db-height-preset-btn.active,
-.btn-lukb-ghost.db-height-preset-btn.active,
-button.db-height-preset-btn.active {
+.btn-lukb.active:focus {
   background: var(--lukb-navy) !important;
   color: #FFFFFF !important;
   border-color: var(--lukb-navy) !important;

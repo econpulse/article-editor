@@ -10,8 +10,6 @@
   function markDirty() { return E.markDirty.apply(this, arguments); }
   const state = E.state;
 
-  const LUKB_SERIES_COLORS = ["#037FDA", "#9CD4FB", "#431231", "#BA249D", "#F07E2C"];
-
   const DB_CHART_PALETTES = E.CHART_PALETTES;
 
   function indexTickerItems(items) {
@@ -486,11 +484,6 @@
     container.appendChild(configGrid);
 
     // Zeile 3b: Farbpaletten-Steuerung (LUKB Standard vs. Blau-Abstufung)
-    if (blk.palette !== "lukb_classic" && blk.palette !== "lukb_blues") {
-      blk.palette = "lukb_classic";
-    }
-    delete blk.palette_colors;
-
     const paletteCtrl = E.createChartPaletteBar(blk, DB_CHART_PALETTES, function () {
       renderSeriesRows();
       requestDbChartPreview(blk, true);
@@ -498,7 +491,6 @@
       if (typeof flushAutosave === "function") flushAutosave(false);
     });
     const getActivePaletteColors = paletteCtrl.getActiveColors;
-    const renderPaletteControls = paletteCtrl.render;
     container.appendChild(paletteCtrl.element);
 
     // Zeile 4: Zeitreihen-Builder (maximal 5 Ticker)
@@ -672,7 +664,6 @@
       markDirty();
     });
 
-    renderPaletteControls();
     renderSeriesRows();
     container.appendChild(seriesSection);
 
@@ -746,7 +737,6 @@
 
   Object.assign(E, {
     DB_CHART_PALETTES: DB_CHART_PALETTES,
-    LUKB_SERIES_COLORS: LUKB_SERIES_COLORS,
     attachTickerAutocomplete: attachTickerAutocomplete,
     buildDbChartBlockBody: buildDbChartBlockBody,
     closeTickerSuggestPopover: closeTickerSuggestPopover,

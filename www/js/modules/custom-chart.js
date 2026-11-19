@@ -17,13 +17,6 @@
 
   const CUSTOM_CHART_PALETTES = E.CHART_PALETTES;
 
-  const CUSTOM_CHART_HEIGHT_PRESETS = [
-    { label: "28 mm", val: 28, title: "Kompakt (28 mm)" },
-    { label: "36 mm (Standard)", val: 36, title: "Standardhöhe (36 mm)" },
-    { label: "46 mm", val: 46, title: "Erweitert (46 mm)" },
-    { label: "56 mm", val: 56, title: "Gross (56 mm)" },
-  ];
-
   function parseClientTsv(text, hasHeader) {
     const raw = String(text || "").trim();
     if (!raw) return { columns: [], rows: [] };
@@ -438,17 +431,7 @@
         btn.textContent = opt.label;
         btn.title = opt.desc;
 
-        if (isSelected) {
-          btn.classList.add("active");
-          btn.style.setProperty("background", "var(--lukb-navy)", "important");
-          btn.style.setProperty("color", "#FFFFFF", "important");
-          btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
-        } else {
-          btn.classList.remove("active");
-          btn.style.removeProperty("background");
-          btn.style.removeProperty("color");
-          btn.style.removeProperty("border-color");
-        }
+        btn.classList.toggle("active", isSelected);
 
         btn.addEventListener("click", function () {
           blk.chart_type = opt.id;
@@ -860,7 +843,7 @@
     // =========================================================================
     // Chartfläche-Höhe (identisch zu DB-Charts: 28, 36, 46, 56 mm)
     // =========================================================================
-    const heightBar = E.createChartHeightBar(blk, CUSTOM_CHART_HEIGHT_PRESETS, function () {
+    const heightBar = E.createChartHeightBar(blk, null, function () {
       markDirty();
       requestCustomChartPreview(blk, true);
       if (typeof flushAutosave === "function") {

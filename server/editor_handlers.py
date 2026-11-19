@@ -56,15 +56,7 @@ def register_editor_handlers(
             article_id=payload.get("article_id"),
             asset_id=payload.get("asset_id"),
         )
-        doc = state.current_doc.get()
-        if doc is not None:
-            auto_preview = is_peer_auto_preview(state.session_id, default=True)
-            preview_mode = get_peer_preview_mode(state.session_id, default="pdf")
-            await state.send_preview(
-                doc,
-                include_typst=auto_preview and (preview_mode == "pdf"),
-                include_web=auto_preview and (preview_mode == "web"),
-            )
+        await state.send_active_preview(respect_auto_preview=True)
 
     # Live-Fokus-Meldung eines Autors (welcher Block / welches Feld wird gerade editiert?)
     @reactive.effect
@@ -142,13 +134,11 @@ def register_editor_handlers(
 
             pdf_base64 = None
             web_html = None
-            if not preview_already_current:
-                include_typst = auto_preview and (preview_mode == "pdf")
-                include_web = auto_preview and (preview_mode == "web")
-                pdf_base64, web_html = await state.send_preview(
+            if not preview_already_current and auto_preview:
+                pdf_base64, web_html = await state.send_active_preview(
                     merged_doc,
-                    include_typst=include_typst,
-                    include_web=include_web,
+                    respect_auto_preview=False,
+                    preview_mode=preview_mode,
                 )
 
             # Synchronisiere alle Co-Autoren (und bei erfolgtem DB-Merge auch den Sender selbst)

@@ -14,7 +14,7 @@
     const termsMap = new Map();
 
     const scanHtml = (htmlStr) => {
-      if (!htmlStr) return;
+      if (!htmlStr || htmlStr.indexOf("glossary-term") === -1) return;
       const tmp = document.createElement("div");
       tmp.innerHTML = htmlStr;
       tmp.querySelectorAll(".glossary-term").forEach(el => {
@@ -45,12 +45,13 @@
   function updateGlossaryBlockPreviews() {
     const boxes = document.querySelectorAll(".glossary-auto-detected-box");
     if (!boxes || boxes.length === 0) return;
+    const autoTerms = scanArticleGlossaryTerms();
     boxes.forEach(box => {
       const parent = box.closest(".cms-block-card");
       if (parent && parent.dataset.blockId) {
         const blk = (state.article.blocks || []).find(b => b.id === parent.dataset.blockId);
         if (blk && blk.type === "glossary") {
-          renderGlossaryDetectedSection(box, blk);
+          renderGlossaryDetectedSection(box, blk, autoTerms);
         }
       }
     });
@@ -64,9 +65,9 @@
     }, typeof delayMs === "number" ? delayMs : 180);
   }
 
-  function renderGlossaryDetectedSection(container, blk) {
+  function renderGlossaryDetectedSection(container, blk, preScannedTerms) {
     container.innerHTML = "";
-    const autoTerms = scanArticleGlossaryTerms();
+    const autoTerms = Array.isArray(preScannedTerms) ? preScannedTerms : scanArticleGlossaryTerms();
 
     const header = document.createElement("div");
     header.className = "glossary-detected-header";
@@ -89,8 +90,8 @@
     autoTerms.forEach(item => {
       const row = document.createElement("div");
       row.className = "glossary-detected-pill-item";
-      row.innerHTML = `<span class="glossary-detected-term">${item.term}</span> — ` +
-        `<span class="glossary-detected-def">${item.definition}</span>`;
+      row.innerHTML = `<span class="glossary-detected-term">${E.escapeHtml(item.term)}</span> — ` +
+        `<span class="glossary-detected-def">${E.escapeHtml(item.definition)}</span>`;
       list.appendChild(row);
     });
     container.appendChild(list);
@@ -882,7 +883,7 @@
       const rawText = (e.clipboardData || window.clipboardData).getData("text/plain");
       const text = cleanPdfPastedText(rawText);
       document.execCommand("insertText", false, text);
-      onChange(editable.innerHTML);
+      onChange(sanitizeRichTextHtml(editable.innerHTML));
       updateGlossaryBlockPreviews();
     });
 
@@ -936,7 +937,7 @@
     topLbl.style.margin = "0";
     topLbl.textContent = "Zitat / Pull-Quote (LUKB Corporate Design)";
 
-    const layoutSel = createSimpleLayoutSelect(blk, 180);
+    const layoutSel = createSimpleLayoutSelect(blk, "180px");
 
     topRow.appendChild(topLbl);
     topRow.appendChild(layoutSel);
@@ -1126,17 +1127,7 @@
     function updatePresetActive() {
       const cur = blk.height_mm || 8;
       presetButtons.forEach(function (pb) {
-        if (pb.val === cur) {
-          pb.btn.classList.add("active");
-          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
-          pb.btn.style.setProperty("color", "#FFFFFF", "important");
-          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
-        } else {
-          pb.btn.classList.remove("active");
-          pb.btn.style.removeProperty("background");
-          pb.btn.style.removeProperty("color");
-          pb.btn.style.removeProperty("border-color");
-        }
+        pb.btn.classList.toggle("active", pb.val === cur);
       });
     }
 

@@ -29,7 +29,8 @@
     customChartTimers: {}, // block_id -> timeoutId
     isDirty: false,
     autosaveTimer: null,
-    lastPreviewedArticleJson: "",
+    editSeq: 0,
+    lastPreviewedSeq: -1,
     sortableInstance: null,
     selectedBlockIds: new Set(),
     lastSelectedBlockId: null,
@@ -60,6 +61,16 @@
 
   function deepClone(obj) {
     return obj ? JSON.parse(JSON.stringify(obj)) : null;
+  }
+
+  function sendShinyEvent(inputName, payload) {
+    if (!window.Shiny || !window.Shiny.setInputValue) return false;
+    const data = Object.assign({}, payload || {});
+    if (data.ts === undefined) {
+      data.ts = Date.now();
+    }
+    window.Shiny.setInputValue(inputName, data, { priority: "event" });
+    return true;
   }
 
   function escapeHtml(str) {
@@ -243,17 +254,7 @@
     function updatePresetActive() {
       const cur = blk.chart_height_mm || 36;
       presetButtons.forEach(function (pb) {
-        if (pb.val === cur) {
-          pb.btn.classList.add("active");
-          pb.btn.style.setProperty("background", "var(--lukb-navy)", "important");
-          pb.btn.style.setProperty("color", "#FFFFFF", "important");
-          pb.btn.style.setProperty("border-color", "var(--lukb-navy)", "important");
-        } else {
-          pb.btn.classList.remove("active");
-          pb.btn.style.removeProperty("background");
-          pb.btn.style.removeProperty("color");
-          pb.btn.style.removeProperty("border-color");
-        }
+        pb.btn.classList.toggle("active", pb.val === cur);
       });
     }
 
@@ -626,6 +627,7 @@
   function markDirty() {
     if (!state.article) return;
     state.isDirty = true;
+    state.editSeq += 1;
     setAutosaveIndicator("dirty", "Ungespeicherte Änderungen …");
     if (statsDebounceTimer) {
       clearTimeout(statsDebounceTimer);
@@ -658,19 +660,12 @@
       clearTimeout(previewDebounceTimer);
       previewDebounceTimer = null;
     }
-    state.lastPreviewedArticleJson = JSON.stringify(state.article);
+    state.lastPreviewedSeq = state.editSeq;
     const currentMode = state.previewMode || "pdf";
-    if (window.Shiny && window.Shiny.setInputValue) {
-      window.Shiny.setInputValue(
-        "lukb_request_live_preview",
-        {
-          article: state.article,
-          preview_mode: currentMode,
-          ts: Date.now(),
-        },
-        { priority: "event" }
-      );
-    }
+    sendShinyEvent("lukb_request_live_preview", {
+      article: state.article,
+      preview_mode: currentMode,
+    });
   }
 
   function updateLiveStatsCounter() {
@@ -712,7 +707,7 @@
         countText(b.subtitle);
         (b.rows || []).forEach(r => Object.values(r).forEach(v => countText(String(v))));
         estPages += (b.layout === "full" ? 0.38 : 0.22);
-      } else if (b.type === "figure" || b.type === "db_chart") {
+      } else if (b.type === "figure" || b.type === "db_chart" || b.type === "custom_chart") {
         countText(b.title);
         countText(b.subtitle);
         estPages += (b.layout === "full" ? 0.45 : 0.25);
@@ -755,26 +750,18 @@
 
     const knownAssets = Object.keys(state.assetCache || {});
     const currentMode = state.previewMode || "pdf";
-    const currentArticleJson = JSON.stringify(state.article);
-    const previewAlreadyCurrent = !!(state.lastPreviewedArticleJson && state.lastPreviewedArticleJson === currentArticleJson);
+    const previewAlreadyCurrent = state.lastPreviewedSeq === state.editSeq;
 
-    if (window.Shiny && window.Shiny.setInputValue) {
-      window.Shiny.setInputValue(
-        "lukb_autosave_payload",
-        {
-          article: state.article,
-          base_article: state.baseArticle,
-          create_revision: !!createRevision,
-          revision_note: revisionNote || "",
-          auto_preview: state.autoPreview,
-          preview_mode: currentMode,
-          preview_already_current: previewAlreadyCurrent,
-          known_asset_ids: knownAssets,
-          ts: Date.now(),
-        },
-        { priority: "event" }
-      );
-    }
+    sendShinyEvent("lukb_autosave_payload", {
+      article: state.article,
+      base_article: state.baseArticle,
+      create_revision: !!createRevision,
+      revision_note: revisionNote || "",
+      auto_preview: state.autoPreview,
+      preview_mode: currentMode,
+      preview_already_current: previewAlreadyCurrent,
+      known_asset_ids: knownAssets,
+    });
   }
 
   // ==========================================================================
@@ -1170,9 +1157,11 @@
           const txt = (b.text || "").trim();
           label += "Überschrift: " + (txt.length > 28 ? txt.slice(0, 28) + "…" : (txt || "(leer)"));
         } else if (b.type === "richtext") {
-          const tmp = document.createElement("div");
-          tmp.innerHTML = b.html || "";
-          const txt = (tmp.textContent || tmp.innerText || "").trim().replace(/\s+/g, " ");
+          const txt = (b.html || "")
+            .replace(/<[^>]+>/g, " ")
+            .replace(/&nbsp;/gi, " ")
+            .replace(/\s+/g, " ")
+            .trim();
           label += "Absatz: " + (txt.length > 28 ? txt.slice(0, 28) + "…" : (txt || "(leer)"));
         } else if (b.type === "callout") {
           const txt = (b.title || "").trim();
@@ -1248,6 +1237,7 @@
     pushUndo: pushUndo,
     requestLivePreview: requestLivePreview,
     sanitizeRichTextHtml: sanitizeRichTextHtml,
+    sendShinyEvent: sendShinyEvent,
     setAutosaveIndicator: setAutosaveIndicator,
     showRestoredToast: showRestoredToast,
     showUndoToast: showUndoToast,

@@ -48,10 +48,6 @@
     }
   }
 
-  function escapeTableHtml(str) {
-    return escapeHtml(str);
-  }
-
   function formatTsvCell(val) {
     const s = val != null ? String(val) : "";
     if (/[\t\n\r"]/.test(s)) {
@@ -459,8 +455,16 @@
     }
 
     function autoResizeAllGridCells() {
-      gridScroll.querySelectorAll("textarea.grid-cell-input").forEach(function (ta) {
-        autoResizeCellTextarea(ta);
+      const cells = Array.from(gridScroll.querySelectorAll("textarea.grid-cell-input"));
+      if (cells.length === 0) return;
+      cells.forEach(function (ta) {
+        ta.style.height = "auto";
+      });
+      const heights = cells.map(function (ta) {
+        return Math.max(32, ta.scrollHeight) + "px";
+      });
+      cells.forEach(function (ta, idx) {
+        ta.style.height = heights[idx];
       });
     }
 
@@ -1227,7 +1231,6 @@
     clearTableSelection: clearTableSelection,
     closeTableContextMenu: closeTableContextMenu,
     copyViaHiddenTextarea: copyViaHiddenTextarea,
-    escapeTableHtml: escapeTableHtml,
     formatTsvCell: formatTsvCell,
     getTableRangeHtml: getTableRangeHtml,
     getTableRangeTsv: getTableRangeTsv,

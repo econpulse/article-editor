@@ -13,9 +13,7 @@ from shiny import Session
 
 from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
-from services.chart_generator import generate_db_chart_svg
-from services.custom_chart_generator import generate_custom_chart_svg
-from services.renderer import render_preview_pdf_base64, render_preview_svg_pages, render_web_html
+from services.renderer import render_block_chart_svg, render_preview_pdf_base64, render_web_html
 
 logger = logging.getLogger("lukb_cms.collab")
 
@@ -59,16 +57,14 @@ def collect_article_assets_map(
                     b64 = base64.b64encode(rec["data"]).decode("ascii")
                     mime = rec.get("mime_type", "image/svg+xml")
                     assets_map[aid] = f"data:{mime};base64,{b64}"
-        elif btype == "db_chart":
+        elif btype in ("db_chart", "custom_chart"):
             bid = blk.get("id", "")
             if bid and (known_set is None or bid not in known_set):
-                svg_markup = generate_db_chart_svg(blk)
-                b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
-                assets_map[bid] = f"data:image/svg+xml;base64,{b64}"
-        elif btype == "custom_chart":
-            bid = blk.get("id", "")
-            if bid and (known_set is None or bid not in known_set):
-                svg_markup = generate_custom_chart_svg(blk, embed_fonts=True)
+                svg_markup = render_block_chart_svg(
+                    blk,
+                    embed_fonts=True,
+                    max_date=doc.metadata.publication_date,
+                )
                 b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
                 assets_map[bid] = f"data:image/svg+xml;base64,{b64}"
     return assets_map

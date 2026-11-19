@@ -20,7 +20,9 @@ import hashlib
 import html
 import json
 import math
-from datetime import date
+import threading
+from collections import OrderedDict
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -423,13 +425,15 @@ def _extract_series_chart_types(item: Any) -> list[str]:
     return cleaned
 
 
-_DB_CHART_SVG_CACHE: dict[str, str] = {}
+_DB_CHART_SVG_CACHE: OrderedDict[str, str] = OrderedDict()
+_DB_CHART_CACHE_LOCK = threading.Lock()
 _DB_CHART_CACHE_MAX_SIZE = 256
 
 
 def clear_db_chart_cache() -> None:
     """Leert den In-Memory-SVG-Cache für DB-Charts."""
-    _DB_CHART_SVG_CACHE.clear()
+    with _DB_CHART_CACHE_LOCK:
+        _DB_CHART_SVG_CACHE.clear()
 
 
 def _compute_db_chart_cache_key(
@@ -495,9 +499,11 @@ def generate_db_chart_svg(
       und Live-Vorschau in 0 ms ohne erneute SQL-Abfrage oder SVG-Pfadberechnung bedient werden.
     """
     cache_key = _compute_db_chart_cache_key(block_data, embed_fonts, max_date)
-    cached_svg = _DB_CHART_SVG_CACHE.get(cache_key)
-    if cached_svg is not None:
-        return cached_svg
+    with _DB_CHART_CACHE_LOCK:
+        cached_svg = _DB_CHART_SVG_CACHE.get(cache_key)
+        if cached_svg is not None:
+            _DB_CHART_SVG_CACHE.move_to_end(cache_key)
+            return cached_svg
     raw_series = block_data.get("series") or []
     start_date_str = str(block_data.get("start_date") or "2022-01-01").strip()
     rebasing = str(block_data.get("rebasing") or "none").strip()
@@ -992,9 +998,9 @@ def generate_db_chart_svg(
 
     svg_parts.append("</svg>")
     result_svg = "\n".join(svg_parts)
-    if len(_DB_CHART_SVG_CACHE) >= _DB_CHART_CACHE_MAX_SIZE:
-        # Entferne ältesten Eintrag (FIFO/LRU light)
-        oldest_key = next(iter(_DB_CHART_SVG_CACHE))
-        _DB_CHART_SVG_CACHE.pop(oldest_key, None)
-    _DB_CHART_SVG_CACHE[cache_key] = result_svg
+    with _DB_CHART_CACHE_LOCK:
+        _DB_CHART_SVG_CACHE[cache_key] = result_svg
+        _DB_CHART_SVG_CACHE.move_to_end(cache_key)
+        while len(_DB_CHART_SVG_CACHE) > _DB_CHART_CACHE_MAX_SIZE:
+            _DB_CHART_SVG_CACHE.popitem(last=False)
     return result_svg

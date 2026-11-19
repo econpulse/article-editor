@@ -15,9 +15,28 @@ from database.repository import (
     save_article,
     unpublish_article_from_portal,
 )
+from server.collab import broadcast_article_sync
 from server.state import SessionState
 
 logger = logging.getLogger("lukb_cms.workflow_handlers")
+
+
+def _notify_connect_deploy_result(
+    connect_info: dict | None,
+    deployed_msg: str,
+    local_msg: str,
+    local_duration: int = 7,
+) -> None:
+    if connect_info and connect_info.get("deployed"):
+        ui.notification_show(deployed_msg, type="message", duration=5)
+    elif connect_info and not connect_info.get("success"):
+        ui.notification_show(
+            f"⚠️ Lokal aktualisiert, aber Connect-Update fehlgeschlagen: {connect_info.get('error')}",
+            type="warning",
+            duration=8,
+        )
+    else:
+        ui.notification_show(local_msg, type="message", duration=local_duration)
 
 
 def register_workflow_handlers(
@@ -48,6 +67,13 @@ def register_workflow_handlers(
             revision_note="Zur Prüfung / Freigabe eingereicht (Status: review)",
         )
         await state.send_article_list(doc.id)
+        await broadcast_article_sync(
+            article_id=doc.id,
+            doc=doc,
+            sender_session_id=state.session_id,
+            author_name=state.current_user,
+            include_sender=False,
+        )
         ui.notification_show(
             "✅ Publikation zur Freigabe eingereicht (Status: In Review). Ein Senior Editor kann den Artikel nun prüfen und publizieren.",
             type="message",
@@ -75,26 +101,19 @@ def register_workflow_handlers(
                 doc.status = "published"
                 state.current_doc.set(doc)
                 await state.send_article_list(doc.id)
+                await broadcast_article_sync(
+                    article_id=doc.id,
+                    doc=doc,
+                    sender_session_id=state.session_id,
+                    author_name=user,
+                    include_sender=False,
+                )
                 count = res.get("total_published", 1)
-                connect_info = res.get("connect_deploy")
-                if connect_info and connect_info.get("deployed"):
-                    ui.notification_show(
-                        f"✅ Artikel publiziert & auf Posit Connect bereitgestellt! ({count} online)",
-                        type="message",
-                        duration=5,
-                    )
-                elif connect_info and not connect_info.get("success"):
-                    ui.notification_show(
-                        f"⚠️ Lokal publiziert, aber Connect-Update fehlgeschlagen: {connect_info.get('error')}",
-                        type="warning",
-                        duration=8,
-                    )
-                else:
-                    ui.notification_show(
-                        f"ℹ️ Lokal publiziert ({count} Artikel). Posit Connect nicht gekoppelt (CONNECT_PORTAL_GUID fehlt in Umgebungsvariablen).",
-                        type="message",
-                        duration=7,
-                    )
+                _notify_connect_deploy_result(
+                    res.get("connect_deploy"),
+                    deployed_msg=f"✅ Artikel publiziert & auf Posit Connect bereitgestellt! ({count} online)",
+                    local_msg=f"ℹ️ Lokal publiziert ({count} Artikel). Posit Connect nicht gekoppelt (CONNECT_PORTAL_GUID fehlt in Umgebungsvariablen).",
+                )
             else:
                 ui.notification_show(f"Publikationsfehler: {res.get('error')}", type="warning", duration=5)
         except Exception as exc:
@@ -166,25 +185,19 @@ def register_workflow_handlers(
                 doc.status = "draft"
                 state.current_doc.set(doc)
                 await state.send_article_list(doc.id)
-                connect_info = res.get("connect_deploy")
-                if connect_info and connect_info.get("deployed"):
-                    ui.notification_show(
-                        "✅ Artikel vom Portal zurückgezogen & auf Posit Connect entfernt.",
-                        type="message",
-                        duration=5,
-                    )
-                elif connect_info and not connect_info.get("success"):
-                    ui.notification_show(
-                        f"⚠️ Lokal entfernt, aber Connect-Update fehlgeschlagen: {connect_info.get('error')}",
-                        type="warning",
-                        duration=8,
-                    )
-                else:
-                    ui.notification_show(
-                        "Artikel vom Portal zurückgezogen (Status auf 'Entwurf' gesetzt).",
-                        type="message",
-                        duration=5,
-                    )
+                await broadcast_article_sync(
+                    article_id=doc.id,
+                    doc=doc,
+                    sender_session_id=state.session_id,
+                    author_name=state.current_user,
+                    include_sender=False,
+                )
+                _notify_connect_deploy_result(
+                    res.get("connect_deploy"),
+                    deployed_msg="✅ Artikel vom Portal zurückgezogen & auf Posit Connect entfernt.",
+                    local_msg="Artikel vom Portal zurückgezogen (Status auf 'Entwurf' gesetzt).",
+                    local_duration=5,
+                )
             else:
                 ui.notification_show(f"Fehler: {res.get('error')}", type="warning", duration=5)
         except Exception as exc:

@@ -18,6 +18,8 @@ import io
 import json
 import math
 import re
+import threading
+from collections import OrderedDict
 from datetime import date, datetime
 from typing import Any
 
@@ -1356,13 +1358,15 @@ def _render_timeseries_svg(
     return "\n".join(svg_parts)
 
 
-_CUSTOM_CHART_SVG_CACHE: dict[str, str] = {}
+_CUSTOM_CHART_SVG_CACHE: OrderedDict[str, str] = OrderedDict()
+_CUSTOM_CHART_CACHE_LOCK = threading.Lock()
 _CUSTOM_CHART_CACHE_MAX_SIZE = 256
 
 
 def clear_custom_chart_cache() -> None:
     """Leert den In-Memory-SVG-Cache für Custom-Charts."""
-    _CUSTOM_CHART_SVG_CACHE.clear()
+    with _CUSTOM_CHART_CACHE_LOCK:
+        _CUSTOM_CHART_SVG_CACHE.clear()
 
 
 def _compute_custom_chart_cache_key(
@@ -1435,9 +1439,11 @@ def generate_custom_chart_svg(
     `custom_chart`-Blöcke bei Autosave und Rendering in 0 ms bedient werden.
     """
     cache_key = _compute_custom_chart_cache_key(block_data, embed_fonts)
-    cached_svg = _CUSTOM_CHART_SVG_CACHE.get(cache_key)
-    if cached_svg is not None:
-        return cached_svg
+    with _CUSTOM_CHART_CACHE_LOCK:
+        cached_svg = _CUSTOM_CHART_SVG_CACHE.get(cache_key)
+        if cached_svg is not None:
+            _CUSTOM_CHART_SVG_CACHE.move_to_end(cache_key)
+            return cached_svg
 
     raw_tsv = str(block_data.get("raw_tsv") or "").strip()
     has_header = bool(block_data.get("has_header", True))
@@ -1465,8 +1471,9 @@ def generate_custom_chart_svg(
             # category_bar (Standard)
             result_svg = _render_category_bar_svg(block_data, columns, rows, embed_fonts=embed_fonts)
 
-    if len(_CUSTOM_CHART_SVG_CACHE) >= _CUSTOM_CHART_CACHE_MAX_SIZE:
-        oldest_key = next(iter(_CUSTOM_CHART_SVG_CACHE))
-        _CUSTOM_CHART_SVG_CACHE.pop(oldest_key, None)
-    _CUSTOM_CHART_SVG_CACHE[cache_key] = result_svg
+    with _CUSTOM_CHART_CACHE_LOCK:
+        _CUSTOM_CHART_SVG_CACHE[cache_key] = result_svg
+        _CUSTOM_CHART_SVG_CACHE.move_to_end(cache_key)
+        while len(_CUSTOM_CHART_SVG_CACHE) > _CUSTOM_CHART_CACHE_MAX_SIZE:
+            _CUSTOM_CHART_SVG_CACHE.popitem(last=False)
     return result_svg

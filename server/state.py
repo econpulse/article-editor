@@ -10,17 +10,25 @@ import logging
 from typing import Any
 from shiny import Inputs, Session, reactive
 
-from database.repository import create_new_article, get_article, list_articles, list_available_tickers
+from database.repository import (
+    create_new_article,
+    get_article,
+    get_first_article_id,
+    list_articles,
+    list_available_tickers,
+)
 from schemas.article import ArticleDocument
 from server.collab import (
     broadcast_presence,
     cleanup_peer,
     collect_article_assets_map,
     get_peer_color,
+    get_peer_preview_mode,
+    is_peer_auto_preview,
     register_peer,
     set_peer_article,
 )
-from services.renderer import render_preview_pdf_base64, render_preview_svg_pages, render_web_html
+from services.renderer import render_preview_pdf_base64, render_web_html
 
 logger = logging.getLogger("lukb_cms.state")
 
@@ -59,8 +67,6 @@ class SessionState:
         self.current_doc.set(new_doc)
 
     def _on_session_ended(self) -> None:
-        import asyncio
-
         try:
             loop = asyncio.get_running_loop()
             loop.create_task(cleanup_peer(self.session_id))
@@ -143,14 +149,31 @@ class SessionState:
         )
         return pdf_base64, web_html
 
+    async def send_active_preview(
+        self,
+        doc: ArticleDocument | None = None,
+        *,
+        respect_auto_preview: bool = True,
+        preview_mode: str | None = None,
+    ) -> tuple[str | None, str | None]:
+        """Sendet die Vorschau entsprechend dem aktiven Preview-Modus und Auto-Preview-Status der Session."""
+        if respect_auto_preview and not is_peer_auto_preview(self.session_id, default=True):
+            return None, None
+        mode = (preview_mode or get_peer_preview_mode(self.session_id, default="pdf")).strip().lower()
+        return await self.send_preview(
+            doc,
+            include_typst=(mode == "pdf"),
+            include_web=(mode == "web"),
+        )
+
     async def load_and_broadcast_article(self, article_id: str) -> None:
         """Lädt einen Artikel, setzt den Session-Zustand und informiert andere Co-Autoren."""
         def _load_doc_and_assets():
-            loaded_doc = get_article(article_id)
+            loaded_doc = get_article(article_id) if article_id else None
             if loaded_doc is None:
-                all_items = list_articles()
-                if all_items:
-                    loaded_doc = get_article(all_items[0]["id"])
+                first_id = get_first_article_id()
+                if first_id:
+                    loaded_doc = get_article(first_id)
                 else:
                     loaded_doc = create_new_article(user=self.current_user)
             if loaded_doc is None:

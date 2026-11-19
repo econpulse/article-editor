@@ -293,7 +293,23 @@
 
   let activePickerPopover = null;
 
+  let activePickerDocClick = null;
+
+  function attachOutsideDismiss(containerEl, triggerEl, onClose, setRef) {
+    function onDocClick(e) {
+      if (containerEl && !containerEl.contains(e.target) && (!triggerEl || !triggerEl.contains(e.target))) {
+        onClose();
+      }
+    }
+    setRef(onDocClick);
+    setTimeout(function () { document.addEventListener("pointerdown", onDocClick); }, 15);
+  }
+
   function closeBlockPickerPopup() {
+    if (activePickerDocClick) {
+      document.removeEventListener("pointerdown", activePickerDocClick);
+      activePickerDocClick = null;
+    }
     if (activePickerPopover && activePickerPopover.parentNode) {
       activePickerPopover.parentNode.removeChild(activePickerPopover);
     }
@@ -385,15 +401,7 @@
     popover.style.left = left + "px";
     popover.style.top = top + "px";
 
-    function onDocClick(e) {
-      if (popover && !popover.contains(e.target) && !triggerElement.contains(e.target)) {
-        closeBlockPickerPopup();
-        document.removeEventListener("pointerdown", onDocClick);
-      }
-    }
-    setTimeout(function () {
-      document.addEventListener("pointerdown", onDocClick);
-    }, 15);
+    attachOutsideDismiss(popover, triggerElement, closeBlockPickerPopup, function (fn) { activePickerDocClick = fn; });
   }
 
   function createInlineInserterElement(targetIndex, isTop) {
@@ -568,7 +576,7 @@
     state.article.blocks.forEach(function (b) {
       newBlocks.push(b);
       if (state.selectedBlockIds.has(b.id)) {
-        const clone = JSON.parse(JSON.stringify(b));
+        const clone = deepClone(b);
         clone.id = uid("blk");
         newBlocks.push(clone);
         newSelectedIds.add(clone.id);
@@ -652,12 +660,25 @@
     }
   }
 
+  let activeMoveDialogDocClick = null;
+
+  function closeMoveToDialog() {
+    if (activeMoveDialogDocClick) {
+      document.removeEventListener("pointerdown", activeMoveDialogDocClick);
+      activeMoveDialogDocClick = null;
+    }
+    const existing = document.getElementById("cms-move-to-dialog");
+    if (existing && existing.parentNode) {
+      existing.parentNode.removeChild(existing);
+    }
+  }
+
   function openMoveToDialog(anchorBtn) {
     closeBlockPickerPopup();
 
     const existingDialog = document.getElementById("cms-move-to-dialog");
     if (existingDialog) {
-      existingDialog.parentNode.removeChild(existingDialog);
+      closeMoveToDialog();
       return;
     }
 
@@ -675,7 +696,7 @@
     closeBtn.textContent = "✕";
     closeBtn.addEventListener("click", function (e) {
       e.stopPropagation();
-      if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+      closeMoveToDialog();
     });
     header.appendChild(closeBtn);
     dialog.appendChild(header);
@@ -693,7 +714,7 @@
     topItem.innerHTML = '<span class="item-icon">⤒</span><span>1. Ganz an den Anfang</span>';
     topItem.addEventListener("click", function (e) {
       e.stopPropagation();
-      if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+      closeMoveToDialog();
       moveSelectedBlocksTo(0);
     });
     list.appendChild(topItem);
@@ -711,10 +732,10 @@
       btn.type = "button";
       btn.className = "block-picker-item";
       const label = (item.origIndex + 1) + ". " + getBlockTypeLabel(item.block.type);
-      btn.innerHTML = '<span class="item-icon">↳</span><span>Nach: ' + label + "</span>";
+      btn.innerHTML = '<span class="item-icon">↳</span><span>Nach: ' + E.escapeHtml(label) + "</span>";
       btn.addEventListener("click", function (e) {
         e.stopPropagation();
-        if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+        closeMoveToDialog();
         moveSelectedBlocksTo(uIdx + 1);
       });
       list.appendChild(btn);
@@ -726,7 +747,7 @@
     endItem.innerHTML = '<span class="item-icon">⤓</span><span>Ganz ans Ende</span>';
     endItem.addEventListener("click", function (e) {
       e.stopPropagation();
-      if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
+      closeMoveToDialog();
       moveSelectedBlocksTo(unselected.length);
     });
     list.appendChild(endItem);
@@ -738,15 +759,7 @@
     dialog.style.left = Math.max(10, rect.left - 40) + "px";
     dialog.style.top = Math.max(10, rect.top - dialog.offsetHeight - 8) + "px";
 
-    function onDocClick(e) {
-      if (dialog && !dialog.contains(e.target) && !anchorBtn.contains(e.target)) {
-        if (dialog.parentNode) dialog.parentNode.removeChild(dialog);
-        document.removeEventListener("pointerdown", onDocClick);
-      }
-    }
-    setTimeout(function () {
-      document.addEventListener("pointerdown", onDocClick);
-    }, 15);
+    attachOutsideDismiss(dialog, anchorBtn, closeMoveToDialog, function (fn) { activeMoveDialogDocClick = fn; });
   }
 
   function updateFloatingSelectionBar() {
@@ -948,17 +961,19 @@
       return;
     }
 
+    const frag = document.createDocumentFragment();
     let insideBox = false;
     blocks.forEach(function (blk, index) {
       if (blk.type === "box_start") {
         insideBox = true;
       }
       const card = buildBlockCardElement(blk, index, insideBox);
-      canvas.appendChild(card);
+      frag.appendChild(card);
       if (blk.type === "box_end") {
         insideBox = false;
       }
     });
+    canvas.appendChild(frag);
 
     initSortable(canvas);
     updateFloatingSelectionBar();
@@ -1000,7 +1015,7 @@
     });
   }
 
-  function updateCardAnchorBadges(card, blk) {
+  function updateCardAnchorBadges(card, blk, anchorCountMap) {
     const headerLeft = card.querySelector(".block-header-left");
     if (!headerLeft) return;
 
@@ -1015,29 +1030,26 @@
         anchorPill.title = "Dieses Element ist an einen Textabsatz verankert. Klicken, um zum Ziel zu springen.";
         anchorPill.textContent = "⚓ Verankert";
 
-        anchorPill.addEventListener("mouseenter", function () {
+        const getAnchorTargetCard = function () {
           const curBlk = state.article ? state.article.blocks.find(function (b) { return b.id === card.dataset.blockId; }) : blk;
           const targetId = curBlk ? curBlk.anchor_to : blk.anchor_to;
-          const targetCard = document.querySelector('[data-block-id="' + targetId + '"]');
+          return targetId ? document.querySelector('[data-block-id="' + targetId + '"]') : null;
+        };
+        anchorPill.addEventListener("mouseenter", function () {
+          const targetCard = getAnchorTargetCard();
           if (targetCard) targetCard.classList.add("anchor-target-highlight");
         });
         anchorPill.addEventListener("mouseleave", function () {
-          const curBlk = state.article ? state.article.blocks.find(function (b) { return b.id === card.dataset.blockId; }) : blk;
-          const targetId = curBlk ? curBlk.anchor_to : blk.anchor_to;
-          const targetCard = document.querySelector('[data-block-id="' + targetId + '"]');
+          const targetCard = getAnchorTargetCard();
           if (targetCard) targetCard.classList.remove("anchor-target-highlight");
         });
         anchorPill.addEventListener("click", function (e) {
           e.stopPropagation();
-          const curBlk = state.article ? state.article.blocks.find(function (b) { return b.id === card.dataset.blockId; }) : blk;
-          const targetId = curBlk ? curBlk.anchor_to : blk.anchor_to;
-          const targetCard = document.querySelector('[data-block-id="' + targetId + '"]');
+          const targetCard = getAnchorTargetCard();
           if (targetCard) {
             targetCard.scrollIntoView({ behavior: "smooth", block: "center" });
             targetCard.classList.add("anchor-target-highlight");
-            setTimeout(function () {
-              targetCard.classList.remove("anchor-target-highlight");
-            }, 1600);
+            setTimeout(function () { targetCard.classList.remove("anchor-target-highlight"); }, 1600);
           }
         });
         headerLeft.appendChild(anchorPill);
@@ -1048,10 +1060,15 @@
 
     // 2. Target-Pill auf dem Zielabsatz
     let targetPill = headerLeft.querySelector(".block-anchor-target-pill");
-    const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
-    const attachedMarginCount = blocksList.filter(function (o) {
-      return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column";
-    }).length;
+    let attachedMarginCount = 0;
+    if (anchorCountMap instanceof Map) {
+      attachedMarginCount = anchorCountMap.get(blk.id) || 0;
+    } else {
+      const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
+      attachedMarginCount = blocksList.filter(function (o) {
+        return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column";
+      }).length;
+    }
 
     if (attachedMarginCount > 0) {
       if (!targetPill) {
@@ -1069,6 +1086,13 @@
   function reindexCanvasCards(canvas) {
     if (!canvas) canvas = document.getElementById("lukb-blocks-canvas");
     if (!canvas || !state.article || !state.article.blocks) return;
+
+    const anchorCountMap = new Map();
+    state.article.blocks.forEach(function (o) {
+      if (o && o.anchor_to && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column") {
+        anchorCountMap.set(o.anchor_to, (anchorCountMap.get(o.anchor_to) || 0) + 1);
+      }
+    });
 
     const cardElements = Array.from(canvas.querySelectorAll(":scope > .cms-block-card"));
     const total = cardElements.length;
@@ -1119,7 +1143,7 @@
       }
 
       // Verankerungs-Badges aktualisieren
-      updateCardAnchorBadges(card, blk);
+      updateCardAnchorBadges(card, blk, anchorCountMap);
 
       if (blk.type === "box_end") insideBox = false;
     });
@@ -1128,9 +1152,13 @@
   function reorderCanvasCardsFromState(canvas) {
     if (!canvas) canvas = document.getElementById("lukb-blocks-canvas");
     if (!canvas || !state.article || !state.article.blocks) return;
+    const cardMap = new Map();
+    canvas.querySelectorAll(":scope > .cms-block-card").forEach(function (card) {
+      if (card.dataset.blockId) cardMap.set(card.dataset.blockId, card);
+    });
     const frag = document.createDocumentFragment();
     state.article.blocks.forEach(function (blk) {
-      const card = canvas.querySelector(':scope > [data-block-id="' + blk.id + '"]');
+      const card = cardMap.get(blk.id);
       if (card) frag.appendChild(card);
     });
     canvas.appendChild(frag);
@@ -1285,7 +1313,7 @@
       const currentIdx = getCardCurrentIndex(card);
       if (currentIdx === -1) return;
       const blkToDup = state.article.blocks[currentIdx];
-      const clone = JSON.parse(JSON.stringify(blkToDup));
+      const clone = deepClone(blkToDup);
       clone.id = uid("blk");
       state.article.blocks.splice(currentIdx + 1, 0, clone);
 
@@ -1369,35 +1397,24 @@
     const body = document.createElement("div");
     body.className = "block-body";
 
-    if (blk.type === "heading") {
-      buildHeadingBlockBody(body, blk);
-    } else if (blk.type === "richtext") {
-      buildRichTextBlockBody(body, blk);
-    } else if (blk.type === "callout") {
-      buildCalloutBlockBody(body, blk);
-    } else if (blk.type === "figure") {
-      buildFigureBlockBody(body, blk);
-    } else if (blk.type === "db_chart") {
-      buildDbChartBlockBody(body, blk);
-    } else if (blk.type === "custom_chart") {
-      buildCustomChartBlockBody(body, blk);
-    } else if (blk.type === "table") {
-      buildTableBlockBody(body, blk);
-    } else if (blk.type === "spacer") {
-      buildSpacerBlockBody(body, blk);
-    } else if (blk.type === "colbreak") {
-      buildColbreakBlockBody(body, blk);
-    } else if (blk.type === "quote") {
-      buildQuoteBlockBody(body, blk);
-    } else if (blk.type === "divider") {
-      buildDividerBlockBody(body, blk);
-    } else if (blk.type === "footnotes") {
-      buildFootnotesBlockBody(body, blk);
-    } else if (blk.type === "glossary") {
-      buildGlossaryBlockBody(body, blk);
-    } else if (blk.type === "publications") {
-      buildPublicationsBlockBody(body, blk);
-    }
+    const BLOCK_BODY_BUILDERS = {
+      heading: buildHeadingBlockBody,
+      richtext: buildRichTextBlockBody,
+      callout: buildCalloutBlockBody,
+      figure: buildFigureBlockBody,
+      db_chart: buildDbChartBlockBody,
+      custom_chart: buildCustomChartBlockBody,
+      table: buildTableBlockBody,
+      spacer: buildSpacerBlockBody,
+      colbreak: buildColbreakBlockBody,
+      quote: buildQuoteBlockBody,
+      divider: buildDividerBlockBody,
+      footnotes: buildFootnotesBlockBody,
+      glossary: buildGlossaryBlockBody,
+      publications: buildPublicationsBlockBody,
+    };
+    const bodyBuilder = BLOCK_BODY_BUILDERS[blk.type];
+    if (bodyBuilder) bodyBuilder(body, blk);
 
     card.appendChild(body);
     card.appendChild(createInlineInserterElement(index + 1, false));
@@ -2073,20 +2090,13 @@
         const fileName = file.name || ("grafik_" + Date.now() + defaultExt);
         const mimeType = file.type || (isSvg ? "image/svg+xml" : "image/png");
 
-        if (window.Shiny && window.Shiny.setInputValue) {
-          window.Shiny.setInputValue(
-            "lukb_upload_asset",
-            {
-              asset_id: newAssetId,
-              article_id: state.article.id,
-              filename: fileName,
-              mime_type: mimeType,
-              base64_data: base64Data,
-              ts: Date.now(),
-            },
-            { priority: "event" }
-          );
-        }
+        E.sendShinyEvent("lukb_upload_asset", {
+          asset_id: newAssetId,
+          article_id: state.article.id,
+          filename: fileName,
+          mime_type: mimeType,
+          base64_data: base64Data,
+        });
         markDirty();
       };
       reader.readAsDataURL(file);
@@ -2337,10 +2347,7 @@
       }
       if (e.key === "Escape") {
         closeBlockPickerPopup();
-        const moveDialog = document.getElementById("cms-move-to-dialog");
-        if (moveDialog && moveDialog.parentNode) {
-          moveDialog.parentNode.removeChild(moveDialog);
-        }
+        closeMoveToDialog();
         if (state.selectedBlockIds && state.selectedBlockIds.size > 0) {
           clearBlockSelection();
         }
@@ -2367,13 +2374,7 @@
             webIframe.srcdoc = state.pendingWebHtml;
           }
         }
-        if (window.Shiny && window.Shiny.setInputValue) {
-          window.Shiny.setInputValue(
-            "lukb_preview_mode_change",
-            { mode: mode, ts: Date.now() },
-            { priority: "event" }
-          );
-        }
+        E.sendShinyEvent("lukb_preview_mode_change", { mode: mode });
       });
     });
 
@@ -2410,17 +2411,10 @@
           refreshBtn.classList.remove("has-pending-preview");
         }
 
-        if (window.Shiny && window.Shiny.setInputValue) {
-          window.Shiny.setInputValue(
-            "lukb_auto_preview_toggle",
-            {
-              enabled: state.autoPreview,
-              refresh_now: state.autoPreview,
-              ts: Date.now(),
-            },
-            { priority: "event" }
-          );
-        }
+        E.sendShinyEvent("lukb_auto_preview_toggle", {
+          enabled: state.autoPreview,
+          refresh_now: state.autoPreview,
+        });
       });
     }
   }
@@ -2447,7 +2441,8 @@
       state.isDirty = false;
       state.article = msg.article;
       state.baseArticle = deepClone(msg.article);
-      state.lastPreviewedArticleJson = JSON.stringify(msg.article);
+      state.editSeq = 0;
+      state.lastPreviewedSeq = 0;
       if (Array.isArray(msg.available_tickers)) {
         state.availableTickers = msg.available_tickers;
         indexTickerItems(msg.available_tickers);
@@ -2659,6 +2654,7 @@
             }
             if (blk.type === "box_end") insideBox = false;
           });
+          reindexCanvasCards(canvas);
         }
       }
       applyPeerFocusDecorations();
@@ -2737,13 +2733,15 @@
         return;
       }
 
+      let pdfDoc = null;
+      const seqAtRenderStart = state.editSeq;
       try {
         const pdfData = base64ToUint8Array(pdfBase64);
         const loadingTask = window.pdfjsLib.getDocument({
           data: pdfData,
           isEvalSupported: false,
         });
-        const pdfDoc = await loadingTask.promise;
+        pdfDoc = await loadingTask.promise;
 
         if (renderSeq !== _currentPdfRenderSeq) {
           return; // Ein neueres Update hat diesen Render-Vorgang überholt
@@ -2827,7 +2825,9 @@
         }
 
         _lastRenderedPdfBase64 = pdfBase64;
-        state.lastPreviewedArticleJson = JSON.stringify(state.article);
+        if (seqAtRenderStart > state.lastPreviewedSeq) {
+          state.lastPreviewedSeq = seqAtRenderStart;
+        }
         state.lastKnownPageCount = numPages;
         state.previewPending = false;
         if (refreshBtn) refreshBtn.classList.remove("has-pending-preview");
@@ -2839,6 +2839,10 @@
       } catch (err) {
         if (renderSeq !== _currentPdfRenderSeq) return;
         console.error("PDF.js Live-Preview Render-Fehler:", err);
+      } finally {
+        if (pdfDoc && typeof pdfDoc.destroy === "function") {
+          pdfDoc.destroy().catch(function () {});
+        }
       }
     }
 
@@ -2880,10 +2884,9 @@
         msg.svg_pages.forEach(function (svgMarkup, idx) {
           const pageEl = existingPages[idx];
           if (!pageEl) return;
-          const lenStr = String(svgMarkup.length);
-          if (pageEl.dataset.svgLen !== lenStr || pageEl.innerHTML !== svgMarkup) {
+          if (pageEl._lastSvgMarkup !== svgMarkup) {
             pageEl.innerHTML = svgMarkup;
-            pageEl.dataset.svgLen = lenStr;
+            pageEl._lastSvgMarkup = svgMarkup;
           }
         });
 
@@ -2918,12 +2921,8 @@
       }
     });
 
-    if (!state.autoPreview && window.Shiny.setInputValue) {
-      window.Shiny.setInputValue(
-        "lukb_auto_preview_toggle",
-        { enabled: false, refresh_now: false, ts: Date.now() },
-        { priority: "event" }
-      );
+    if (!state.autoPreview) {
+      E.sendShinyEvent("lukb_auto_preview_toggle", { enabled: false, refresh_now: false });
     }
   }
 

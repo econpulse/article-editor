@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import datetime
+import hashlib
 import html
 import io
 import json
@@ -19,6 +20,7 @@ import mimetypes
 import re
 import tempfile
 import threading
+from collections import OrderedDict
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -47,6 +49,10 @@ TYPST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 _COMPILER_CACHE: dict[str, typst.Compiler] = {}
 _COMPILER_LOCK = threading.Lock()
 _LOGO_PNG_CACHE: bytes | None = None
+_LOGO_DATA_URI_CACHE: str | None = None
+_SVG_PNG_CACHE: OrderedDict[str, bytes] = OrderedDict()
+_SVG_PNG_CACHE_LOCK = threading.Lock()
+_SVG_PNG_CACHE_MAX_SIZE = 128
 
 _jinja_env = jinja2.Environment(
     loader=jinja2.FileSystemLoader(str(TEMPLATES_DIR)),
@@ -169,32 +175,34 @@ def _group_blocks_into_render_items(blocks: list[dict[str, Any]]) -> list[dict[s
     return grouped
 
 
+_GLOSSARY_TERM_RE = re.compile(
+    r'<span[^>]*\bclass=["\'][^"\']*glossary-term[^"\']*["\'][^>]*data-tooltip=["\']([^"\']+)["\'][^>]*>(.*?)</span>',
+    re.DOTALL | re.IGNORECASE,
+)
+_GLOSSARY_ALT_RE = re.compile(
+    r'<span[^>]*\bdata-tooltip=["\']([^"\']+)["\'][^>]*\bclass=["\'][^"\']*glossary-term[^"\']*["\'][^>]*>(.*?)</span>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def extract_glossary_terms_from_article(blocks: list[dict[str, Any]]) -> list[dict[str, str]]:
     """
     Sucht alle im Fließtext vorkommenden <span class="glossary-term" data-tooltip="...">Begriff</span>
     oder data-tooltip Attribute zusammen und liefert eine deduplizierte, alphabetisch sortierte Liste
     von Glossar-Einträgen: [{'term': 'SNB', 'definition': 'Schweizerische Nationalbank'}, ...]
     """
-    pattern = re.compile(
-        r'<span[^>]*\bclass=["\'][^"\']*glossary-term[^"\']*["\'][^>]*data-tooltip=["\']([^"\']+)["\'][^>]*>(.*?)</span>',
-        re.DOTALL | re.IGNORECASE,
-    )
-    alt_pattern = re.compile(
-        r'<span[^>]*\bdata-tooltip=["\']([^"\']+)["\'][^>]*\bclass=["\'][^"\']*glossary-term[^"\']*["\'][^>]*>(.*?)</span>',
-        re.DOTALL | re.IGNORECASE,
-    )
     terms_dict: dict[str, str] = {}
 
     def _scan_text(text: str) -> None:
-        if not text:
+        if not text or "glossary-term" not in text:
             return
-        for m in pattern.finditer(text):
+        for m in _GLOSSARY_TERM_RE.finditer(text):
             tip = html.unescape(m.group(1)).strip()
             term = re.sub(r"<[^>]+>", "", m.group(2))
             term = html.unescape(term).strip()
             if term and tip and term not in terms_dict:
                 terms_dict[term] = tip
-        for m in alt_pattern.finditer(text):
+        for m in _GLOSSARY_ALT_RE.finditer(text):
             tip = html.unescape(m.group(1)).strip()
             term = re.sub(r"<[^>]+>", "", m.group(2))
             term = html.unescape(term).strip()
@@ -308,28 +316,50 @@ def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
     return payload
 
 
+def _fetch_doc_asset_records(blocks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Lädt alle in `figure`-Blöcken referenzierten Asset-Datensätze gebündelt aus der DB."""
+    figure_aids = {
+        blk.get("asset_id", "")
+        for blk in blocks
+        if blk.get("type") == "figure" and blk.get("asset_id")
+    }
+    return get_assets_by_ids(figure_aids) if figure_aids else {}
+
+
+def render_block_chart_svg(
+    blk: dict[str, Any],
+    *,
+    embed_fonts: bool,
+    max_date: str | datetime.date | None = None,
+) -> str:
+    """Einheitlicher Chart-SVG-Renderer für `db_chart` und `custom_chart` über alle Ausgabekanäle."""
+    if blk.get("type") == "db_chart":
+        return generate_db_chart_svg(blk, embed_fonts=embed_fonts, max_date=max_date)
+    return generate_custom_chart_svg(blk, embed_fonts=embed_fonts)
+
+
+def _materialize_chart_svg(work_dir: Path, svg_markup: str) -> str:
+    """Schreibt Chart-SVG unter deterministischem Content-Hash in `work_dir` (thread-safe, kein Überschreiben)."""
+    chart_bytes = svg_markup.encode("utf-8")
+    digest = hashlib.sha256(chart_bytes).hexdigest()[:16]
+    chart_filename = f"chart_{digest}.svg"
+    chart_file_path = work_dir / chart_filename
+    if not chart_file_path.exists():
+        chart_file_path.write_bytes(chart_bytes)
+    return chart_filename
+
+
 def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, Any]:
     """
     Bereitet das Artikel-Dictionary für Typst auf:
-    - Kopiert das offizielle LUKB-Logo (`LUKB-Logo.svg`) in das temporäre Render-Verzeichnis.
     - Konvertiert HTML-Rich-Text-Blöcke in sicheres Typst-Markup.
     - Schreibt benötigte Grafik-Assets aus der MSSQL-Datenbank in `work_dir`
       und trägt den relativen Pfad als `resolved_image` ein.
     - Gruppiert Blöcke zwischen `box_start` und `box_end` zu einer gemeinsamen farblichen Textbox.
     """
-    if work_dir != TYPST_CACHE_DIR and LUKB_LOGO_SVG_PATH.exists():
-        logo_dst = work_dir / "LUKB-Logo.svg"
-        if not logo_dst.exists() or LUKB_LOGO_SVG_PATH.stat().st_mtime > logo_dst.stat().st_mtime:
-            logo_dst.write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
-
     payload = _prepare_common_article_payload(doc)
     raw_blocks = payload.get("blocks", [])
-    figure_aids = {
-        blk.get("asset_id", "")
-        for blk in raw_blocks
-        if blk.get("type") == "figure" and blk.get("asset_id")
-    }
-    asset_cache = get_assets_by_ids(figure_aids) if figure_aids else {}
+    asset_cache = _fetch_doc_asset_records(raw_blocks)
 
     # Gliederungshierarchie für Acrobat / PDF-Bookmarks (H1, H2, H3) berechnen:
     # Falls keine H1 im Dokument existiert, wird H2 zur höchsten Ebene (Level 1 in der PDF-Outline).
@@ -365,35 +395,19 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                     )
                     asset_filename = f"{asset_id}{ext}"
                     asset_file_path = work_dir / asset_filename
-                    if not asset_file_path.exists():
-                        asset_file_path.write_bytes(asset_record["data"])
+                    asset_bytes = asset_record["data"]
+                    if not asset_file_path.exists() or asset_file_path.read_bytes() != asset_bytes:
+                        asset_file_path.write_bytes(asset_bytes)
                     resolved_rel_path = asset_filename
             bcopy["resolved_image"] = resolved_rel_path
 
-        elif btype == "db_chart":
-            svg_markup = generate_db_chart_svg(
+        elif btype in ("db_chart", "custom_chart"):
+            svg_markup = render_block_chart_svg(
                 blk,
                 embed_fonts=False,
                 max_date=doc.metadata.publication_date,
             )
-            chart_filename = f"dbchart_{blk.get('id', 'chart')}.svg"
-            chart_file_path = work_dir / chart_filename
-            chart_bytes = svg_markup.encode("utf-8")
-            if not chart_file_path.exists() or chart_file_path.read_bytes() != chart_bytes:
-                chart_file_path.write_bytes(chart_bytes)
-            bcopy["resolved_image"] = chart_filename
-
-        elif btype == "custom_chart":
-            svg_markup = generate_custom_chart_svg(
-                blk,
-                embed_fonts=False,
-            )
-            chart_filename = f"customchart_{blk.get('id', 'chart')}.svg"
-            chart_file_path = work_dir / chart_filename
-            chart_bytes = svg_markup.encode("utf-8")
-            if not chart_file_path.exists() or chart_file_path.read_bytes() != chart_bytes:
-                chart_file_path.write_bytes(chart_bytes)
-            bcopy["resolved_image"] = chart_filename
+            bcopy["resolved_image"] = _materialize_chart_svg(work_dir, svg_markup)
 
         elif btype == "quote":
             bcopy["quote_typst"] = escape_typst_text(blk.get("quote", ""))
@@ -455,10 +469,13 @@ def _ensure_typst_workspace(template_id: str) -> tuple[Path, Path]:
     """
     Synchronisiert gemeinsame Typst-Basismodule (`templates/_common/*.typ`), das
     angeforderte Template sowie das LUKB-Logo in das persistente Arbeitsverzeichnis `TYPST_CACHE_DIR`.
-    Kopiert Dateien nur, wenn sie nicht existieren oder sich die Quell-mtime geändert hat.
+    Kopiert Dateien nur, wenn sie nicht existieren oder sich die Quell-mtime geändert hat,
+    und invalidiert bei Template-Änderungen den `typst.Compiler`-Cache.
     Gibt (work_typ, TYPST_CACHE_DIR) zurück.
     """
     TYPST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    common_changed = False
+    tpl_changed = False
 
     common_src = TEMPLATES_DIR / "_common"
     if common_src.exists():
@@ -468,6 +485,7 @@ def _ensure_typst_workspace(template_id: str) -> tuple[Path, Path]:
             dst_file = common_dst / src_file.name
             if not dst_file.exists() or src_file.stat().st_mtime > dst_file.stat().st_mtime:
                 dst_file.write_bytes(src_file.read_bytes())
+                common_changed = True
 
     template_path = _get_template_typ_path(template_id)
     tpl_folder_name = template_path.parent.name
@@ -476,11 +494,17 @@ def _ensure_typst_workspace(template_id: str) -> tuple[Path, Path]:
     work_typ = tpl_dst_dir / "document.typ"
     if not work_typ.exists() or template_path.stat().st_mtime > work_typ.stat().st_mtime:
         work_typ.write_bytes(template_path.read_bytes())
+        tpl_changed = True
 
     if LUKB_LOGO_SVG_PATH.exists():
         logo_dst = TYPST_CACHE_DIR / "LUKB-Logo.svg"
         if not logo_dst.exists() or LUKB_LOGO_SVG_PATH.stat().st_mtime > logo_dst.stat().st_mtime:
             logo_dst.write_bytes(LUKB_LOGO_SVG_PATH.read_bytes())
+
+    if common_changed:
+        invalidate_compiler_cache()
+    elif tpl_changed:
+        invalidate_compiler_cache(template_id)
 
     return work_typ, TYPST_CACHE_DIR
 
@@ -501,7 +525,7 @@ def invalidate_compiler_cache(template_id: str | None = None) -> None:
             _COMPILER_CACHE.clear()
 
 
-def _get_or_create_compiler(template_id: str, work_typ: Path, root_dir: Path, article_json_str: str) -> typst.Compiler:
+def _get_or_create_compiler(template_id: str, work_typ: Path, root_dir: Path) -> typst.Compiler:
     """Holt eine wiederverwendbare Typst.Compiler-Instanz aus dem Cache oder initialisiert sie."""
     with _COMPILER_LOCK:
         compiler = _COMPILER_CACHE.get(template_id)
@@ -510,35 +534,41 @@ def _get_or_create_compiler(template_id: str, work_typ: Path, root_dir: Path, ar
                 input=work_typ,
                 root=root_dir,
                 font_paths=_get_font_paths(),
-                sys_inputs={"article_json": article_json_str},
             )
             _COMPILER_CACHE[template_id] = compiler
         return compiler
 
 
-def render_pdf_bytes(doc: ArticleDocument) -> bytes:
-    """Kompiliert ein ArticleDocument mit der aktuellsten Typst-Engine zu einem PDF (bytes)."""
+def _compile_typst(doc: ArticleDocument, output_format: str) -> bytes | list[bytes]:
+    """Gemeinsame Typst-Kompilierungspipeline für PDF (`pdf`) und Seiten-SVGs (`svg`)."""
     work_typ, work_dir = _ensure_typst_workspace(doc.template_id)
     payload = _prepare_typst_payload(doc, work_dir)
     article_json_str = json.dumps(payload, ensure_ascii=False)
 
     try:
-        compiler = _get_or_create_compiler(doc.template_id, work_typ, work_dir, article_json_str)
+        compiler = _get_or_create_compiler(doc.template_id, work_typ, work_dir)
         with _COMPILER_LOCK:
-            pdf_bytes = compiler.compile(
-                format="pdf",
+            return compiler.compile(
+                format=output_format,
                 sys_inputs={"article_json": article_json_str},
             )
     except Exception as exc:
-        logger.warning(f"Fehler im Typst.Compiler-Cache für PDF ({exc}), Fallback auf Einmal-Kompilierung.")
+        logger.warning(
+            f"Fehler im Typst.Compiler-Cache für {output_format.upper()} ({exc}), Fallback auf Einmal-Kompilierung."
+        )
         invalidate_compiler_cache(doc.template_id)
-        pdf_bytes = typst.compile(
+        return typst.compile(
             input=work_typ,
             root=work_dir,
+            format=output_format,
             font_paths=_get_font_paths(),
             sys_inputs={"article_json": article_json_str},
         )
 
+
+def render_pdf_bytes(doc: ArticleDocument) -> bytes:
+    """Kompiliert ein ArticleDocument mit der aktuellsten Typst-Engine zu einem PDF (bytes)."""
+    pdf_bytes = _compile_typst(doc, "pdf")
     if isinstance(pdf_bytes, list):
         return pdf_bytes[0]
     return pdf_bytes
@@ -555,33 +585,8 @@ def render_preview_svg_pages(doc: ArticleDocument) -> list[str]:
     Kompiliert ein ArticleDocument in-memory zu einer Liste von SVG-Strings (eine SVG pro PDF-Seite).
     Nutzt eine langlebige `typst.Compiler`-Instanz mit persistentem Rust-Cache für maximale Geschwindigkeit.
     """
-    work_typ, work_dir = _ensure_typst_workspace(doc.template_id)
-    payload = _prepare_typst_payload(doc, work_dir)
-    article_json_str = json.dumps(payload, ensure_ascii=False)
-
-    try:
-        compiler = _get_or_create_compiler(doc.template_id, work_typ, work_dir, article_json_str)
-        with _COMPILER_LOCK:
-            compiled = compiler.compile(
-                format="svg",
-                sys_inputs={"article_json": article_json_str},
-            )
-    except Exception as exc:
-        logger.warning(f"Fehler im Typst.Compiler-Cache für SVG ({exc}), Fallback auf Einmal-Kompilierung.")
-        invalidate_compiler_cache(doc.template_id)
-        compiled = typst.compile(
-            input=work_typ,
-            root=work_dir,
-            format="svg",
-            font_paths=_get_font_paths(),
-            sys_inputs={"article_json": article_json_str},
-        )
-
-    if isinstance(compiled, bytes):
-        pages_bytes = [compiled]
-    else:
-        pages_bytes = list(compiled)
-
+    compiled = _compile_typst(doc, "svg")
+    pages_bytes = [compiled] if isinstance(compiled, bytes) else list(compiled)
     return [p.decode("utf-8") for p in pages_bytes]
 
 
@@ -674,12 +679,7 @@ def render_web_html(doc: ArticleDocument) -> str:
     payload = _prepare_common_article_payload(doc)
     raw_blocks = payload.get("blocks", [])
     payload["auto_footnotes"] = _transform_web_inline_footnotes(raw_blocks)
-    figure_aids = {
-        blk.get("asset_id", "")
-        for blk in raw_blocks
-        if blk.get("type") == "figure" and blk.get("asset_id")
-    }
-    asset_records = get_assets_by_ids(figure_aids) if figure_aids else {}
+    asset_records = _fetch_doc_asset_records(raw_blocks)
     asset_uri_cache: dict[str, str] = {}
     for blk in raw_blocks:
         if blk.get("type") in ("richtext", "callout"):
@@ -698,28 +698,22 @@ def render_web_html(doc: ArticleDocument) -> str:
                         asset_uri_cache[asset_id] = ""
                 data_uri = asset_uri_cache[asset_id]
             blk["data_uri"] = data_uri
-        elif blk.get("type") == "db_chart":
-            svg_markup = generate_db_chart_svg(
+        elif blk.get("type") in ("db_chart", "custom_chart"):
+            svg_markup = render_block_chart_svg(
                 blk,
                 embed_fonts=True,
                 max_date=doc.metadata.publication_date,
             )
             b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
             blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
-        elif blk.get("type") == "custom_chart":
-            svg_markup = generate_custom_chart_svg(
-                blk,
-                embed_fonts=True,
-            )
-            b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
-            blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
 
     payload["blocks"] = _group_blocks_into_render_items(payload.get("blocks", []))
 
-    logo_data_uri = ""
-    if LUKB_LOGO_SVG_PATH.exists():
+    global _LOGO_DATA_URI_CACHE
+    if _LOGO_DATA_URI_CACHE is None and LUKB_LOGO_SVG_PATH.exists():
         b64_logo = base64.b64encode(LUKB_LOGO_SVG_PATH.read_bytes()).decode("ascii")
-        logo_data_uri = f"data:image/svg+xml;base64,{b64_logo}"
+        _LOGO_DATA_URI_CACHE = f"data:image/svg+xml;base64,{b64_logo}"
+    logo_data_uri = _LOGO_DATA_URI_CACHE or ""
 
     tpl_name = f"{doc.template_id}/template.html.j2"
     try:
@@ -753,9 +747,15 @@ def _set_docx_cell_margins(cell, top: int = 120, bottom: int = 120, left: int = 
 
 
 def _svg_to_png_bytes(svg_markup: str, ppi: float = 144.0) -> bytes | None:
-    """Konvertiert SVG-Vektorgrafiken via temporäre Typst-Kompilierung in druckscharfe PNGs für Word."""
+    """Konvertiert SVG-Vektorgrafiken via temporäre Typst-Kompilierung in druckscharfe PNGs für Word (mit LRU-Cache)."""
     if not svg_markup or not svg_markup.strip():
         return None
+    cache_key = f"{ppi}:{hashlib.sha256(svg_markup.encode('utf-8')).hexdigest()}"
+    with _SVG_PNG_CACHE_LOCK:
+        cached = _SVG_PNG_CACHE.get(cache_key)
+        if cached is not None:
+            _SVG_PNG_CACHE.move_to_end(cache_key)
+            return cached
     try:
         with tempfile.TemporaryDirectory(prefix="lukb_svg2png_") as td:
             tdp = Path(td)
@@ -766,12 +766,21 @@ def _svg_to_png_bytes(svg_markup: str, ppi: float = 144.0) -> bytes | None:
                 '#set page(width: auto, height: auto, margin: 0pt)\n#image("chart.svg")',
                 encoding="utf-8",
             )
-            return typst.compile(
+            png_bytes = typst.compile(
                 typ_path,
                 format="png",
                 ppi=ppi,
                 font_paths=_get_font_paths(),
             )
+            if isinstance(png_bytes, list):
+                png_bytes = png_bytes[0]
+            if png_bytes:
+                with _SVG_PNG_CACHE_LOCK:
+                    _SVG_PNG_CACHE[cache_key] = png_bytes
+                    _SVG_PNG_CACHE.move_to_end(cache_key)
+                    while len(_SVG_PNG_CACHE) > _SVG_PNG_CACHE_MAX_SIZE:
+                        _SVG_PNG_CACHE.popitem(last=False)
+            return png_bytes
     except Exception:
         return None
 
@@ -864,16 +873,21 @@ class _DocxHtmlRunParser(HTMLParser):
             run.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
 
 
+_DOCX_BLOCK_SPLIT_RE = re.compile(r"<(p|li)([^>]*)>(.*?)</\1>", re.DOTALL | re.IGNORECASE)
+
+
 def _add_html_runs_to_paragraph(
     paragraph,
     html_fragment: str,
     footnote_collector: list[dict[str, str]] | None = None,
+    already_sanitized: bool = False,
 ) -> None:
     if not html_fragment:
         return
     parser = _DocxHtmlRunParser(paragraph, footnote_collector=footnote_collector)
     try:
-        parser.feed(sanitize_richtext_html(html_fragment))
+        frag = html_fragment if already_sanitized else sanitize_richtext_html(html_fragment)
+        parser.feed(frag)
         parser.close()
     except Exception:
         # Fallback auf einfaches unescaping falls fehlerhaftes HTML
@@ -891,11 +905,10 @@ def _render_richtext_into_docx(
         p = doc_or_cell.add_paragraph()
         p.paragraph_format.space_after = Pt(6)
         p.paragraph_format.line_spacing = 1.15
-        _add_html_runs_to_paragraph(p, sanitized, footnote_collector=footnote_collector)
+        _add_html_runs_to_paragraph(p, sanitized, footnote_collector=footnote_collector, already_sanitized=True)
         return
 
-    pattern = re.compile(r"<(p|li)([^>]*)>(.*?)</\1>", re.DOTALL | re.IGNORECASE)
-    matches = list(pattern.finditer(sanitized))
+    matches = list(_DOCX_BLOCK_SPLIT_RE.finditer(sanitized))
     if not matches:
         plain = re.sub(r"<[^>]+>", " ", sanitized).strip()
         p = doc_or_cell.add_paragraph()
@@ -910,12 +923,12 @@ def _render_richtext_into_docx(
             p = doc_or_cell.add_paragraph(style="List Bullet")
             p.paragraph_format.space_after = Pt(3)
             p.paragraph_format.line_spacing = 1.15
-            _add_html_runs_to_paragraph(p, inner, footnote_collector=footnote_collector)
+            _add_html_runs_to_paragraph(p, inner, footnote_collector=footnote_collector, already_sanitized=True)
         else:
             p = doc_or_cell.add_paragraph()
             p.paragraph_format.space_after = Pt(6)
             p.paragraph_format.line_spacing = 1.15
-            _add_html_runs_to_paragraph(p, inner, footnote_collector=footnote_collector)
+            _add_html_runs_to_paragraph(p, inner, footnote_collector=footnote_collector, already_sanitized=True)
 
 
 def _get_cached_logo_png_bytes() -> bytes | None:
@@ -1041,12 +1054,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
     # 5. Inhaltsblöcke rendern
     common_payload = _prepare_common_article_payload(doc_model)
     raw_common_blocks = common_payload.get("blocks", [])
-    docx_figure_aids = {
-        b.get("asset_id", "")
-        for b in raw_common_blocks
-        if b.get("type") == "figure" and b.get("asset_id")
-    }
-    docx_asset_records = get_assets_by_ids(docx_figure_aids) if docx_figure_aids else {}
+    docx_asset_records = _fetch_doc_asset_records(raw_common_blocks)
     grouped_blocks = _group_blocks_into_render_items(raw_common_blocks)
     docx_inline_footnotes: list[dict[str, str]] = []
     docx_has_footnotes_block = False
@@ -1122,17 +1130,11 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 r.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
 
             img_bytes = None
-            if btype == "db_chart":
-                svg_code = generate_db_chart_svg(
+            if btype in ("db_chart", "custom_chart"):
+                svg_code = render_block_chart_svg(
                     blk,
                     embed_fonts=False,
                     max_date=doc_model.metadata.publication_date,
-                )
-                img_bytes = _svg_to_png_bytes(svg_code, ppi=144.0)
-            elif btype == "custom_chart":
-                svg_code = generate_custom_chart_svg(
-                    blk,
-                    embed_fonts=False,
                 )
                 img_bytes = _svg_to_png_bytes(svg_code, ppi=144.0)
             else:

@@ -352,7 +352,7 @@ def publish_article(
         try:
             from database.repository import (
                 get_active_published_snapshots_metadata,
-                get_published_snapshot_blobs,
+                get_published_snapshot_blobs_by_ids,
             )
 
             active_snaps = get_active_published_snapshots_metadata()
@@ -363,7 +363,8 @@ def publish_article(
                     if art_key not in active_ids and art_key != doc.id:
                         manifest["articles"].pop(art_key, None)
 
-                # Fehlende aktive Artikel aus der DB ins Manifest und auf die Platte nachziehen
+                missing_blobs_needed: list[tuple[dict[str, Any], Path, bool, bool]] = []
+                # Fehlende aktive Artikel aus der DB ins Manifest aufnehmen & lokale Lücken sammeln
                 for snap in active_snaps:
                     snap_id = snap.get("article_id")
                     if not snap_id:
@@ -376,23 +377,30 @@ def publish_article(
                         meta["has_pdf"] = bool(snap.get("has_pdf"))
                         manifest["articles"][snap_id] = meta
 
-                    # Sicherstellen, dass HTML und PDF auf der Festplatte vorhanden sind;
-                    # Blobs werden nur nachgeladen, wenn die Dateien lokal fehlen.
                     snap_slug = snap.get("slug")
                     if snap_slug:
                         snap_dir = dist_dir / "articles" / snap_slug
                         html_missing = not (snap_dir / "index.html").exists()
                         pdf_missing = bool(snap.get("has_pdf")) and not (snap_dir / f"{snap_slug}.pdf").exists()
                         if html_missing or pdf_missing:
-                            blobs = get_published_snapshot_blobs(snap_id)
-                            if blobs:
-                                snap_dir.mkdir(parents=True, exist_ok=True)
-                                if html_missing:
-                                    (snap_dir / "index.html").write_text(
-                                        blobs.get("html_content") or "", encoding="utf-8"
-                                    )
-                                if pdf_missing and blobs.get("pdf_bytes"):
-                                    (snap_dir / f"{snap_slug}.pdf").write_bytes(blobs["pdf_bytes"])
+                            missing_blobs_needed.append((snap, snap_dir, html_missing, pdf_missing))
+
+                if missing_blobs_needed:
+                    blobs_by_id = get_published_snapshot_blobs_by_ids(
+                        {s["article_id"] for s, _, _, _ in missing_blobs_needed}
+                    )
+                    for snap, snap_dir, html_missing, pdf_missing in missing_blobs_needed:
+                        blobs = blobs_by_id.get(snap["article_id"])
+                        if not blobs:
+                            continue
+                        snap_slug = snap["slug"]
+                        snap_dir.mkdir(parents=True, exist_ok=True)
+                        if html_missing:
+                            (snap_dir / "index.html").write_text(
+                                blobs.get("html_content") or "", encoding="utf-8"
+                            )
+                        if pdf_missing and blobs.get("pdf_bytes"):
+                            (snap_dir / f"{snap_slug}.pdf").write_bytes(blobs["pdf_bytes"])
         except Exception as exc:
             logger.warning(f"Abgleich mit MSSQL-Snapshots während Publikation übersprungen: {exc}")
 
