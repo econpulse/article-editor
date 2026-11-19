@@ -42,7 +42,7 @@
 )
 
 // Seite 1 Dokumenten-Kopf (Standard LUKB Investment Fokus)
-#render-standard-header(meta, title-below: 3em, lead-below: 3em)
+#render-standard-header(meta, title-below: 2.2em, lead-below: 2.2em)
 
 // Zweispaltiger Hauptteil mit O(N)-Spaltenausgleich und hybriden Full-Width-Floats
 #render-two-column-body(

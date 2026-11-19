@@ -21,6 +21,12 @@ _DANGEROUS_SELF_RE = re.compile(
 )
 _HTML_COMMENTS_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
+_EMPTY_P_OR_BR = r"(?:<p\b[^>]*>(?:\s|&nbsp;|<br\s*/?>)*</p>|<br\s*/?>|\s|&nbsp;)"
+_LEADING_EMPTY_RE = re.compile(rf"^(?:{_EMPTY_P_OR_BR})+", re.IGNORECASE)
+_TRAILING_EMPTY_RE = re.compile(rf"(?:{_EMPTY_P_OR_BR})+$", re.IGNORECASE)
+_P_LEADING_BR = re.compile(r"(<p\b[^>]*>)(?:\s|&nbsp;|<br\s*/?>)+", re.IGNORECASE)
+_P_TRAILING_BR = re.compile(r"(?:\s|&nbsp;|<br\s*/?>)+(</p>)", re.IGNORECASE)
+
 
 @functools.lru_cache(maxsize=4096)
 def sanitize_richtext_html(html_str: str) -> str:
@@ -31,6 +37,8 @@ def sanitize_richtext_html(html_str: str) -> str:
     - Bewahrt semantische Auszeichnungen (`<strong>`, `<b>`, `<em>`, `<i>`, `<u>`, `<sub>`, `<sup>`,
       `<ul>`, `<ol>`, `<li>`, `<br>`, `<a href="...">`, `<span class="glossary-term" data-tooltip="...">`,
       `<footnote>`).
+    - Entfernt überflüssige leere Absätze und führende/nachgestellte `<br>`-Zeilenumbrüche, um
+      Typst-Syntaxfehler durch verwaiste Zeilenumbrüche am Blockanfang/-ende zu verhindern.
     """
     if not html_str or not html_str.strip():
         return ""
@@ -43,6 +51,18 @@ def sanitize_richtext_html(html_str: str) -> str:
     # Entferne leere verschachtelte <p><p>-Dopplungen
     cleaned = re.sub(r"<p>\s*<p>", "<p>", cleaned, flags=re.IGNORECASE)
     cleaned = re.sub(r"</p>\s*</p>", "</p>", cleaned, flags=re.IGNORECASE)
+
+    # Entferne führende und nachgestellte <br>-Tags innerhalb von Absätzen
+    cleaned = _P_LEADING_BR.sub(r"\1", cleaned)
+    cleaned = _P_TRAILING_BR.sub(r"\1", cleaned)
+
+    # Entferne führende und nachgestellte leere Absätze und standalone <br>-Tags
+    prev = None
+    while prev != cleaned:
+        prev = cleaned
+        cleaned = _LEADING_EMPTY_RE.sub("", cleaned)
+        cleaned = _TRAILING_EMPTY_RE.sub("", cleaned)
+
     return cleaned.strip()
 
 
@@ -136,7 +156,16 @@ class _HtmlToTypstParser(HTMLParser):
         word_count = self.current_word_count
         self.current_word_count = 0
 
-        if not text_content:
+        # Bereinige führende und nachgestellte Typst-Zeilenumbrüche (\ bzw. \\\n) und Whitespace.
+        # Ein nachgestellter Backslash vor dem Blockende "]" würde das schliessende "]" escapen
+        # ("\]") und in Typst sofort zu einem fatalen "unclosed delimiter"-Kompilierungsfehler führen.
+        # Ebenso wird ein Absatz, der ausschliesslich aus Zeilenumbrüchen oder Non-Breaking-Spaces
+        # besteht, vollständig verworfen.
+        text_content = re.sub(r"(\\+\s*)+$", "", text_content).strip()
+        text_content = re.sub(r"^(\s*\\+)+", "", text_content).strip()
+
+        stripped_check = text_content.replace("\\", "").replace("\xa0", "").strip()
+        if not text_content or not stripped_check:
             return
 
         # Option A: Absätze unter der Schwelle als unteilbare Blöcke halten
@@ -150,7 +179,9 @@ class _HtmlToTypstParser(HTMLParser):
         self.flush_open_inline_tags()
         list_content = "".join(self.list_parts).strip()
         self.list_parts.clear()
-        if list_content:
+        list_content = re.sub(r"(\\+\s*)+$", "", list_content).strip()
+        stripped_check = list_content.replace("\\", "").replace("\xa0", "").strip()
+        if list_content and stripped_check:
             self.blocks.append(list_content)
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -254,7 +285,8 @@ class _HtmlToTypstParser(HTMLParser):
             self._flush_current_paragraph()
         if self.list_parts:
             self._flush_current_list()
-        return "\n\n".join(self.blocks).strip()
+        valid_blocks = [b.strip() for b in self.blocks if b and b.strip()]
+        return "\n\n".join(valid_blocks).strip()
 
 
 @functools.lru_cache(maxsize=4096)
@@ -275,7 +307,13 @@ def html_to_typst(
         result = parser.finalize()
     except Exception:
         plain = re.sub(r"<[^>]+>", " ", sanitized)
-        escaped_plain = escape_typst_text(plain.strip())
+        plain = re.sub(r"(\\+\s*)+$", "", plain).strip()
+        plain = re.sub(r"^(\s*\\+)+", "", plain).strip()
+        escaped_plain = escape_typst_text(plain)
+        escaped_plain = re.sub(r"(\\+\s*)+$", "", escaped_plain).strip()
+        escaped_plain = re.sub(r"^(\s*\\+)+", "", escaped_plain).strip()
+        if not escaped_plain or not escaped_plain.replace("\\", "").replace("\xa0", "").strip():
+            return ""
         if 0 < keep_together_max_words and len(escaped_plain.split()) <= keep_together_max_words:
             return f"#block(breakable: false)[{escaped_plain}]"
         return escaped_plain

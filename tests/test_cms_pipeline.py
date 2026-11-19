@@ -2211,6 +2211,82 @@ def test_pdfjs_preview_pipeline():
     assert preview_already_current is True, "Wenn Vorschau bereits aktuell ist, wird Doppel-Rendering übersprungen"
 
 
+def test_richtext_empty_lines_and_template_spacing():
+    """
+    Testet:
+    1. Header-Abstände: investment_focus und investment_tufte nutzen identisch kompakte Abstände
+       (title-below: 2.2em, lead-below: 2.2em; HTML: 1.5em / 1.8em).
+    2. Typst-Preview-Robustheit: RichText-Blöcke mit führenden oder nachgestellten Leerzeilen /
+       Zeilenumbrüchen (z.B. <p><br></p>, <br>, <p>Text<br></p>) kompilieren fehlerfrei ohne Typst-Syntaxfehler.
+    """
+    from schemas.article import ArticleDocument, ArticleMetadata, RichTextBlock
+    from services.html_to_typst import html_to_typst
+    from services.renderer import render_pdf_bytes, render_web_html
+
+    # 1. Template-Kopfzeilen-Abstände überprüfen
+    inv_focus_typ = (ROOT / "templates" / "investment_focus" / "template.typ").read_text(encoding="utf-8")
+    inv_tufte_typ = (ROOT / "templates" / "investment_tufte" / "template.typ").read_text(encoding="utf-8")
+    assert "title-below: 2.2em, lead-below: 2.2em" in inv_focus_typ
+    assert "title-below: 2.2em, lead-below: 2.2em" in inv_tufte_typ
+
+    base_html = (ROOT / "templates" / "_common" / "base_article.html.j2").read_text(encoding="utf-8")
+    assert "margin: 0 0 1.5em 0;" in base_html
+    assert "margin: 0 0 1.8em 0;" in base_html
+
+    # 2. HTML to Typst mit führenden/nachgestellten Umbrüchen
+    problematic_htmls = [
+        "<p><br></p><p>Geldpolitik der SNB im Fokus.</p>",
+        "<p>Geldpolitik der SNB im Fokus.</p><p><br></p>",
+        "<p><br>Geldpolitik der SNB im Fokus.</p>",
+        "<p>Geldpolitik der SNB im Fokus.<br></p>",
+        "<p>Geldpolitik der SNB im Fokus.<br><br></p>",
+        "<br><p>Geldpolitik der SNB im Fokus.</p>",
+        "<p>Geldpolitik der SNB im Fokus.</p><br>",
+        "<p>&nbsp;</p><p>Geldpolitik der SNB im Fokus.</p>",
+        "<p>Geldpolitik der SNB im Fokus.</p><p>&nbsp;</p>",
+        "<div><br></div><p>Geldpolitik der SNB im Fokus.</p>",
+        "<p>Geldpolitik der SNB im Fokus.</p><div><br></div>",
+        "<p><br></p><p><br></p><p>Geldpolitik der SNB im Fokus.</p><p><br></p>",
+        "<p><br>&nbsp;<br></p><p>Geldpolitik der SNB im Fokus.</p>",
+        "<p><br></p>",
+        "<br>",
+        "<p>&nbsp;</p>",
+        "<p>Absatz 1</p><p><br></p><p>Absatz 2</p>",
+    ]
+
+    for h in problematic_htmls:
+        typ_code = html_to_typst(h)
+        # Darf niemals auf ungepaartes \[ oder \ vor ] enden
+        assert not typ_code.endswith("\\]"), f"Typst-Code darf nicht mit unescaped Backslash vor Klammer enden: {typ_code}"
+        assert "\\\n]" not in typ_code
+        assert "\\ ]" not in typ_code
+
+    # 3. Vollständiges PDF-Rendering für beide Templates mit Leerzeilen-Blöcken
+    for tpl_id in ("investment_focus", "investment_tufte"):
+        doc = ArticleDocument(
+            id=f"art-empty-lines-{tpl_id}",
+            template_id=tpl_id,
+            metadata=ArticleMetadata(
+                title="Leerzeilen Robustheitstest",
+                lead="Ein Testartikel zur Validierung robuster Typst-Vorschau.",
+            ),
+            blocks=[
+                RichTextBlock(html="<p><br></p><p>Erster Absatz mit führendem Leerzeichen.</p>"),
+                RichTextBlock(html="<p>Zweiter Absatz mit nachgestelltem Zeilenumbruch.<br></p>"),
+                RichTextBlock(html="<p><br></p>"),  # Komplett leerer Block
+                RichTextBlock(html="<br><p>Dritter Absatz mit Break-Tag.<br><br></p>"),
+                RichTextBlock(html="<p>Absatz A</p><p><br></p><p>Absatz B</p>"),
+            ],
+        )
+        pdf = render_pdf_bytes(doc)
+        assert pdf.startswith(b"%PDF"), f"Typst PDF-Kompilierung für {tpl_id} muss gültiges PDF liefern"
+        assert len(pdf) > 1000
+
+        html = render_web_html(doc)
+        assert "Erster Absatz" in html
+        assert "Zweiter Absatz" in html
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -2238,6 +2314,7 @@ if __name__ == "__main__":
     test_priority_3_modular_js_footnotes_and_html_hardening()
     test_typst_pdf_outline_hierarchy()
     test_pdfjs_preview_pipeline()
+    test_richtext_empty_lines_and_template_spacing()
     test_full_cms_workflow()
     import tests.test_custom_chart as tcc
     tcc.test_parsing_helpers()

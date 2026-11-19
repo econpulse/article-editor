@@ -162,7 +162,7 @@
   ]
 }
 
-#let render-standard-header(meta, title-below: 3em, lead-below: 3em) = {
+#let render-standard-header(meta, title-below: 2.2em, lead-below: 2.2em) = {
   v(-0.75cm)
   block(
     width: 100%,
@@ -385,7 +385,9 @@
     #set text(size: body-size)
     #set par(spacing: 1.0em)
     #set list(spacing: 0.65em)
-    #eval(markup-str, mode: "markup")
+    #if markup-str != none and markup-str.trim() != "" [
+      #eval(markup-str, mode: "markup")
+    ]
   ]
 }
 
@@ -882,8 +884,10 @@
     let out-lvl = blk.at("outline_level", default: none)
     render-heading(blk.level, blk.text, outline-level: out-lvl, below-space: heading-below)
   } else if blk.type == "richtext" {
-    eval(blk.typst_markup, mode: "markup")
-    parbreak()
+    if blk.typst_markup != none and blk.typst_markup.trim() != "" {
+      eval(blk.typst_markup, mode: "markup")
+      parbreak()
+    }
   } else if blk.type == "callout" {
     render-callout(blk.title, blk.typst_markup, accent-color: callout-accent)
   } else if blk.type in ("figure", "db_chart", "custom_chart") {
@@ -1376,8 +1380,10 @@
       below-space: 0.65em,
     )
   } else if blk.type == "richtext" {
-    eval(blk.typst_markup, mode: "markup")
-    parbreak()
+    if blk.typst_markup != none and blk.typst_markup.trim() != "" {
+      eval(blk.typst_markup, mode: "markup")
+      parbreak()
+    }
   } else if blk.type == "callout" {
     render-callout(blk.title, blk.typst_markup, accent-color: lukb-cyan, title-size: 9.5pt, body-size: 8.8pt)
   } else if blk.type in ("figure", "db_chart", "custom_chart") {
