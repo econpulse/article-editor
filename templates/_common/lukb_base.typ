@@ -405,11 +405,59 @@
   }
 }
 
+#let render-box-title-subtitle(
+  title,
+  subtitle,
+  title-sz,
+  sub-sz,
+  is-margin: false,
+  title-below-with-sub: auto,
+  title-below-no-sub: 0pt,
+  sub-below: 0pt,
+  sticky-blocks: false,
+) = {
+  let eff-title-below-sub = if title-below-with-sub == auto { if is-margin { 4.5pt } else { 5.5pt } } else { title-below-with-sub }
+  if title != "" [
+    #block(sticky: sticky-blocks, breakable: false, above: 0pt, below: if subtitle != "" { eff-title-below-sub } else { title-below-no-sub })[
+      #set par(leading: 0.28em, justify: false)
+      #text(font: font-heading, weight: "medium", size: title-sz, fill: lukb-navy)[#title]
+    ]
+  ]
+  if subtitle != "" [
+    #block(sticky: sticky-blocks, breakable: false, above: 0pt, below: sub-below)[
+      #set par(leading: 0.28em, justify: false)
+      #text(font: font-body, weight: "light", size: sub-sz, fill: lukb-muted)[#subtitle]
+    ]
+  ]
+}
+
+#let render-box-source(source, is-margin: false, with-border: false, empty-bottom: false) = {
+  let top-pad = if source != "" { if is-margin { 0.5em } else { 0.55em } } else { 0pt }
+  let bot-pad = if is-margin { 5pt } else { 6pt }
+  if with-border {
+    block(
+      width: 100%,
+      breakable: false,
+      stroke: (bottom: 0.6pt + lukb-border),
+      inset: (top: top-pad, bottom: bot-pad),
+      above: 0pt,
+      below: 0pt,
+    )[
+      #if source != "" [
+        #text(font: font-body, weight: "light", size: if is-margin { 6.8pt } else { 7.5pt }, fill: lukb-muted)[#source]
+      ]
+    ]
+  } else if source != "" [
+    #block(width: 100%, breakable: false, above: top-pad, below: 0pt)[
+      #text(font: font-body, weight: "light", size: if is-margin { 6.8pt } else { 7.5pt }, fill: lukb-muted)[#source]
+    ]
+  ]
+}
+
 #let render-figure-box(blk, is-margin: false, allow-float: true) = {
   let is-floating = allow-float and (not is-margin) and (blk.at("layout", default: "column") == "full") and (not blk.at("_inline_full", default: false))
   let title-sz = if is-margin { 8.8pt } else { 10pt }
   let sub-sz = if is-margin { 7.6pt } else { 8.3pt }
-  let src-sz = if is-margin { 6.8pt } else { 7.5pt }
   let img-path = resolve-asset-path(blk.at("resolved_image", default: ""))
 
   let fig-box = block(
@@ -420,18 +468,16 @@
     above: if is-floating { 0pt } else if is-margin { 0.4em } else { 2.0em },
     below: if is-floating { 0pt } else if is-margin { 0.6em } else { 1.1em }
   )[
-    #if blk.title != "" [
-      #block(sticky: true, breakable: false, above: 0pt, below: if blk.subtitle != "" { if is-margin { 4.5pt } else { 5.5pt } } else { if is-margin { 5pt } else { 6pt } })[
-        #set par(leading: 0.28em, justify: false)
-        #text(font: font-heading, weight: "medium", size: title-sz, fill: lukb-navy)[#blk.title]
-      ]
-    ]
-    #if blk.subtitle != "" [
-      #block(sticky: true, breakable: false, above: 0pt, below: if is-margin { 5pt } else { 6pt })[
-        #set par(leading: 0.28em, justify: false)
-        #text(font: font-body, weight: "light", size: sub-sz, fill: lukb-muted)[#blk.subtitle]
-      ]
-    ]
+    #render-box-title-subtitle(
+      blk.title,
+      blk.subtitle,
+      title-sz,
+      sub-sz,
+      is-margin: is-margin,
+      title-below-no-sub: if is-margin { 5pt } else { 6pt },
+      sub-below: if is-margin { 5pt } else { 6pt },
+      sticky-blocks: true,
+    )
     #if img-path != "" [
       #align(center)[
         #image(img-path, width: 100%)
@@ -448,11 +494,7 @@
         ]
       ]
     ]
-    #if blk.source != "" [
-      #block(width: 100%, breakable: false, above: if is-margin { 0.5em } else { 0.55em }, below: 0pt)[
-        #text(font: font-body, weight: "light", size: src-sz, fill: lukb-muted)[#blk.source]
-      ]
-    ]
+    #render-box-source(blk.source, is-margin: is-margin)
   ]
 
   if is-floating {
@@ -510,24 +552,32 @@
       above: 0pt,
       below: if blk.title != "" or blk.subtitle != "" { if is-factsheet { 3pt } else if is-margin { 5pt } else { 6pt } } else { 2pt }
     )[
-      #if blk.title != "" [
-        #block(above: 0pt, below: if blk.subtitle != "" { if is-margin { 4pt } else { 5.5pt } } else { 0pt })[
-          #set par(leading: 0.28em, justify: false)
-          #text(font: font-heading, weight: "medium", size: title-sz, fill: lukb-navy)[#blk.title]
-        ]
-      ]
-      #if blk.subtitle != "" [
-        #block(above: 0pt, below: 0pt)[
-          #set par(leading: 0.28em, justify: false)
-          #text(font: font-body, weight: "light", size: sub-sz, fill: lukb-muted)[#blk.subtitle]
-        ]
-      ]
+      #render-box-title-subtitle(
+        blk.title,
+        blk.subtitle,
+        title-sz,
+        sub-sz,
+        is-margin: is-margin,
+        title-below-with-sub: if is-margin { 4pt } else { 5.5pt },
+      )
     ]
 
     #set table.cell(breakable: false)
     #let show-header = blk.at("show_header", default: true)
     #let highlight-last = blk.at("highlight_last_row", default: false)
     #let main-rows-count = if is-long-table and has-source and rows.len() > 0 { rows.len() - 1 } else { rows.len() }
+    #let render-row-cells(row-dict, is-total) = cols.map(c => {
+      let cell-val = row-dict.at(c.field, default: "")
+      let cell-justify = (c.align == "justify")
+      [
+        #set par(justify: cell-justify)
+        #(if is-total {
+          text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
+        } else {
+          text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
+        })
+      ]
+    })
 
     #table(
       columns: col-widths,
@@ -578,18 +628,7 @@
       }),
       ..for (r-idx, row-dict) in rows.slice(0, main-rows-count).enumerate() {
         let is-total = highlight-last and (r-idx == rows.len() - 1)
-        cols.map(c => {
-          let cell-val = row-dict.at(c.field, default: "")
-          let cell-justify = (c.align == "justify")
-          [
-            #set par(justify: cell-justify)
-            #(if is-total {
-              text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
-            } else {
-              text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
-            })
-          ]
-        })
+        render-row-cells(row-dict, is-total)
       },
       ..(if is-long-table and has-source and rows.len() > 0 {
         let last-idx = rows.len() - 1
@@ -614,29 +653,9 @@
                   ..(if is-tufte-style { (left: none, right: none) } else { (:) })
                 ),
                 fill: (x, y) => last-bg,
-                ..cols.map(c => {
-                  let cell-val = last-row.at(c.field, default: "")
-                  let cell-justify = (c.align == "justify")
-                  [
-                    #set par(justify: cell-justify)
-                    #(if is-total {
-                      text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
-                    } else {
-                      text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
-                    })
-                  ]
-                })
+                ..render-row-cells(last-row, is-total)
               )
-              #block(
-                width: 100%,
-                breakable: false,
-                stroke: (bottom: 0.6pt + lukb-border),
-                inset: (top: if is-margin { 0.5em } else { 0.55em }, bottom: if is-margin { 5pt } else { 6pt }),
-                above: 0pt,
-                below: 0pt
-              )[
-                #text(font: font-body, weight: "light", size: if is-margin { 6.8pt } else { 7.5pt }, fill: lukb-muted)[#blk.source]
-              ]
+              #render-box-source(blk.source, is-margin: is-margin, with-border: true)
             ]
           ),
         )
@@ -646,18 +665,7 @@
     )
 
     #if not (is-long-table and has-source and rows.len() > 0) [
-      #block(
-        width: 100%,
-        breakable: false,
-        stroke: (bottom: 0.6pt + lukb-border),
-        inset: (top: if blk.source != "" { if is-margin { 0.5em } else { 0.55em } } else { 0pt }, bottom: if is-margin { 5pt } else { 6pt }),
-        above: 0pt,
-        below: 0pt
-      )[
-        #if blk.source != "" [
-          #text(font: font-body, weight: "light", size: if is-margin { 6.8pt } else { 7.5pt }, fill: lukb-muted)[#blk.source]
-        ]
-      ]
+      #render-box-source(blk.source, is-margin: is-margin, with-border: true)
     ]
   ]
 
@@ -776,34 +784,28 @@
       #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-blue)[#title]
       #v(5pt)
     ]
+    #let render-glossary-entry(item) = {
+      let term = item.at("term", default: "")
+      let def = item.at("definition", default: "")
+      [
+        #set par(leading: 0.28em, justify: false)
+        #text(font: font-heading, weight: "medium", size: 7.8pt, fill: lukb-navy)[#term]
+        #h(3pt)
+        #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-muted)[—]
+        #h(3pt)
+        #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-text)[#def]
+      ]
+    }
     #if two-columns [
       #grid(
         columns: (1fr, 1fr),
         column-gutter: 14pt,
         row-gutter: 4pt,
-        ..items.map(item => [
-          #let term = item.at("term", default: "")
-          #let def = item.at("definition", default: "")
-          #set par(leading: 0.28em, justify: false)
-          #text(font: font-heading, weight: "medium", size: 7.8pt, fill: lukb-navy)[#term]
-          #h(3pt)
-          #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-muted)[—]
-          #h(3pt)
-          #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-text)[#def]
-        ])
+        ..items.map(item => render-glossary-entry(item))
       )
     ] else [
       #for item in items [
-        #let term = item.at("term", default: "")
-        #let def = item.at("definition", default: "")
-        #block(above: 2.5pt, below: 2.5pt)[
-          #set par(leading: 0.28em, justify: false)
-          #text(font: font-heading, weight: "medium", size: 7.8pt, fill: lukb-navy)[#term]
-          #h(3pt)
-          #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-muted)[—]
-          #h(3pt)
-          #text(font: font-body, weight: "light", size: 7.6pt, fill: lukb-text)[#def]
-        ]
+        #block(above: 2.5pt, below: 2.5pt)[#render-glossary-entry(item)]
       ]
     ]
   ]
@@ -872,14 +874,40 @@
 // Zweispaltiger Hauptteil mit O(N)-Spaltenausgleich (für investment_focus & market_flash)
 // ============================================================================
 
+#let get-typst-attr(blk, key, default: "") = blk.at(key + "_typst", default: blk.at(key, default: default))
+
+#let maybe-place-bottom(blk, el, can-float) = {
+  if can-float and blk.at("layout", default: "column") == "full" {
+    place(bottom, scope: "parent", float: true, el)
+  } else {
+    el
+  }
+}
+
+#let render-textbox-container(breakable: true, above: 1.05em, below: 1.05em, body) = block(
+  width: 100%,
+  breakable: breakable,
+  fill: rgb("#EBF3FA"),
+  stroke: 0.6pt + lukb-navy,
+  inset: (x: 10pt, y: 9pt),
+  radius: 2pt,
+  above: above,
+  below: below,
+  body,
+)
+
 #let render-single-block(
   blk,
   in-box: false,
   inline-full: false,
+  is-margin: false,
+  allow-float: true,
+  table-style: "navy",
   callout-accent: lukb-cyan,
   quote-accent: lukb-cyan,
   heading-below: 0.68em,
 ) = {
+  let can-float = allow-float and (not in-box) and (not inline-full)
   if blk.type == "heading" {
     let out-lvl = blk.at("outline_level", default: none)
     render-heading(blk.level, blk.text, outline-level: out-lvl, below-space: heading-below)
@@ -897,7 +925,7 @@
     } else if inline-full {
       bcopy.insert("_inline_full", true)
     }
-    render-figure-box(bcopy)
+    render-figure-box(bcopy, is-margin: is-margin, allow-float: allow-float)
   } else if blk.type == "table" {
     let bcopy = blk
     if in-box {
@@ -905,7 +933,7 @@
     } else if inline-full {
       bcopy.insert("_inline_full", true)
     }
-    render-table-box(bcopy)
+    render-table-box(bcopy, is-margin: is-margin, allow-float: allow-float, style-variant: table-style)
   } else if blk.type == "textbox_group" {
     let has-colbreak = blk.children.any(c => c.type == "colbreak")
     layout(bounds => {
@@ -914,46 +942,25 @@
           #render-single-block(
             child,
             in-box: true,
+            is-margin: is-margin,
+            allow-float: allow-float,
+            table-style: table-style,
             callout-accent: callout-accent,
             quote-accent: quote-accent,
             heading-below: heading-below,
           )
         ]
       ]
-      let box-breakable = block(
-        width: 100%,
-        breakable: true,
-        fill: rgb("#EBF3FA"),
-        stroke: 0.6pt + lukb-navy,
-        inset: (x: 10pt, y: 9pt),
-        radius: 2pt,
-        above: 1.05em,
-        below: 1.05em,
-        inner-content
-      )
+      let box-breakable = render-textbox-container(breakable: true, inner-content)
       // Typografische Regel:
-      // Kurze Boxen (1 Kind-Element und <= 90pt / ca. 3.2cm) ohne manuellen Umbruch werden zusammengehalten,
-      // um Kasten-Fragmente am Spaltenende zu vermeiden.
-      // Mehrteilige Boxen (mehrere Absätze/Überschriften) oder längere Boxen (> 90pt) dürfen
-      // harmonisch über Spalten umbrechen, um grosse Weissraum-Löcher zu verhindern.
+      // Kurze Boxen (1 Kind-Element und <= 90pt / ca. 3.2cm) ohne manuellen Umbruch werden zusammengehalten.
       let is-short-single-box = if blk.children.len() <= 1 {
-        let box-h = measure(box-breakable, width: bounds.width).height
-        box-h <= 90pt
+        measure(box-breakable, width: bounds.width).height <= 90pt
       } else {
         false
       }
       if (not has-colbreak) and is-short-single-box {
-        block(
-          width: 100%,
-          breakable: false,
-          fill: rgb("#EBF3FA"),
-          stroke: 0.6pt + lukb-navy,
-          inset: (x: 10pt, y: 9pt),
-          radius: 2pt,
-          above: 1.05em,
-          below: 1.05em,
-          inner-content
-        )
+        render-textbox-container(breakable: false, inner-content)
       } else {
         box-breakable
       }
@@ -965,48 +972,32 @@
     colbreak()
   } else if blk.type == "quote" {
     let q-box = render-quote-box(
-      blk.at("quote_typst", default: blk.at("quote", default: "")),
-      blk.at("author_typst", default: blk.at("author", default: "")),
-      blk.at("source_typst", default: blk.at("source", default: "")),
+      get-typst-attr(blk, "quote"),
+      get-typst-attr(blk, "author"),
+      get-typst-attr(blk, "source"),
       accent-color: quote-accent,
     )
-    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
-      place(bottom, scope: "parent", float: true, q-box)
-    } else {
-      q-box
-    }
+    maybe-place-bottom(blk, q-box, can-float)
   } else if blk.type == "divider" {
     render-divider(blk.at("style", default: "solid"))
   } else if blk.type == "footnotes" {
     let fn-box = render-footnotes-box(
-      blk.at("title_typst", default: blk.at("title", default: "Anmerkungen & Quellen")),
-      blk.at("items_typst", default: blk.at("items", default: ()))
+      get-typst-attr(blk, "title", default: "Anmerkungen & Quellen"),
+      get-typst-attr(blk, "items", default: ()),
     )
-    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
-      place(bottom, scope: "parent", float: true, fn-box)
-    } else {
-      fn-box
-    }
+    maybe-place-bottom(blk, fn-box, can-float)
   } else if blk.type == "glossary" {
     let g-box = render-glossary-box(
-      blk.at("title_typst", default: blk.at("title", default: "Glossar & Begriffserklärungen")),
-      blk.at("items_typst", default: blk.at("items", default: ()))
+      get-typst-attr(blk, "title", default: "Glossar & Begriffserklärungen"),
+      get-typst-attr(blk, "items", default: ()),
     )
-    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
-      place(bottom, scope: "parent", float: true, g-box)
-    } else {
-      g-box
-    }
+    maybe-place-bottom(blk, g-box, can-float)
   } else if blk.type == "publications" {
     let pub-box = render-publications-box(
-      blk.at("title_typst", default: blk.at("title", default: "Weitere Publikationen")),
-      blk.at("items_typst", default: blk.at("items", default: ()))
+      get-typst-attr(blk, "title", default: "Weitere Publikationen"),
+      get-typst-attr(blk, "items", default: ()),
     )
-    if blk.at("layout", default: "column") == "full" and not in-box and not inline-full {
-      place(bottom, scope: "parent", float: true, pub-box)
-    } else {
-      pub-box
-    }
+    maybe-place-bottom(blk, pub-box, can-float)
   }
 }
 
@@ -1067,7 +1058,7 @@
       if items.len() >= 2 and items.len() <= 24 {
         let item-heights = items.map(it => {
           if it.type == "spacer" {
-            (it.at("height_mm", default: 8) * 2.83465pt)
+            (it.at("height_mm", default: 8) * 1mm)
           } else if it.type == "colbreak" {
             0pt
           } else {
@@ -1181,7 +1172,7 @@
       let is-full = (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "full")
       if not is-full {
         let ih = if it.type == "spacer" {
-          (it.at("height_mm", default: 8) * 2.83465pt)
+          (it.at("height_mm", default: 8) * 1mm)
         } else if it.type == "colbreak" {
           0pt
         } else {
@@ -1347,7 +1338,6 @@
       let prev-row = rows.at(idx)
       let next-row = rows.at(idx + 1)
       let prev-last = if prev-row.left.len() > 0 { prev-row.left.last() } else { none }
-      let next-first = if next-row.left.len() > 0 { next-row.left.at(0) } else { none }
 
       if prev-last != none and prev-last.type == "heading" {
         // Vorherige Zeile endete mit einer Überschrift:
@@ -1397,15 +1387,7 @@
     let has-text = text-children.len() > 0
     let is-split = has-visuals and has-text and (not is-margin)
 
-    block(
-      width: 100%,
-      fill: rgb("#EBF3FA"),
-      stroke: 0.6pt + lukb-navy,
-      inset: (x: 10pt, y: 9pt),
-      radius: 2pt,
-      above: 1.25em,
-      below: 1.25em
-    )[
+    render-textbox-container(above: 1.25em, below: 1.25em)[
       #if is-split and build-rows-fn != none [
         #let box-rows = build-rows-fn(blk.children, main-w: tufte-main-w - 10pt, margin-w: tufte-margin-w - 10pt)
         #let box-gutters = compute-tufte-row-gutters(box-rows)
@@ -1442,9 +1424,9 @@
     // Wird auf Run-Ebene als Seitenumbruch behandelt
   } else if blk.type == "quote" {
     render-quote-box(
-      blk.at("quote_typst", default: blk.at("quote", default: "")),
-      blk.at("author_typst", default: blk.at("author", default: "")),
-      blk.at("source_typst", default: blk.at("source", default: "")),
+      get-typst-attr(blk, "quote"),
+      get-typst-attr(blk, "author"),
+      get-typst-attr(blk, "source"),
       accent-color: lukb-gold,
       is-margin: is-margin,
       tufte-style: true,
@@ -1453,19 +1435,19 @@
     render-divider(blk.at("style", default: "solid"))
   } else if blk.type == "footnotes" {
     render-footnotes-box(
-      blk.at("title_typst", default: blk.at("title", default: "Anmerkungen & Quellen")),
-      blk.at("items_typst", default: blk.at("items", default: ()))
+      get-typst-attr(blk, "title", default: "Anmerkungen & Quellen"),
+      get-typst-attr(blk, "items", default: ()),
     )
   } else if blk.type == "glossary" {
     render-glossary-box(
-      blk.at("title_typst", default: blk.at("title", default: "Glossar & Begriffserklärungen")),
-      blk.at("items_typst", default: blk.at("items", default: ())),
+      get-typst-attr(blk, "title", default: "Glossar & Begriffserklärungen"),
+      get-typst-attr(blk, "items", default: ()),
       two-columns: true,
     )
   } else if blk.type == "publications" {
     render-publications-box(
-      blk.at("title_typst", default: blk.at("title", default: "Weitere Publikationen")),
-      blk.at("items_typst", default: blk.at("items", default: ())),
+      get-typst-attr(blk, "title", default: "Weitere Publikationen"),
+      get-typst-attr(blk, "items", default: ()),
       two-columns: false,
     )
   }

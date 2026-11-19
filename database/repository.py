@@ -1037,7 +1037,7 @@ def _coerce_to_date(val: Any) -> date | None:
         s = val.strip()
         if not s:
             return None
-        from services.custom_chart_generator import parse_flexible_date
+        from services.chart_common import parse_flexible_date
 
         parsed = parse_flexible_date(s)
         if parsed is not None:

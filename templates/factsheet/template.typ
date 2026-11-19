@@ -68,7 +68,17 @@
   footer: render-factsheet-footer(meta)
 )
 
-#let render-factsheet-header-page1(meta) = {
+#let render-factsheet-header(
+  meta,
+  title-text,
+  title-size,
+  title-color,
+  subtitle-text,
+  subtitle-color,
+  kicker-text,
+  kicker-color,
+  border-color,
+) = {
   v(-0.4cm)
   grid(
     columns: (1fr, auto),
@@ -89,21 +99,21 @@
   block(
     width: 100%,
     inset: (bottom: 5pt),
-    stroke: (bottom: 1.5pt + lukb-navy)
+    stroke: (bottom: 1.5pt + border-color)
   )[
     #grid(
       columns: (1fr, auto),
       align: (left + bottom, right + bottom),
       [
-        #text(font: font-heading, weight: "medium", size: 19pt, fill: lukb-navy)[#meta.title]
-        #if meta.subtitle != "" [
+        #text(font: font-heading, weight: "medium", size: title-size, fill: title-color)[#title-text]
+        #if subtitle-text != "" [
           #v(2pt)
-          #text(font: font-body, weight: "light", size: 9pt, fill: lukb-blue)[#meta.subtitle]
+          #text(font: font-body, weight: "light", size: 9pt, fill: subtitle-color)[#subtitle-text]
         ]
       ],
       [
-        #if meta.category != "" [
-          #text(font: font-heading, weight: "medium", size: 8.2pt, fill: lukb-cyan)[#upper(meta.category)]
+        #if kicker-text != "" [
+          #text(font: font-heading, weight: "medium", size: 8.2pt, fill: kicker-color)[#kicker-text]
         ]
       ]
     )
@@ -111,66 +121,23 @@
   v(4pt)
 }
 
-#let render-factsheet-header-page2(meta) = {
-  v(-0.4cm)
-  grid(
-    columns: (1fr, auto),
-    align: (left + horizon, right + horizon),
-    [
-      #image(resolve-asset-path("LUKB-Logo.svg"), height: 25pt)
-    ],
-    [
-      #let pub-str = if meta.at("header_series", default: "") != "" {
-        meta.header_series
-      } else {
-        "Factsheet per " + format-pub-date(meta.publication_date)
-      }
-      #text(font: font-heading, weight: "medium", size: 8.8pt, fill: lukb-muted)[#pub-str]
-    ]
-  )
-  v(6pt)
-  block(
-    width: 100%,
-    inset: (bottom: 5pt),
-    stroke: (bottom: 1.5pt + lukb-cyan)
-  )[
-    #grid(
-      columns: (1fr, auto),
-      align: (left + bottom, right + bottom),
-      [
-        #text(font: font-heading, weight: "medium", size: 17pt, fill: rgb("#009FE3"))[Aus Prinzip nachhaltig]
-        #v(2pt)
-        #text(font: font-body, weight: "light", size: 9pt, fill: lukb-muted)[Nachhaltigkeits- und ESG-Profil des Anlagefonds]
-      ],
-      [
-        #text(font: font-heading, weight: "medium", size: 8.2pt, fill: lukb-navy)[ESG & STEWARDSHIP]
-      ]
-    )
-  ]
-  v(4pt)
-}
+#let render-factsheet-block(blk, callout-accent: lukb-cyan) = render-single-block(
+  blk,
+  in-box: true,
+  is-margin: true,
+  allow-float: true,
+  table-style: "factsheet",
+  callout-accent: callout-accent,
+  heading-below: 0.30em,
+)
 
-#let render-factsheet-block(blk, callout-accent: lukb-cyan) = {
-  if blk.type == "table" {
-    let bcopy = blk
-    bcopy.insert("layout", "column")
-    render-table-box(bcopy, is-margin: true, style-variant: "factsheet")
-  } else if blk.type in ("figure", "db_chart", "custom_chart") {
-    let bcopy = blk
-    bcopy.insert("layout", "column")
-    render-figure-box(bcopy, is-margin: true)
-  } else if blk.type == "heading" {
-    let out-lvl = blk.at("outline_level", default: none)
-    render-heading(blk.level, blk.text, outline-level: out-lvl, below-space: 0.30em)
-  } else if blk.type == "richtext" {
-    eval(blk.typst_markup, mode: "markup")
-    parbreak()
-  } else if blk.type == "callout" {
-    render-callout(blk.title, blk.typst_markup, accent-color: callout-accent)
-  } else {
-    render-single-block(blk, callout-accent: callout-accent, heading-below: 0.30em)
-  }
-}
+#let render-factsheet-columns(left-blocks, right-blocks, left-accent, right-accent) = grid(
+  columns: (1fr, 1fr),
+  column-gutter: 14pt,
+  align: (top + left, top + left),
+  [ #for blk in left-blocks [ #render-factsheet-block(blk, callout-accent: left-accent) ] ],
+  [ #for blk in right-blocks [ #render-factsheet-block(blk, callout-accent: right-accent) ] ],
+)
 
 // Partition blocks into sections by colbreak
 #let sections = ( () , )
@@ -188,23 +155,31 @@
 #let p2-right = if sections.len() > 3 { sections.at(3) } else { () }
 
 // PAGE 1
-#render-factsheet-header-page1(meta)
-#grid(
-  columns: (1fr, 1fr),
-  column-gutter: 14pt,
-  align: (top + left, top + left),
-  [ #for blk in p1-left [ #render-factsheet-block(blk, callout-accent: lukb-cyan) ] ],
-  [ #for blk in p1-right [ #render-factsheet-block(blk, callout-accent: lukb-navy) ] ]
+#render-factsheet-header(
+  meta,
+  meta.title,
+  19pt,
+  lukb-navy,
+  meta.subtitle,
+  lukb-blue,
+  if meta.category != "" { upper(meta.category) } else { "" },
+  lukb-cyan,
+  lukb-navy,
 )
+#render-factsheet-columns(p1-left, p1-right, lukb-cyan, lukb-navy)
 
 #if sections.len() > 2 [
   #pagebreak()
-  #render-factsheet-header-page2(meta)
-  #grid(
-    columns: (1fr, 1fr),
-    column-gutter: 14pt,
-    align: (top + left, top + left),
-    [ #for blk in p2-left [ #render-factsheet-block(blk, callout-accent: lukb-cyan) ] ],
-    [ #for blk in p2-right [ #render-factsheet-block(blk, callout-accent: lukb-blue) ] ]
+  #render-factsheet-header(
+    meta,
+    "Aus Prinzip nachhaltig",
+    17pt,
+    rgb("#009FE3"),
+    "Nachhaltigkeits- und ESG-Profil des Anlagefonds",
+    lukb-muted,
+    "ESG & STEWARDSHIP",
+    lukb-navy,
+    lukb-cyan,
   )
+  #render-factsheet-columns(p2-left, p2-right, lukb-cyan, lukb-blue)
 ]

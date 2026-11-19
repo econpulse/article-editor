@@ -250,7 +250,8 @@
     }
 
     .blk-richtext a::after,
-    .blk-callout a::after {
+    .blk-callout a::after,
+    .pub-item-link::after {
       content: "";
       display: inline-block;
       width: 11px;
@@ -579,11 +580,6 @@
       margin: 2em 0 1.4em 0;
     }
 
-    .blk-richtext + .blk-figure,
-    .blk-figure {
-      margin-top: 2em;
-    }
-
     .blk-box-title {
       font-family: var(--font-heading);
       font-weight: 500;
@@ -727,6 +723,24 @@
     {% endif %}
   {% endmacro %}
 
+  {% macro render_footnotes_block(title, items, extra_classes="", show_optional_num=false) %}
+    <div class="blk-footnotes {{ extra_classes }}">
+      {% if title %}
+        <h2 class="blk-h2 footnotes-title">{{ title }}</h2>
+      {% endif %}
+      <ol class="footnotes-list">
+        {% for item in items %}
+          {% set fn_num = item.num or loop.index %}
+          <li id="fn-{{ fn_num }}" value="{{ fn_num }}">
+            {% if not show_optional_num or item.num %}<span class="footnote-num">[{{ fn_num }}]</span>{% endif %}
+            <span class="footnote-text">{{ item.text }}</span>
+            <a href="#fnref-{{ fn_num }}" class="lukb-fn-backref" title="Zurück zur Textstelle">↩</a>
+          </li>
+        {% endfor %}
+      </ol>
+    </div>
+  {% endmacro %}
+
   {% macro render_single_block(blk, in_box=false) %}
     {% if blk.type == "heading" %}
       {% if blk.level == 1 %}
@@ -839,21 +853,7 @@
       <hr class="blk-divider blk-divider-{{ blk.style or 'solid' }}" />
 
     {% elif blk.type == "footnotes" %}
-      <div class="blk-footnotes {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
-        {% if blk.title %}
-          <h2 class="blk-h2 footnotes-title">{{ blk.title }}</h2>
-        {% endif %}
-        <ol class="footnotes-list">
-          {% for item in blk['items'] %}
-            {% set fn_num = item.num or loop.index %}
-            <li id="fn-{{ fn_num }}" value="{{ fn_num }}">
-              {% if item.num %}<span class="footnote-num">[{{ item.num }}]</span>{% endif %}
-              <span class="footnote-text">{{ item.text }}</span>
-              <a href="#fnref-{{ fn_num }}" class="lukb-fn-backref" title="Zurück zur Textstelle">↩</a>
-            </li>
-          {% endfor %}
-        </ol>
-      </div>
+      {{ render_footnotes_block(blk.title, blk['items'], extra_classes=('blk-full-span' if (blk.layout == 'full' and not in_box) else ''), show_optional_num=true) }}
 
     {% elif blk.type == "glossary" %}
       {% set items = blk['all_items'] or blk['custom_items'] or [] %}
@@ -888,7 +888,6 @@
               {% if item_url %}
                 <a href="{{ item_url }}" target="_blank" rel="noopener noreferrer" class="pub-item-link" title="{{ p_title }}">
                   <span class="pub-title-quote">"{{ p_title }}"</span>{% if p_date %} vom <span class="pub-date-text">{{ p_date }}</span>{% endif %}
-                  <svg class="pub-link-icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
                 </a>
               {% else %}
                 <span class="pub-item-text">
@@ -961,19 +960,7 @@
         {% endfor %}
       {% endblock %}
       {% if article.auto_footnotes and article.auto_footnotes|length > 0 %}
-        <div class="blk-footnotes blk-full-span">
-          <h2 class="blk-h2 footnotes-title">Anmerkungen &amp; Fussnoten</h2>
-          <ol class="footnotes-list">
-            {% for item in article.auto_footnotes %}
-              {% set fn_num = item.num or loop.index %}
-              <li id="fn-{{ fn_num }}" value="{{ fn_num }}">
-                <span class="footnote-num">[{{ fn_num }}]</span>
-                <span class="footnote-text">{{ item.text }}</span>
-                <a href="#fnref-{{ fn_num }}" class="lukb-fn-backref" title="Zurück zur Textstelle">↩</a>
-              </li>
-            {% endfor %}
-          </ol>
-        </div>
+        {{ render_footnotes_block("Anmerkungen & Fussnoten", article.auto_footnotes, extra_classes="blk-full-span") }}
       {% endif %}
     </section>
 

@@ -74,7 +74,6 @@
 {% block header_banner %}
   {{ render_brand_row() }}
 
-  {% set pub_date = article.metadata.publication_date_formatted or article.metadata.publication_date %}
   <div class="lukb-factsheet-header-box" style="margin-bottom: 18px; border-bottom: 2px solid var(--lukb-navy); padding-bottom: 12px;">
     <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;">
       <h1 class="lukb-title" style="margin: 0; font-size: 2.1rem; color: var(--lukb-navy);">{{ article.metadata.title }}</h1>
@@ -102,20 +101,24 @@
     {% endif %}
   {% endfor %}
 
-  {% if sections|length >= 4 %}
-    <!-- SEITE 1: 2 SPALTEN -->
+  {% macro render_factsheet_grid(left_blocks, right_blocks) %}
     <div class="lukb-factsheet-grid">
       <div class="lukb-factsheet-col">
-        {% for blk in sections[0] %}
+        {% for blk in left_blocks %}
           {{ render_single_block(blk, in_box=false) }}
         {% endfor %}
       </div>
       <div class="lukb-factsheet-col">
-        {% for blk in sections[1] %}
+        {% for blk in right_blocks %}
           {{ render_single_block(blk, in_box=false) }}
         {% endfor %}
       </div>
     </div>
+  {% endmacro %}
+
+  {% if sections|length >= 4 %}
+    <!-- SEITE 1: 2 SPALTEN -->
+    {{ render_factsheet_grid(sections[0], sections[1]) }}
 
     <!-- SEITE 2: TRENNER / HEADER -->
     <div class="lukb-factsheet-p2-header">
@@ -127,18 +130,7 @@
     </div>
 
     <!-- SEITE 2: 2 SPALTEN -->
-    <div class="lukb-factsheet-grid">
-      <div class="lukb-factsheet-col">
-        {% for blk in sections[2] %}
-          {{ render_single_block(blk, in_box=false) }}
-        {% endfor %}
-      </div>
-      <div class="lukb-factsheet-col">
-        {% for blk in sections[3] %}
-          {{ render_single_block(blk, in_box=false) }}
-        {% endfor %}
-      </div>
-    </div>
+    {{ render_factsheet_grid(sections[2], sections[3]) }}
 
     {% if sections|length > 4 %}
       <div class="lukb-factsheet-bottom" style="margin-top: 20px;">

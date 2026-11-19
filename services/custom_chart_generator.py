@@ -18,15 +18,14 @@ import io
 import json
 import math
 import re
-import threading
-from collections import OrderedDict
-from datetime import date, datetime
+from datetime import date
 from typing import Any
 
-from services.chart_generator import (
+from services.chart_common import (
     FONT_BODY,
     FONT_HEADING,
     LUKB_CHART_PALETTE,
+    ThreadSafeSvgCache,
     _build_embedded_font_face_defs,
     _compute_nice_ticks,
     _compute_pretty_x_axis_ticks,
@@ -34,134 +33,13 @@ from services.chart_generator import (
     _format_ch_number,
     _render_empty_state_svg,
     compute_plot_height_px,
+    open_svg_document,
+    parse_flexible_date,
+    parse_number,
+    render_timeseries_svg,
     resolve_chart_palette,
+    resolve_legend_columns,
 )
-
-
-def parse_number(val: Any) -> float | None:
-    """
-    Normalisiert und parst Zahlenwerte aus Excel / TSV / CSV:
-    - Unterstützt Schweizer Tausendertrenner (') und Leerzeichen (1'250.50 oder 1 250,50)
-    - Unterstützt Prozentangaben (12.5% oder 12,5 %) -> 12.5
-    - Unterstützt Buchhaltungs-Minus in Klammern (120.5) -> -120.5
-    - Erkennt Komma vs. Punkt als Dezimaltrenner
-    """
-    if val is None:
-        return None
-    if isinstance(val, (int, float)):
-        if math.isnan(val) or math.isinf(val):
-            return None
-        return float(val)
-
-    s = str(val).strip()
-    if not s or s in ("-", "–", "—", "n/a", "N/A", "null", "None"):
-        return None
-
-    # Prozentzeichen entfernen
-    s = s.replace("%", "").strip()
-
-    # Klammern für negative Werte: (123.45) -> -123.45
-    if s.startswith("(") and s.endswith(")"):
-        s = "-" + s[1:-1].strip()
-
-    # Apostrophe und Leerzeichen entfernen (Schweizer Format 1'000.00 / 1 000,00)
-    s = s.replace("'", "").replace("’", "").replace(" ", "").replace("\xa0", "")
-
-    # Komma vs. Punkt behandeln
-    if "," in s and "." in s:
-        # z.B. 1,234.56 vs 1.234,56
-        if s.rfind(",") > s.rfind("."):
-            s = s.replace(".", "").replace(",", ".")
-        else:
-            s = s.replace(",", "")
-    elif "," in s:
-        s = s.replace(",", ".")
-
-    try:
-        f = float(s)
-        if math.isnan(f) or math.isinf(f):
-            return None
-        return f
-    except (ValueError, TypeError):
-        return None
-
-
-def parse_flexible_date(val: Any) -> date | None:
-    """Parst Datumsangaben in gängigen Schweizer-, ISO- und Finanz-Formaten."""
-    if val is None:
-        return None
-    if isinstance(val, datetime):
-        return val.date()
-    if isinstance(val, date):
-        return val
-
-    s = str(val).strip()
-    if not s:
-        return None
-
-    # ISO Format: YYYY-MM-DD
-    if re.match(r"^\d{4}-\d{1,2}-\d{1,2}$", s):
-        parts = [int(p) for p in s.split("-")]
-        try:
-            return date(parts[0], parts[1], parts[2])
-        except ValueError:
-            return None
-
-    # CH/DE Format: DD.MM.YYYY oder D.M.YYYY
-    if re.match(r"^\d{1,2}\.\d{1,2}\.\d{4}$", s):
-        parts = [int(p) for p in s.split(".")]
-        try:
-            return date(parts[2], parts[1], parts[0])
-        except ValueError:
-            return None
-
-    # Schrägstrich Format: YYYY/MM/DD oder DD/MM/YYYY
-    if re.match(r"^\d{4}/\d{1,2}/\d{1,2}$", s):
-        parts = [int(p) for p in s.split("/")]
-        try:
-            return date(parts[0], parts[1], parts[2])
-        except ValueError:
-            return None
-    if re.match(r"^\d{1,2}/\d{1,2}/\d{4}$", s):
-        parts = [int(p) for p in s.split("/")]
-        try:
-            return date(parts[2], parts[1], parts[0])
-        except ValueError:
-            return None
-
-    # Monat/Jahr: MM.YYYY oder MM/YYYY oder YYYY-MM
-    m_my = re.match(r"^(\d{1,2})[./](\d{4})$", s)
-    if m_my:
-        try:
-            return date(int(m_my.group(2)), int(m_my.group(1)), 1)
-        except ValueError:
-            return None
-
-    m_ym = re.match(r"^(\d{4})-(\d{1,2})$", s)
-    if m_ym:
-        try:
-            return date(int(m_ym.group(1)), int(m_ym.group(2)), 1)
-        except ValueError:
-            return None
-
-    # Quartal: 2024-Q1, Q1 2024, 2024 Q1
-    m_q1 = re.match(r"^(\d{4})[- /]?[Qq]([1-4])$", s)
-    if m_q1:
-        y, q = int(m_q1.group(1)), int(m_q1.group(2))
-        return date(y, (q - 1) * 3 + 1, 1)
-    m_q2 = re.match(r"^[Qq]([1-4])[- /]?(\d{4})$", s)
-    if m_q2:
-        q, y = int(m_q2.group(1)), int(m_q2.group(2))
-        return date(y, (q - 1) * 3 + 1, 1)
-
-    # Reines Jahr: 2020..2040
-    if re.match(r"^\d{4}$", s):
-        try:
-            return date(int(s), 1, 1)
-        except ValueError:
-            return None
-
-    return None
 
 
 def parse_wide_tsv_data(raw_text: str, has_header: bool = True) -> tuple[list[str], list[list[str]]]:
@@ -264,26 +142,6 @@ def infer_chart_configuration(columns: list[str], rows: list[list[str]]) -> dict
         "x_col": x_col,
         "series": series_items,
     }
-
-
-def resolve_legend_columns(
-    block_data: dict[str, Any],
-    default_columns: int = 2,
-) -> int:
-    """
-    Ermittelt die Anzahl der Spalten für die Legendeneinträge:
-    - Benutzerdefiniert, falls konfiguriert (1..6)
-    - Fallback: default_columns (1 bei Legende rechts, 2 bei Legende unterhalb)
-    """
-    user_val = block_data.get("legend_columns")
-    if user_val is not None and user_val not in ("", "auto", 0):
-        try:
-            val = int(user_val)
-            if 1 <= val <= 6:
-                return val
-        except (ValueError, TypeError):
-            pass
-    return default_columns
 
 
 def _render_doughnut_pie_svg(
@@ -1085,7 +943,7 @@ def _render_timeseries_svg(
     rows: list[list[str]],
     embed_fonts: bool = True,
 ) -> str:
-    """Rendert ein Zeitreihendiagramm aus Wide-Format-Daten mit LUKB Vektorgrafik."""
+    """Rendert ein Zeitreihendiagramm aus Wide-Format-Daten über die gemeinsame Timeseries-Engine."""
     layout_mode = str(block_data.get("layout") or "column").strip()
     is_column = layout_mode != "full"
     active_palette = resolve_chart_palette(block_data)
@@ -1093,7 +951,6 @@ def _render_timeseries_svg(
     x_col = str(block_data.get("x_col") or (columns[0] if columns else "")).strip()
     x_idx = columns.index(x_col) if x_col in columns else 0
 
-    # Aktive Serien ermitteln
     series_cfg = block_data.get("series") or []
     configured_series: list[dict[str, Any]] = []
 
@@ -1134,7 +991,6 @@ def _render_timeseries_svg(
             embed_fonts=embed_fonts,
         )
 
-    # Datenpunkte nach Datum sortiert aufbauen: {field: [(date, val), ...]}
     series_points: dict[str, list[tuple[date, float]]] = {s["field"]: [] for s in configured_series}
     all_dates_set: set[date] = set()
 
@@ -1151,222 +1007,52 @@ def _render_timeseries_svg(
             if val_f is not None:
                 series_points[s["field"]].append((d_val, val_f))
 
-    # Sortieren
-    for fld in series_points:
-        series_points[fld].sort(key=lambda x: x[0])
-
-    all_dates = sorted(all_dates_set)
-    if len(all_dates) < 2:
+    if len(all_dates_set) < 2:
         return _render_empty_state_svg(
             "Nicht genügend Datums-Punkte vorhanden",
             f"Spalte '{x_col}' muss mindestens 2 gültige Datumsangaben enthalten.",
             embed_fonts=embed_fonts,
         )
 
-    min_date = all_dates[0]
-    max_date = all_dates[-1]
-    min_ord = float(min_date.toordinal())
-    max_ord = float(max_date.toordinal())
-    if math.isclose(min_ord, max_ord):
-        min_ord -= 15.0
-        max_ord += 15.0
-    span_ord = max(1.0, max_ord - min_ord)
-
-    # Y-Wertebereich
-    y_candidates: list[float] = []
+    resolved_series: list[dict[str, Any]] = []
     for s in configured_series:
-        for _, v in series_points[s["field"]]:
-            y_candidates.append(v)
+        pts = sorted(series_points[s["field"]], key=lambda x: x[0])
+        if not pts:
+            continue
+        resolved_series.append(
+            {
+                "label": s["label"],
+                "color": s["color"],
+                "chart_type": s["chart_type"],
+                "chart_types": [s["chart_type"]],
+                "chart_types_set": {s["chart_type"]},
+                "points": pts,
+                "points_map": {d: v for d, v in pts},
+            }
+        )
 
-    if not y_candidates:
+    if not resolved_series:
         return _render_empty_state_svg(
             "Keine numerischen Werte in den Zeitreihen",
             "Bitte prüfen Sie das Zahlenformat in den ausgewählten Wert-Spalten.",
             embed_fonts=embed_fonts,
         )
 
-    raw_min_y = min(y_candidates)
-    raw_max_y = max(y_candidates)
-    y_ticks = _compute_nice_ticks(raw_min_y, raw_max_y, target_ticks=5)
-    y_min = y_ticks[0]
-    y_max = y_ticks[-1]
-    y_span = max(1e-9, y_max - y_min)
-    y_step = y_ticks[1] - y_ticks[0] if len(y_ticks) > 1 else 1.0
-
-    # Geometrie
-    axis_font_size = 22.5 if is_column else 14.5
-    legend_font_size = 20.5 if is_column else 14.0
-
-    y_tick_labels = [_format_ch_number(tick, y_step) for tick in y_ticks]
-    max_y_label_w = max(
-        (_estimate_label_width_px(lbl, axis_font_size) for lbl in y_tick_labels),
-        default=16.0,
+    return render_timeseries_svg(
+        resolved_series,
+        block_data,
+        is_column_layout=is_column,
+        embed_fonts=embed_fonts,
+        rebasing="none",
     )
-    y_label_right_x = max(12.0, round(max_y_label_w, 1))
-    y_axis_gap = 10.0 if is_column else 9.0
-
-    _, plot_h = compute_plot_height_px(block_data, is_column)
-
-    svg_w = 680
-    plot_left = y_label_right_x + y_axis_gap
-    plot_right = 678.0
-    plot_top = 18.0
-    plot_bottom = plot_top + plot_h
-    plot_w = plot_right - plot_left
-
-    def x_px(dt: date) -> float:
-        return plot_left + ((float(dt.toordinal()) - min_ord) / span_ord) * plot_w
-
-    def y_px(val: float) -> float:
-        clamped = max(y_min, min(y_max, val))
-        return plot_bottom - ((clamped - y_min) / y_span) * plot_h
-
-    zero_y = y_px(0.0)
-
-    # Pfade rendern
-    chart_paths: list[str] = []
-    for s in configured_series:
-        pts = series_points[s["field"]]
-        if not pts:
-            continue
-        color = s["color"]
-        ctype = s["chart_type"]
-
-        # Fläche
-        if ctype == "area":
-            area_coords = [f"{x_px(d):.1f},{y_px(v):.1f}" for d, v in pts]
-            first_x = x_px(pts[0][0])
-            last_x = x_px(pts[-1][0])
-            d_area = f"M {first_x:.1f},{zero_y:.1f} L " + " L ".join(area_coords) + f" L {last_x:.1f},{zero_y:.1f} Z"
-            chart_paths.append(
-                f'    <path d="{d_area}" fill="{color}" fill-opacity="0.18" stroke="none"/>'
-            )
-
-        # Linie oder Stufe
-        if ctype in ("line", "area"):
-            line_coords = [f"{x_px(d):.1f},{y_px(v):.1f}" for d, v in pts]
-            d_line = "M " + " L ".join(line_coords)
-            chart_paths.append(
-                f'    <path d="{d_line}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>'
-            )
-        elif ctype == "step":
-            step_segments: list[str] = [f"M {x_px(pts[0][0]):.1f},{y_px(pts[0][1]):.1f}"]
-            for i in range(1, len(pts)):
-                prev_d, prev_v = pts[i - 1]
-                curr_d, curr_v = pts[i]
-                step_segments.append(f"L {x_px(curr_d):.1f},{y_px(prev_v):.1f}")
-                step_segments.append(f"L {x_px(curr_d):.1f},{y_px(curr_v):.1f}")
-            chart_paths.append(
-                f'    <path d="{" ".join(step_segments)}" fill="none" stroke="{color}" stroke-width="2.5" stroke-linecap="square"/>'
-            )
-        elif ctype == "bar":
-            bar_w = max(2.5, min(24.0, (plot_w / len(pts)) * 0.65))
-            for d, v in pts:
-                xp = x_px(d) - bar_w / 2.0
-                yp = y_px(v)
-                bh = abs(zero_y - yp)
-                by = yp if v >= 0 else zero_y
-                chart_paths.append(
-                    f'    <rect x="{xp:.1f}" y="{by:.1f}" width="{bar_w:.1f}" height="{max(1.0, bh):.1f}" fill="{color}" rx="1"/>'
-                )
-
-        # Datenpunkte
-        if ctype in ("dot", "line", "step") and len(pts) <= 30:
-            for d, v in pts:
-                chart_paths.append(
-                    f'    <circle cx="{x_px(d):.1f}" cy="{y_px(v):.1f}" r="3.2" fill="{color}" stroke="#FFFFFF" stroke-width="1.2"/>'
-                )
-
-    # X-Achsen Ticks
-    x_ticks_data = _compute_pretty_x_axis_ticks(min_date, max_date, is_column)
-    x_axis_labels: list[str] = []
-    x_label_y = plot_bottom + (31.0 if is_column else 24.0)
-
-    for t_dt, lbl in x_ticks_data:
-        xp = x_px(t_dt)
-        svg_parts_tick = (
-            f'    <line x1="{xp:.1f}" y1="{plot_bottom:.1f}" x2="{xp:.1f}" y2="{plot_bottom + 5:.1f}" stroke="#002855" stroke-width="1.0"/>'
-            f'    <text x="{xp:.1f}" y="{x_label_y:.1f}" text-anchor="middle" font-size="{axis_font_size}" fill="#002855">{lbl}</text>'
-        )
-        x_axis_labels.append(svg_parts_tick)
-
-    # Legende
-    items_per_legend_row = resolve_legend_columns(block_data, default_columns=2)
-    legend_rows = math.ceil(len(configured_series) / items_per_legend_row)
-    legend_row_gap = 29.0 if is_column else 22.0
-    legend_start_y = x_label_y + (34.0 if is_column else 27.0)
-
-    legend_elements: list[str] = []
-    legend_left_x = 0.0
-    col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
-
-    for idx, s in enumerate(configured_series):
-        r_idx = idx // items_per_legend_row
-        c_idx = idx % items_per_legend_row
-        lx = legend_left_x + c_idx * col_w
-        ly = legend_start_y + r_idx * legend_row_gap
-        safe_lbl = html.escape(s["label"])
-
-        # Legendensymbol passend zur Darstellungsart
-        ctype = s["chart_type"]
-        if ctype in ("line", "step", "area"):
-            legend_elements.append(
-                f'    <line x1="{lx:.1f}" y1="{ly - 5:.1f}" x2="{lx + 20:.1f}" y2="{ly - 5:.1f}" stroke="{s["color"]}" stroke-width="3" stroke-linecap="round"/>'
-            )
-            text_x = lx + 28
-        else:
-            legend_elements.append(
-                f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{s["color"]}"/>'
-            )
-            text_x = lx + 22
-
-        legend_elements.append(
-            f'    <text x="{text_x:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
-            f'{safe_lbl}</text>'
-        )
-
-    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + (12.0 if is_column else 8.0)))
-
-    # SVG assembeln
-    svg_parts: list[str] = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svg_w} {svg_h}" width="{svg_w}" height="{svg_h}" font-family="{FONT_BODY}">',
-    ]
-    if embed_fonts:
-        defs = _build_embedded_font_face_defs()
-        if defs:
-            svg_parts.append(defs)
-    svg_parts.append(f'  <rect width="{svg_w}" height="{svg_h}" fill="#FFFFFF"/>')
-
-    # Y-Gitterlinien
-    for tick, lbl in zip(y_ticks, y_tick_labels):
-        yp = y_px(tick)
-        is_zero = math.isclose(tick, 0.0, abs_tol=1e-6)
-        line_col = "#002855" if is_zero else "#E2E8F0"
-        stroke_w = "1.5" if is_zero else "1.0"
-        svg_parts.append(
-            f'  <line x1="{plot_left:.1f}" y1="{yp:.1f}" x2="{plot_right:.1f}" y2="{yp:.1f}" stroke="{line_col}" stroke-width="{stroke_w}"/>'
-        )
-        svg_parts.append(
-            f'  <text x="{y_label_right_x:.1f}" y="{yp + 6:.1f}" text-anchor="end" font-size="{axis_font_size}" fill="#5A687C">{lbl}</text>'
-        )
-
-    # Pfade & Beschriftung
-    svg_parts.extend(chart_paths)
-    svg_parts.extend(x_axis_labels)
-    svg_parts.extend(legend_elements)
-    svg_parts.append("</svg>")
-    return "\n".join(svg_parts)
 
 
-_CUSTOM_CHART_SVG_CACHE: OrderedDict[str, str] = OrderedDict()
-_CUSTOM_CHART_CACHE_LOCK = threading.Lock()
-_CUSTOM_CHART_CACHE_MAX_SIZE = 256
+_CUSTOM_CHART_SVG_CACHE = ThreadSafeSvgCache(max_size=256)
 
 
 def clear_custom_chart_cache() -> None:
     """Leert den In-Memory-SVG-Cache für Custom-Charts."""
-    with _CUSTOM_CHART_CACHE_LOCK:
-        _CUSTOM_CHART_SVG_CACHE.clear()
+    _CUSTOM_CHART_SVG_CACHE.clear()
 
 
 def _compute_custom_chart_cache_key(
@@ -1439,11 +1125,9 @@ def generate_custom_chart_svg(
     `custom_chart`-Blöcke bei Autosave und Rendering in 0 ms bedient werden.
     """
     cache_key = _compute_custom_chart_cache_key(block_data, embed_fonts)
-    with _CUSTOM_CHART_CACHE_LOCK:
-        cached_svg = _CUSTOM_CHART_SVG_CACHE.get(cache_key)
-        if cached_svg is not None:
-            _CUSTOM_CHART_SVG_CACHE.move_to_end(cache_key)
-            return cached_svg
+    cached_svg = _CUSTOM_CHART_SVG_CACHE.get(cache_key)
+    if cached_svg is not None:
+        return cached_svg
 
     raw_tsv = str(block_data.get("raw_tsv") or "").strip()
     has_header = bool(block_data.get("has_header", True))
@@ -1471,9 +1155,5 @@ def generate_custom_chart_svg(
             # category_bar (Standard)
             result_svg = _render_category_bar_svg(block_data, columns, rows, embed_fonts=embed_fonts)
 
-    with _CUSTOM_CHART_CACHE_LOCK:
-        _CUSTOM_CHART_SVG_CACHE[cache_key] = result_svg
-        _CUSTOM_CHART_SVG_CACHE.move_to_end(cache_key)
-        while len(_CUSTOM_CHART_SVG_CACHE) > _CUSTOM_CHART_CACHE_MAX_SIZE:
-            _CUSTOM_CHART_SVG_CACHE.popitem(last=False)
+    _CUSTOM_CHART_SVG_CACHE.set(cache_key, result_svg)
     return result_svg
