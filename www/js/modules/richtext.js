@@ -29,6 +29,9 @@
     state.article.blocks.forEach(b => {
       if (b.type === "richtext" || b.type === "callout") {
         scanHtml(b.html);
+      } else if (b.type === "media_text") {
+        scanHtml(b.html);
+        scanHtml(b.aside_html);
       }
     });
 

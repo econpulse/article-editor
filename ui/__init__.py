@@ -22,6 +22,7 @@ JS_MODULES = (
     "js/modules/db-chart.js",
     "js/modules/custom-chart.js",
     "js/modules/table-editor.js",
+    "js/modules/media-text.js",
     "js/modules/sidebar-modal.js",
     "js/modules/collab.js",
 )

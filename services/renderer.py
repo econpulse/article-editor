@@ -33,7 +33,7 @@ from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
 from docx.shared import Inches, Pt, RGBColor
 
-from config import DATA_DIR, FONTS_DIR, TEMPLATES_DIR, WWW_DIR
+from config import DATA_DIR, FONTS_DIR, TEMPLATES_DIR, TYPST_CACHE_DIR, WWW_DIR
 from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
@@ -43,7 +43,6 @@ from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_ri
 logger = logging.getLogger("lukb_cms.renderer")
 
 LUKB_LOGO_SVG_PATH = WWW_DIR / "img" / "LUKB-Logo.svg"
-TYPST_CACHE_DIR = DATA_DIR / "typst_cache"
 TYPST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 _COMPILER_CACHE: dict[str, typst.Compiler] = {}
@@ -212,10 +211,16 @@ def extract_glossary_terms_from_article(blocks: list[dict[str, Any]]) -> list[di
     for blk in blocks:
         if blk.get("type") in ("richtext", "callout"):
             _scan_text(blk.get("html", ""))
+        elif blk.get("type") == "media_text":
+            _scan_text(blk.get("html", ""))
+            _scan_text(blk.get("aside_html", ""))
         elif blk.get("type") == "textbox_group":
             for child in blk.get("children", []):
                 if child.get("type") in ("richtext", "callout"):
                     _scan_text(child.get("html", ""))
+                elif child.get("type") == "media_text":
+                    _scan_text(child.get("html", ""))
+                    _scan_text(child.get("aside_html", ""))
 
     items = [{"term": k, "definition": v} for k, v in terms_dict.items()]
     items.sort(key=lambda x: x["term"].lower())
@@ -250,7 +255,7 @@ def _reorder_blocks_for_anchors(blocks: list[dict[str, Any]]) -> list[dict[str, 
     has_anchors = any(
         isinstance(b, dict)
         and b.get("anchor_to")
-        and b.get("type") in ("figure", "db_chart", "custom_chart", "table")
+        and b.get("type") in ("figure", "db_chart", "custom_chart", "table", "media_text")
         and b.get("layout", "column") == "column"
         for b in blocks
     )
@@ -267,7 +272,7 @@ def _reorder_blocks_for_anchors(blocks: list[dict[str, Any]]) -> list[dict[str, 
             continue
         aid = blk.get("anchor_to")
         is_margin = (
-            blk.get("type") in ("figure", "db_chart", "custom_chart", "table")
+            blk.get("type") in ("figure", "db_chart", "custom_chart", "table", "media_text")
             and blk.get("layout", "column") == "column"
         )
         if is_margin and aid and aid in known_ids and aid != blk.get("id"):
@@ -301,8 +306,20 @@ def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
 
     raw_blocks = _reorder_blocks_for_anchors(payload.get("blocks", []))
     payload["blocks"] = raw_blocks
-    for blk in raw_blocks:
+    zebra_counter = 0
+    for idx, blk in enumerate(raw_blocks):
         btype = blk.get("type")
+        if btype == "media_text" and blk.get("style_preset") == "zebra":
+            blk["_zebra_index"] = zebra_counter
+            next_blk = raw_blocks[idx + 1] if idx + 1 < len(raw_blocks) else None
+            blk["_zebra_last"] = not (
+                isinstance(next_blk, dict)
+                and next_blk.get("type") == "media_text"
+                and next_blk.get("style_preset") == "zebra"
+            )
+            zebra_counter += 1
+        else:
+            zebra_counter = 0
         if btype == "glossary":
             blk["all_items"] = _resolve_glossary_items(blk, raw_blocks)
         elif btype == "publications":
@@ -317,12 +334,15 @@ def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
 
 
 def _fetch_doc_asset_records(blocks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Lädt alle in `figure`-Blöcken referenzierten Asset-Datensätze gebündelt aus der DB."""
-    figure_aids = {
-        blk.get("asset_id", "")
-        for blk in blocks
-        if blk.get("type") == "figure" and blk.get("asset_id")
-    }
+    """Lädt alle in `figure`- und `media_text`-Blöcken referenzierten Asset-Datensätze gebündelt aus der DB."""
+    figure_aids: set[str] = set()
+    for blk in blocks:
+        if blk.get("type") == "figure" and blk.get("asset_id"):
+            figure_aids.add(blk["asset_id"])
+        elif blk.get("type") == "media_text":
+            media = blk.get("media")
+            if isinstance(media, dict) and media.get("type") == "figure" and media.get("asset_id"):
+                figure_aids.add(media["asset_id"])
     return get_assets_by_ids(figure_aids) if figure_aids else {}
 
 
@@ -408,6 +428,43 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
                 max_date=doc.metadata.publication_date,
             )
             bcopy["resolved_image"] = _materialize_chart_svg(work_dir, svg_markup)
+
+        elif btype == "media_text":
+            bcopy["title_typst"] = escape_typst_text(blk.get("title", ""))
+            bcopy["typst_markup"] = html_to_typst(blk.get("html", ""))
+            aside_raw = blk.get("aside_html", "")
+            bcopy["aside_typst_markup"] = (
+                html_to_typst(aside_raw) if aside_raw and str(aside_raw).strip() else ""
+            )
+            media_raw = blk.get("media") if isinstance(blk.get("media"), dict) else {}
+            media_copy = dict(media_raw)
+            mtype = blk.get("media_type") or media_copy.get("type") or "figure"
+            media_copy["type"] = mtype
+            if mtype == "figure":
+                asset_id = media_copy.get("asset_id", "")
+                resolved_rel_path = ""
+                if asset_id:
+                    asset_record = asset_cache.get(asset_id)
+                    if asset_record and asset_record.get("data"):
+                        ext = _extension_for_mime(
+                            asset_record.get("mime_type", ""),
+                            asset_record.get("filename", ""),
+                        )
+                        asset_filename = f"{asset_id}{ext}"
+                        asset_file_path = work_dir / asset_filename
+                        asset_bytes = asset_record["data"]
+                        if not asset_file_path.exists() or asset_file_path.read_bytes() != asset_bytes:
+                            asset_file_path.write_bytes(asset_bytes)
+                        resolved_rel_path = asset_filename
+                media_copy["resolved_image"] = resolved_rel_path
+            elif mtype in ("db_chart", "custom_chart"):
+                svg_markup = render_block_chart_svg(
+                    media_copy,
+                    embed_fonts=False,
+                    max_date=doc.metadata.publication_date,
+                )
+                media_copy["resolved_image"] = _materialize_chart_svg(work_dir, svg_markup)
+            bcopy["media"] = media_copy
 
         elif btype == "quote":
             bcopy["quote_typst"] = escape_typst_text(blk.get("quote", ""))
@@ -649,6 +706,10 @@ def _transform_web_inline_footnotes(blocks: list[dict[str, Any]]) -> list[dict[s
         btype = blk.get("type")
         if btype in ("richtext", "callout"):
             blk["html"] = _replace_in_html(sanitize_richtext_html(blk.get("html", "")))
+        elif btype == "media_text":
+            blk["html"] = _replace_in_html(sanitize_richtext_html(blk.get("html", "")))
+            if blk.get("aside_html"):
+                blk["aside_html"] = _replace_in_html(sanitize_richtext_html(blk.get("aside_html", "")))
         elif btype == "footnotes":
             has_footnotes_block = True
 
@@ -706,6 +767,36 @@ def render_web_html(doc: ArticleDocument) -> str:
             )
             b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
             blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
+        elif blk.get("type") == "media_text":
+            blk["html"] = _normalize_inline_links_html(blk.get("html", ""))
+            if blk.get("aside_html"):
+                blk["aside_html"] = _normalize_inline_links_html(blk.get("aside_html", ""))
+            media = blk.get("media") if isinstance(blk.get("media"), dict) else {}
+            mtype = blk.get("media_type") or media.get("type") or "figure"
+            media["type"] = mtype
+            if mtype == "figure":
+                asset_id = media.get("asset_id", "")
+                data_uri = ""
+                if asset_id:
+                    if asset_id not in asset_uri_cache:
+                        asset_record = asset_records.get(asset_id)
+                        if asset_record and asset_record.get("data"):
+                            b64 = base64.b64encode(asset_record["data"]).decode("ascii")
+                            mime = asset_record.get("mime_type", "image/svg+xml")
+                            asset_uri_cache[asset_id] = f"data:{mime};base64,{b64}"
+                        else:
+                            asset_uri_cache[asset_id] = ""
+                    data_uri = asset_uri_cache[asset_id]
+                media["data_uri"] = data_uri
+            elif mtype in ("db_chart", "custom_chart"):
+                svg_markup = render_block_chart_svg(
+                    media,
+                    embed_fonts=True,
+                    max_date=doc.metadata.publication_date,
+                )
+                b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+                media["data_uri"] = f"data:image/svg+xml;base64,{b64}"
+            blk["media"] = media
 
     payload["blocks"] = _group_blocks_into_render_items(payload.get("blocks", []))
 
@@ -1264,6 +1355,116 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 r.font.size = Pt(8.0)
                 r.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
                 r.italic = True
+
+        elif btype == "media_text":
+            mt_title = blk.get("title", "").strip()
+            if mt_title:
+                pt = container.add_paragraph()
+                pt.paragraph_format.space_before = Pt(10)
+                pt.paragraph_format.space_after = Pt(4)
+                r = pt.add_run(mt_title)
+                r.bold = True
+                r.font.size = Pt(10.5)
+                r.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
+
+            media = blk.get("media") if isinstance(blk.get("media"), dict) else {}
+            mtype = blk.get("media_type") or media.get("type") or "figure"
+            media_copy = dict(media)
+            media_copy["type"] = mtype
+            pos = blk.get("media_position", "auto")
+            aside_html = (blk.get("aside_html") or "").strip()
+            style_preset = blk.get("style_preset", "plain")
+
+            def _render_mt_media(target_container, img_width_in: float):
+                if mtype == "table":
+                    _render_block(target_container, media_copy)
+                else:
+                    img_bytes = None
+                    if mtype in ("db_chart", "custom_chart"):
+                        svg_code = render_block_chart_svg(
+                            media_copy,
+                            embed_fonts=False,
+                            max_date=doc_model.metadata.publication_date,
+                        )
+                        img_bytes = _svg_to_png_bytes(svg_code, ppi=144.0)
+                    else:
+                        aid = media_copy.get("asset_id", "")
+                        if aid:
+                            rec = docx_asset_records.get(aid)
+                            if rec and rec.get("data"):
+                                data = rec["data"]
+                                mime = rec.get("mime_type", "")
+                                if "svg" in mime.lower() or rec.get("filename", "").lower().endswith(".svg"):
+                                    img_bytes = _svg_to_png_bytes(data.decode("utf-8", errors="ignore"), ppi=144.0)
+                                else:
+                                    img_bytes = data
+                    if img_bytes:
+                        try:
+                            p_pic = target_container.add_paragraph()
+                            p_pic.paragraph_format.space_before = Pt(2)
+                            p_pic.paragraph_format.space_after = Pt(2)
+                            p_pic.add_run().add_picture(io.BytesIO(img_bytes), width=Inches(img_width_in))
+                        except Exception:
+                            pass
+
+            if pos in ("top", "bottom"):
+                if pos == "top":
+                    _render_mt_media(container, 5.8)
+                    _render_richtext_into_docx(container, blk.get("html", ""), footnote_collector=docx_inline_footnotes)
+                else:
+                    _render_richtext_into_docx(container, blk.get("html", ""), footnote_collector=docx_inline_footnotes)
+                    _render_mt_media(container, 5.8)
+                if aside_html:
+                    _render_richtext_into_docx(container, aside_html, footnote_collector=docx_inline_footnotes)
+            else:
+                num_cols = 3 if aside_html else 2
+                tbl = container.add_table(rows=1, cols=num_cols)
+                tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+                tbl.autofit = False
+                total_w = 6.5
+                m_pct = float(blk.get("media_width_pct") or 30) / 100.0
+                a_pct = float(blk.get("aside_width_pct") or 26) / 100.0 if aside_html else 0.0
+                t_pct = max(0.2, 1.0 - m_pct - a_pct)
+                if pos == "right":
+                    col_specs = [("text", t_pct), ("media", m_pct)]
+                else:
+                    col_specs = [("media", m_pct), ("text", t_pct)]
+                if aside_html:
+                    col_specs.append(("aside", a_pct))
+
+                bg_hex = None
+                if style_preset == "zebra" and (blk.get("_zebra_index", 0) % 2 == 0):
+                    bg_hex = "F4F7FA"
+                elif style_preset == "card":
+                    bg_hex = "FFFFFF"
+
+                for c_idx, (kind, pct) in enumerate(col_specs):
+                    cw = Inches(total_w * pct)
+                    tbl.columns[c_idx].width = cw
+                    cell = tbl.rows[0].cells[c_idx]
+                    cell.width = cw
+                    cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                    if bg_hex:
+                        _set_docx_cell_background(cell, bg_hex)
+                    _set_docx_cell_margins(cell, top=110, bottom=110, left=120, right=120)
+                    tcPr = cell._tc.get_or_add_tcPr()
+                    border_col = "D6DEE8" if style_preset == "card" else "FFFFFF"
+                    border_val = "single" if style_preset == "card" else "none"
+                    tcPr.append(parse_xml(
+                        f'<w:tcBorders {nsdecls("w")}>'
+                        f'<w:top w:val="{border_val}" w:sz="4" w:space="0" w:color="{border_col}"/>'
+                        f'<w:left w:val="{border_val}" w:sz="4" w:space="0" w:color="{border_col}"/>'
+                        f'<w:bottom w:val="{border_val}" w:sz="4" w:space="0" w:color="{border_col}"/>'
+                        f'<w:right w:val="{border_val}" w:sz="4" w:space="0" w:color="{border_col}"/>'
+                        f'</w:tcBorders>'
+                    ))
+                    if kind == "media":
+                        _render_mt_media(cell, max(1.2, total_w * pct - 0.25))
+                    elif kind == "text":
+                        _render_richtext_into_docx(cell, blk.get("html", ""), footnote_collector=docx_inline_footnotes)
+                    else:
+                        _render_richtext_into_docx(cell, aside_html, footnote_collector=docx_inline_footnotes)
+                container.add_paragraph().paragraph_format.space_after = Pt(2)
 
         elif btype == "spacer":
             h_mm = blk.get("height_mm", 8)

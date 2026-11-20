@@ -676,6 +676,188 @@
   }
 }
 
+#let render-media-text-media(media-blk, is-compact: false) = {
+  let mtype = media-blk.at("type", default: "figure")
+  if mtype == "table" {
+    let bcopy = media-blk
+    bcopy.insert("_inline_full", true)
+    render-table-box(bcopy, is-margin: is-compact, allow-float: false)
+  } else {
+    let img-path = resolve-asset-path(media-blk.at("resolved_image", default: ""))
+    let has-meta = (str(media-blk.at("title", default: "")).trim() != "") or (str(media-blk.at("subtitle", default: "")).trim() != "") or (str(media-blk.at("source", default: "")).trim() != "")
+    if has-meta {
+      let bcopy = media-blk
+      bcopy.insert("_inline_full", true)
+      render-figure-box(bcopy, is-margin: is-compact, allow-float: false)
+    } else if img-path != "" {
+      image(img-path, width: 100%)
+    } else {
+      rect(
+        width: 100%,
+        height: 60pt,
+        fill: lukb-surface,
+        stroke: (paint: lukb-border, dash: "dashed")
+      )[
+        #align(center + horizon)[
+          #text(size: 7.5pt, fill: lukb-muted)[Grafik-Platzhalter]
+        ]
+      ]
+    }
+  }
+}
+
+#let render-media-text-box(blk, is-margin: false, allow-float: true) = {
+  let is-floating = allow-float and (not is-margin) and (blk.at("layout", default: "full") == "full") and (not blk.at("_inline_full", default: false))
+  let style-preset = blk.at("style_preset", default: "plain")
+  let is-zebra = (style-preset == "zebra")
+  let is-card = (style-preset == "card")
+  let zebra-idx = blk.at("_zebra_index", default: 0)
+  let zebra-last = blk.at("_zebra_last", default: true)
+
+  let fill-col = if is-zebra {
+    if calc.even(zebra-idx) { lukb-surface } else { white }
+  } else if is-card {
+    white
+  } else {
+    none
+  }
+  let box-stroke = if is-card {
+    0.6pt + lukb-border
+  } else if is-zebra {
+    (top: 0.4pt + rgb("#E6ECF2"), bottom: 0.4pt + rgb("#E6ECF2"))
+  } else {
+    none
+  }
+  let box-inset = if is-zebra {
+    (x: 10pt, y: 9pt)
+  } else if is-card {
+    (x: 11pt, y: 10pt)
+  } else {
+    (x: 0pt, y: 3pt)
+  }
+  let box-above = if is-floating {
+    0pt
+  } else if is-zebra {
+    if zebra-idx == 0 { 0.9em } else { 0pt }
+  } else {
+    1.0em
+  }
+  let box-below = if is-floating {
+    0pt
+  } else if is-zebra {
+    if zebra-last { 0.9em } else { 0pt }
+  } else {
+    1.0em
+  }
+
+  let title-txt = str(blk.at("title_typst", default: blk.at("title", default: ""))).trim()
+  let text-markup = str(blk.at("typst_markup", default: "")).trim()
+  let aside-markup = str(blk.at("aside_typst_markup", default: "")).trim()
+  let has-aside = aside-markup != ""
+  let raw-pos = blk.at("media_position", default: "auto")
+  let media-pct = float(blk.at("media_width_pct", default: 30))
+  let aside-pct = float(blk.at("aside_width_pct", default: 26))
+  let media-blk = blk.at("media", default: (:))
+
+  let box-el = block(
+    width: 100%,
+    breakable: false,
+    fill: fill-col,
+    stroke: box-stroke,
+    radius: if is-card { 3pt } else { 0pt },
+    inset: box-inset,
+    above: box-above,
+    below: box-below,
+  )[
+    #if title-txt != "" [
+      #block(above: 0pt, below: 6pt)[
+        #text(font: font-heading, weight: "medium", size: 10pt, fill: lukb-navy)[#title-txt]
+      ]
+    ]
+    #layout(bounds => {
+      let eff-pos = if raw-pos == "auto" {
+        if bounds.width >= 360pt { "left" } else { "top" }
+      } else {
+        raw-pos
+      }
+      let is-compact = bounds.width < 360pt
+      let media-el = render-media-text-media(media-blk, is-compact: is-compact)
+      let text-el = [
+        #set par(justify: false, leading: 0.48em, spacing: 0.65em)
+        #if text-markup != "" [
+          #eval(text-markup, mode: "markup")
+        ]
+      ]
+      let aside-el = if has-aside {
+        [
+          #set par(justify: false, leading: 0.42em, spacing: 0.55em)
+          #set text(size: 8.6pt, fill: lukb-text)
+          #eval(aside-markup, mode: "markup")
+        ]
+      } else {
+        none
+      }
+
+      if eff-pos == "left" or eff-pos == "right" {
+        let text-pct = if has-aside { calc.max(20.0, 100.0 - media-pct - aside-pct) } else { calc.max(20.0, 100.0 - media-pct) }
+        if eff-pos == "left" {
+          if has-aside {
+            grid(
+              columns: (media-pct * 1fr, text-pct * 1fr, aside-pct * 1fr),
+              column-gutter: 14pt,
+              align: (top + left, top + left, top + left),
+              media-el, text-el, aside-el,
+            )
+          } else {
+            grid(
+              columns: (media-pct * 1fr, text-pct * 1fr),
+              column-gutter: 14pt,
+              align: (top + left, top + left),
+              media-el, text-el,
+            )
+          }
+        } else {
+          if has-aside {
+            grid(
+              columns: (text-pct * 1fr, media-pct * 1fr, aside-pct * 1fr),
+              column-gutter: 14pt,
+              align: (top + left, top + left, top + left),
+              text-el, media-el, aside-el,
+            )
+          } else {
+            grid(
+              columns: (text-pct * 1fr, media-pct * 1fr),
+              column-gutter: 14pt,
+              align: (top + left, top + left),
+              text-el, media-el,
+            )
+          }
+        }
+      } else if eff-pos == "bottom" {
+        stack(
+          spacing: 8pt,
+          text-el,
+          media-el,
+          ..(if has-aside { (aside-el,) } else { () })
+        )
+      } else {
+        stack(
+          spacing: 8pt,
+          media-el,
+          text-el,
+          ..(if has-aside { (aside-el,) } else { () })
+        )
+      }
+    })
+  ]
+
+  if is-floating {
+    place-full-float(blk, box-el)
+  } else {
+    box-el
+  }
+}
+
 #let render-quote-box(
   quote-text,
   author,
@@ -934,6 +1116,14 @@
       bcopy.insert("_inline_full", true)
     }
     render-table-box(bcopy, is-margin: is-margin, allow-float: allow-float, style-variant: table-style)
+  } else if blk.type == "media_text" {
+    let bcopy = blk
+    if in-box {
+      bcopy.insert("layout", "column")
+    } else if inline-full {
+      bcopy.insert("_inline_full", true)
+    }
+    render-media-text-box(bcopy, is-margin: is-margin, allow-float: allow-float)
   } else if blk.type == "textbox_group" {
     let has-colbreak = blk.children.any(c => c.type == "colbreak")
     layout(bounds => {
@@ -1021,7 +1211,7 @@
       heading-below: heading-below,
     )
 
-    let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "full"))
+    let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "custom_chart", "table", "media_text")) and (it.at("layout", default: "column") == "full"))
     let manual-colbreak-idx = items.position(it => it.type == "colbreak")
     let has-internal-colbreak = items.any(it => it.type == "textbox_group" and it.children.any(c => c.type == "colbreak"))
 
@@ -1169,7 +1359,7 @@
     let overflow-idx = none
 
     for (idx, it) in items.enumerate() {
-      let is-full = (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "full")
+      let is-full = (it.type in ("figure", "db_chart", "custom_chart", "table", "media_text")) and (it.at("layout", default: "column") == "full")
       if not is-full {
         let ih = if it.type == "spacer" {
           (it.at("height_mm", default: 8) * 1mm)
@@ -1274,7 +1464,7 @@
   let runs = ()
   let curr-cols = ()
     for blk in blocks {
-      let is-full-block = (blk.type in ("figure", "db_chart", "custom_chart", "table")) and (blk.at("layout", default: "column") == "full")
+      let is-full-block = (blk.type in ("figure", "db_chart", "custom_chart", "table", "media_text")) and (blk.at("layout", default: "column") == "full")
       let is-inline-full = false
       if is-full-block {
         let pos-mode = blk.at("full_position", default: "auto")
@@ -1380,6 +1570,8 @@
     render-figure-box(blk, is-margin: is-margin, allow-float: false)
   } else if blk.type == "table" {
     render-table-box(blk, is-margin: is-margin, allow-float: false, style-variant: "tufte")
+  } else if blk.type == "media_text" {
+    render-media-text-box(blk, is-margin: is-margin, allow-float: false)
   } else if blk.type == "textbox_group" {
     let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "custom_chart", "table"))
     let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "custom_chart", "table")))
@@ -1574,8 +1766,8 @@
       }
       runs.push((kind: "break"))
     } else {
-      let has-box-visuals = (blk.type == "textbox_group") and blk.children.any(c => c.type in ("figure", "db_chart", "custom_chart", "table"))
-      let is-full = ((blk.type in ("figure", "db_chart", "custom_chart", "table", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")) or ((blk.type == "textbox_group") and (has-box-visuals or blk.at("layout", default: "column") == "full"))
+      let has-box-visuals = (blk.type == "textbox_group") and blk.children.any(c => c.type in ("figure", "db_chart", "custom_chart", "table", "media_text"))
+      let is-full = ((blk.type in ("figure", "db_chart", "custom_chart", "table", "media_text", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")) or ((blk.type == "textbox_group") and (has-box-visuals or blk.at("layout", default: "column") == "full"))
       if is-full {
         if curr-grid-items.len() > 0 {
           runs.push((kind: "grid", items: curr-grid-items))
@@ -1631,6 +1823,33 @@
           )).flatten()
         )
       }
+    }
+  }
+}
+
+// ============================================================================
+// Einspaltiger Hauptteil (für advisory_onecol)
+// ============================================================================
+
+#let render-one-column-body(
+  blocks,
+  callout-accent: lukb-cyan,
+  quote-accent: lukb-cyan,
+  heading-below: 0.65em,
+) = {
+  for blk in blocks {
+    if blk.type == "colbreak" {
+      pagebreak(weak: true)
+    } else {
+      render-single-block(
+        blk,
+        in-box: false,
+        inline-full: true,
+        allow-float: false,
+        callout-accent: callout-accent,
+        quote-accent: quote-accent,
+        heading-below: heading-below,
+      )
     }
   }
 }

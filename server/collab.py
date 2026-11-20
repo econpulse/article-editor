@@ -37,13 +37,19 @@ def collect_article_assets_map(
     Überspringt Assets, die in known_asset_ids enthalten sind, um wiederholte Datenübertragungen zu vermeiden.
     """
     known_set = set(known_asset_ids) if known_asset_ids is not None else None
-    needed_figure_aids = {
-        blk.get("asset_id", "")
-        for blk in doc.blocks
-        if blk.get("type") == "figure"
-        and blk.get("asset_id", "")
-        and (known_set is None or blk.get("asset_id", "") not in known_set)
-    }
+    needed_figure_aids: set[str] = set()
+    for blk in doc.blocks:
+        btype = blk.get("type")
+        if btype == "figure":
+            aid = blk.get("asset_id", "")
+            if aid and (known_set is None or aid not in known_set):
+                needed_figure_aids.add(aid)
+        elif btype == "media_text":
+            media = blk.get("media")
+            if isinstance(media, dict) and media.get("type") == "figure":
+                aid = media.get("asset_id", "")
+                if aid and (known_set is None or aid not in known_set):
+                    needed_figure_aids.add(aid)
     asset_records = get_assets_by_ids(needed_figure_aids) if needed_figure_aids else {}
 
     assets_map: dict[str, str] = {}
@@ -67,6 +73,28 @@ def collect_article_assets_map(
                 )
                 b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
                 assets_map[bid] = f"data:image/svg+xml;base64,{b64}"
+        elif btype == "media_text":
+            media = blk.get("media")
+            if isinstance(media, dict):
+                mtype = blk.get("media_type") or media.get("type") or "figure"
+                if mtype == "figure":
+                    aid = media.get("asset_id", "")
+                    if aid and (known_set is None or aid not in known_set) and aid not in assets_map:
+                        rec = asset_records.get(aid)
+                        if rec and rec.get("data"):
+                            b64 = base64.b64encode(rec["data"]).decode("ascii")
+                            mime = rec.get("mime_type", "image/svg+xml")
+                            assets_map[aid] = f"data:{mime};base64,{b64}"
+                elif mtype in ("db_chart", "custom_chart"):
+                    mid = media.get("id") or f"{blk.get('id', '')}_media"
+                    if mid and (known_set is None or mid not in known_set):
+                        svg_markup = render_block_chart_svg(
+                            media,
+                            embed_fonts=True,
+                            max_date=doc.metadata.publication_date,
+                        )
+                        b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+                        assets_map[mid] = f"data:image/svg+xml;base64,{b64}"
     return assets_map
 
 

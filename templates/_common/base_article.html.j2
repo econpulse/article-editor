@@ -580,6 +580,98 @@
       margin: 2em 0 1.4em 0;
     }
 
+    .blk-media-text {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      margin: 1.4em 0;
+    }
+
+    .blk-media-text.style-card {
+      border: 1px solid var(--lukb-border);
+      border-radius: 4px;
+      padding: 14px 16px;
+      background: #FFFFFF;
+    }
+
+    .blk-media-text.style-zebra {
+      padding: 14px 16px;
+      margin: 0;
+      border-top: 1px solid #E6ECF2;
+    }
+
+    .blk-media-text.style-zebra.zebra-even {
+      background: var(--lukb-surface);
+    }
+
+    .blk-media-text.style-zebra.zebra-odd {
+      background: #FFFFFF;
+    }
+
+    .blk-media-text.style-zebra.zebra-first {
+      margin-top: 1.4em;
+    }
+
+    .blk-media-text.style-zebra.zebra-last {
+      margin-bottom: 1.4em;
+      border-bottom: 1px solid #E6ECF2;
+    }
+
+    .blk-media-text-title {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-navy);
+      font-size: 1.02rem;
+      margin: 0 0 10px 0;
+    }
+
+    .blk-media-text-grid {
+      display: grid;
+      gap: 18px;
+      align-items: start;
+    }
+
+    .blk-media-text-grid.pos-top,
+    .blk-media-text-grid.pos-bottom {
+      grid-template-columns: 1fr;
+    }
+
+    .blk-media-text-media .blk-figure,
+    .blk-media-text-media .blk-table-wrap {
+      margin: 0;
+    }
+
+    .blk-media-text-media img.mt-clean-img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+
+    .blk-media-text-text p:first-child,
+    .blk-media-text-aside p:first-child {
+      margin-top: 0;
+    }
+
+    .blk-media-text-text p:last-child,
+    .blk-media-text-aside p:last-child {
+      margin-bottom: 0;
+    }
+
+    .blk-media-text-aside {
+      font-size: 0.9rem;
+      color: var(--lukb-text);
+    }
+
+    @media (max-width: 780px) {
+      .blk-media-text-grid {
+        grid-template-columns: 1fr !important;
+      }
+      .blk-media-text-media,
+      .blk-media-text-text,
+      .blk-media-text-aside {
+        order: initial !important;
+      }
+    }
+
     .blk-box-title {
       font-family: var(--font-heading);
       font-weight: 500;
@@ -829,6 +921,57 @@
         {% if blk.source %}
           <div class="blk-box-source">{{ blk.source }}</div>
         {% endif %}
+      </div>
+
+    {% elif blk.type == "media_text" %}
+      {% set m = blk.media or {} %}
+      {% set mtype = blk.media_type or m.type or 'figure' %}
+      {% set pos = blk.media_position or 'auto' %}
+      {% set eff_pos = 'left' if pos == 'auto' else pos %}
+      {% set has_aside = blk.aside_html is defined and (blk.aside_html | striptags | trim) != '' %}
+      {% set m_pct = blk.media_width_pct or 30 %}
+      {% set a_pct = blk.aside_width_pct or 26 %}
+      {% set t_pct = [20, 100 - m_pct - (a_pct if has_aside else 0)] | max %}
+      {% set style_cls = 'style-' ~ (blk.style_preset or 'plain') %}
+      {% set zebra_idx = blk._zebra_index if blk._zebra_index is defined else 0 %}
+      {% set zebra_cls = ('zebra-even' if (zebra_idx % 2 == 0) else 'zebra-odd') ~ (' zebra-first' if zebra_idx == 0 else '') ~ (' zebra-last' if blk._zebra_last else '') if blk.style_preset == 'zebra' else '' %}
+      <div class="blk-media-text {{ style_cls }} {{ zebra_cls }} {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
+        {% if blk.title %}
+          <div class="blk-media-text-title">{{ blk.title }}</div>
+        {% endif %}
+        {% if eff_pos in ('left', 'right') %}
+          {% if eff_pos == 'left' %}
+            {% set grid_cols = (m_pct ~ '% ' ~ t_pct ~ '% ' ~ a_pct ~ '%') if has_aside else (m_pct ~ '% 1fr') %}
+          {% else %}
+            {% set grid_cols = (t_pct ~ '% ' ~ m_pct ~ '% ' ~ a_pct ~ '%') if has_aside else ('1fr ' ~ m_pct ~ '%') %}
+          {% endif %}
+        {% else %}
+          {% set grid_cols = '1fr' %}
+        {% endif %}
+        <div class="blk-media-text-grid pos-{{ eff_pos }}" style="grid-template-columns: {{ grid_cols }};">
+          <div class="blk-media-text-media" style="order: {{ 2 if eff_pos in ('right', 'bottom') else 1 }};">
+            {% if mtype == 'table' %}
+              {{ render_single_block(m, in_box=true) }}
+            {% else %}
+              {% set has_meta = (m.title or '') != '' or (m.subtitle or '') != '' or (m.source or '') != '' %}
+              {% if has_meta %}
+                {{ render_single_block(m, in_box=true) }}
+              {% elif m.data_uri %}
+                <img src="{{ m.data_uri }}" alt="{{ blk.title or m.title or 'Grafik' }}" class="mt-clean-img" />
+              {% else %}
+                <div class="blk-figure-placeholder">Grafik-Platzhalter</div>
+              {% endif %}
+            {% endif %}
+          </div>
+          <div class="blk-media-text-text blk-richtext" style="order: {{ 1 if eff_pos in ('right', 'bottom') else 2 }};">
+            {{ blk.html | safe }}
+          </div>
+          {% if has_aside %}
+          <div class="blk-media-text-aside blk-richtext" style="order: 3;">
+            {{ blk.aside_html | safe }}
+          </div>
+          {% endif %}
+        </div>
       </div>
 
     {% elif blk.type == "spacer" %}

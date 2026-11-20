@@ -868,6 +868,32 @@
         ],
       };
     }
+    if (type === "media_text") {
+      return {
+        id: uid("blk"),
+        type: "media_text",
+        title: "",
+        layout: "full",
+        full_position: "inline",
+        media_type: "figure",
+        media_position: "auto",
+        media_width_pct: 30,
+        aside_width_pct: 26,
+        style_preset: "plain",
+        html: "<p><strong>Kernaussage:</strong> Beschreibender Text neben oder unter dem Medium …</p>",
+        aside_html: "",
+        media: {
+          id: uid("blk"),
+          type: "figure",
+          title: "",
+          subtitle: "",
+          source: "",
+          asset_id: "",
+          layout: "column",
+          full_position: "auto",
+        },
+      };
+    }
     if (type === "callout") {
       return {
         id: uid("blk"),
@@ -969,6 +995,8 @@
         return "Daten-Diagramm (Excel / Zwischenablage)";
       case "table":
         return "Daten-Tabelle";
+      case "media_text":
+        return "Media & Text (Kombi-Block)";
       case "callout":
         return "Kernaussagen / Callout";
       case "box_start":
@@ -1015,6 +1043,7 @@
         { type: "custom_chart", label: "Daten-Chart (Excel / TSV)", icon: "📊" },
         { type: "figure", label: "Grafik-Upload", icon: "🖼" },
         { type: "table", label: "Tabelle (Excel)", icon: "📋" },
+        { type: "media_text", label: "Media & Text (Kombi)", icon: "📰" },
       ],
     },
     {
@@ -1150,7 +1179,7 @@
       allBlocks.forEach(function (b, bIdx) {
         if (!b || b.id === blk.id) return;
         if (b.type === "spacer" || b.type === "colbreak" || b.type === "divider" || b.type === "box_start" || b.type === "box_end") return;
-        if ((b.type === "figure" || b.type === "db_chart" || b.type === "table") && (b.layout || "column") === "column") return;
+        if ((b.type === "figure" || b.type === "db_chart" || b.type === "custom_chart" || b.type === "table" || b.type === "media_text") && (b.layout || "column") === "column") return;
 
         let label = (bIdx + 1) + ". ";
         if (b.type === "heading") {

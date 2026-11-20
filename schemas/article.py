@@ -605,6 +605,111 @@ class PublicationsBlock(BaseModel):
         return cleaned
 
 
+MediaPositionMode = Literal["auto", "left", "right", "top", "bottom"]
+MediaTextMediaType = Literal["figure", "db_chart", "custom_chart", "table"]
+MediaTextStylePreset = Literal["plain", "card", "zebra"]
+
+
+def _build_default_media_payload(media_type: str) -> dict[str, Any]:
+    if media_type == "db_chart":
+        return DbChartBlock(layout="column").model_dump()
+    if media_type == "custom_chart":
+        return CustomChartBlock(layout="column").model_dump()
+    if media_type == "table":
+        return TableBlock(layout="column").model_dump()
+    return FigureBlock(layout="column").model_dump()
+
+
+def _validate_media_payload(media_type: str, raw_media: Any) -> dict[str, Any]:
+    data = dict(raw_media) if isinstance(raw_media, dict) else {}
+    data["layout"] = "column"
+    if media_type == "db_chart":
+        data["type"] = "db_chart"
+        return DbChartBlock.model_validate(data).model_dump()
+    if media_type == "custom_chart":
+        data["type"] = "custom_chart"
+        return CustomChartBlock.model_validate(data).model_dump()
+    if media_type == "table":
+        data["type"] = "table"
+        return TableBlock.model_validate(data).model_dump()
+    data["type"] = "figure"
+    return FigureBlock.model_validate(data).model_dump()
+
+
+class MediaTextBlock(MarginAnchorBlockBase):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["media_text"] = "media_text"
+    layout: Literal["column", "full"] = Field(
+        default="full",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+    full_position: FullPositionMode = Field(
+        default="inline",
+        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
+    )
+    title: str = Field(default="", description="Optionaler Block-Titel")
+    html: str = Field(default="<p></p>", description="Haupttext (RichText-HTML)")
+    aside_html: str = Field(
+        default="",
+        description="Optionale dritte Spalte rechts (z.B. Produktname / ISIN-Link)",
+    )
+    media_type: MediaTextMediaType = Field(
+        default="figure",
+        description="Art des eingebetteten Mediums: figure, db_chart, custom_chart, table",
+    )
+    media_position: MediaPositionMode = Field(
+        default="auto",
+        description="Position des Mediums relativ zum Text ('auto', 'left', 'right', 'top', 'bottom')",
+    )
+    media_width_pct: int = Field(
+        default=30,
+        ge=15,
+        le=70,
+        description="Breite des Mediums in Prozent bei Nebeneinander-Anordnung",
+    )
+    aside_width_pct: int = Field(
+        default=26,
+        ge=15,
+        le=45,
+        description="Breite der optionalen rechten Zusatzspalte in Prozent",
+    )
+    style_preset: MediaTextStylePreset = Field(
+        default="plain",
+        description="Visuelles Preset ('plain', 'card', 'zebra')",
+    )
+    media: dict[str, Any] = Field(
+        default_factory=lambda: _build_default_media_payload("figure"),
+        description="Konfiguration des eingebetteten Mediums (figure, db_chart, custom_chart oder table)",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_media_text_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        out = dict(data)
+        raw_mtype = str(out.get("media_type") or "figure").strip().lower()
+        if raw_mtype not in ("figure", "db_chart", "custom_chart", "table"):
+            raw_mtype = "figure"
+        out["media_type"] = raw_mtype
+
+        raw_pos = str(out.get("media_position") or "auto").strip().lower()
+        if raw_pos not in ("auto", "left", "right", "top", "bottom"):
+            raw_pos = "auto"
+        out["media_position"] = raw_pos
+
+        raw_style = str(out.get("style_preset") or "plain").strip().lower()
+        if raw_style not in ("plain", "card", "zebra"):
+            raw_style = "plain"
+        out["style_preset"] = raw_style
+
+        if out.get("full_position") is None:
+            out["full_position"] = "inline"
+
+        out["media"] = _validate_media_payload(raw_mtype, out.get("media"))
+        return out
+
+
 ContentBlock = Union[
     HeadingBlock,
     RichTextBlock,
@@ -622,6 +727,7 @@ ContentBlock = Union[
     GlossaryBlock,
     PublicationsBlock,
     CustomChartBlock,
+    MediaTextBlock,
 ]
 
 
@@ -642,6 +748,7 @@ _KNOWN_BLOCK_TYPES = {
     "footnotes",
     "glossary",
     "publications",
+    "media_text",
 }
 
 _DISCRIMINATED_BLOCK_ADAPTER = TypeAdapter(Annotated[ContentBlock, Field(discriminator="type")])

@@ -34,6 +34,12 @@ TOOLBAR_BLOCKS: list[BlockButtonDef] = [
         style="border-color:#037FDA;background:#EBF5FB;color:#002855;",
     ),
     BlockButtonDef("table", "+ Tabelle (inkl. Excel-Paste)"),
+    BlockButtonDef(
+        "media_text",
+        "+ Media & Text (Kombi)",
+        title="Kombiniert Grafik, Chart oder Tabelle mit einem Textblock (und optionaler Produkt-/ISIN-Spalte)",
+        style="border-color:#005A9C;background:#F0F7FF;color:#002855;",
+    ),
     BlockButtonDef("callout", "+ Kernaussagen-Box"),
     BlockButtonDef(
         "textbox_pair",
@@ -112,6 +118,7 @@ def document_metadata_card_ui(templates_list: list[dict[str, Any]]) -> ui.Tag:
                 ui.tags.select(
                     ui.tags.option("Investment Office News", value="Investment Office News", selected="selected"),
                     ui.tags.option("Finanzanalyse", value="Finanzanalyse"),
+                    ui.tags.option("Asset Management Advisory", value="Asset Management Advisory"),
                     id="meta-header-series",
                     class_="cms-select",
                 ),

@@ -42,10 +42,28 @@ def _resolve_portal_dist_dir() -> Path:
 
 STATIC_PORTAL_DIR = _resolve_portal_dist_dir()
 
+
+def _resolve_typst_cache_dir() -> Path:
+    env_dir = os.getenv("TYPST_CACHE_DIR")
+    if env_dir:
+        return Path(env_dir).resolve()
+
+    if os.getenv("RSTUDIO_CONNECT") or os.getenv("CONNECT_SERVER") or os.getenv("MSSQL_HOST") or os.getenv("MSSQL_SERVER"):
+        return (DATA_DIR / "typst_cache").resolve()
+
+    # Lokale Entwicklung: ausserhalb des Watch-Trees (OS Temp-Verzeichnis),
+    # damit WatchFiles (--reload) beim Materialisieren von Assets/Charts keinen Server-Reload auslöst.
+    import tempfile
+    return (Path(tempfile.gettempdir()) / "lukb_typst_cache").resolve()
+
+
+TYPST_CACHE_DIR = _resolve_typst_cache_dir()
+
 # Stelle sicher, dass Arbeitsverzeichnisse existieren
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 FONTS_DIR.mkdir(parents=True, exist_ok=True)
 STATIC_PORTAL_DIR.mkdir(parents=True, exist_ok=True)
+TYPST_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # Initialisiere lokalen Temp-Portalordner mit bestehendem Portal-Stand (falls vorhanden und Temp-Ordner leer)
 if STATIC_PORTAL_DIR != (DATA_DIR / "static_portal_dist").resolve() and (DATA_DIR / "static_portal_dist").exists():

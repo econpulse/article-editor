@@ -15,6 +15,7 @@
   function buildDbChartBlockBody() { return E.buildDbChartBlockBody.apply(this, arguments); }
   function buildDividerBlockBody() { return E.buildDividerBlockBody.apply(this, arguments); }
   function buildGlossaryBlockBody() { return E.buildGlossaryBlockBody.apply(this, arguments); }
+  function buildMediaTextBlockBody() { return E.buildMediaTextBlockBody.apply(this, arguments); }
   function buildQuoteBlockBody() { return E.buildQuoteBlockBody.apply(this, arguments); }
   function buildRichTextBlockBody() { return E.buildRichTextBlockBody.apply(this, arguments); }
   function buildSpacerBlockBody() { return E.buildSpacerBlockBody.apply(this, arguments); }
@@ -1021,7 +1022,7 @@
 
     // 1. Anchor-Pill auf dem Randelement selbst
     let anchorPill = headerLeft.querySelector(".block-anchor-pill");
-    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "custom_chart" || blk.type === "table") && (blk.layout || "column") === "column";
+    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "custom_chart" || blk.type === "table" || blk.type === "media_text") && (blk.layout || "column") === "column";
 
     if (isMarginType && blk.anchor_to) {
       if (!anchorPill) {
@@ -1066,7 +1067,7 @@
     } else {
       const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
       attachedMarginCount = blocksList.filter(function (o) {
-        return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column";
+        return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table" || o.type === "media_text") && (o.layout || "column") === "column";
       }).length;
     }
 
@@ -1089,7 +1090,7 @@
 
     const anchorCountMap = new Map();
     state.article.blocks.forEach(function (o) {
-      if (o && o.anchor_to && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table") && (o.layout || "column") === "column") {
+      if (o && o.anchor_to && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table" || o.type === "media_text") && (o.layout || "column") === "column") {
         anchorCountMap.set(o.anchor_to, (anchorCountMap.get(o.anchor_to) || 0) + 1);
       }
     });
@@ -1405,6 +1406,7 @@
       db_chart: buildDbChartBlockBody,
       custom_chart: buildCustomChartBlockBody,
       table: buildTableBlockBody,
+      media_text: buildMediaTextBlockBody,
       spacer: buildSpacerBlockBody,
       colbreak: buildColbreakBlockBody,
       quote: buildQuoteBlockBody,

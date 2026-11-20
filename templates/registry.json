@@ -23,6 +23,12 @@
       "name": "LUKB Factsheet (Fonds- & Strategieprofil)",
       "description": "Kompaktes 2-seitiges Factsheet für Anlagefonds & Anlagestrategien mit Stammdaten, Performance, Asset Allocation und ESG-Nachhaltigkeitsprofil.",
       "columns": 2
+    },
+    {
+      "id": "advisory_onecol",
+      "name": "LUKB Advisory / Report (1-spaltig A4)",
+      "description": "Einspaltiges A4-Layout über die volle Seitenbreite für Advisory-Publikationen, Produktübersichten (z. B. Top Chancen) sowie kombinierte Bild-/Chart-/Tabellen-Text-Blöcke.",
+      "columns": 1
     }
   ]
 }
