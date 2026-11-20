@@ -19,7 +19,13 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from schemas.article import ArticleDocument, CustomChartBlock, CustomChartSeriesItem, parse_block
-from services.chart_generator import _estimate_label_width_px
+from services.chart_common import (
+    _count_needed_decimals,
+    _format_ch_number,
+    _format_single_ch_number,
+    format_axis_ticks,
+)
+from services.chart_generator import _estimate_label_width_px, generate_db_chart_svg
 from services.custom_chart_generator import (
     generate_custom_chart_svg,
     infer_chart_configuration,
@@ -513,6 +519,117 @@ def test_custom_chart_svg_cache():
     assert len(_CUSTOM_CHART_SVG_CACHE) == 0
 
 
+def test_consistent_axis_tick_decimals():
+    """
+    Stellt sicher, dass an Achsen (Zeitreihen & Kategoriebalken) immer einheitlich viele
+    Nachkommastellen dargestellt werden (entsprechend der Zahl, die die meisten benötigt).
+    Beispiel: 100.0, 97.5, 95.0 statt 100, 97.5, 95.
+    """
+    # 1. Nachkommastellen-Erkennung
+    assert _count_needed_decimals(100.0) == 0
+    assert _count_needed_decimals(97.5) == 1
+    assert _count_needed_decimals(95.0) == 0
+    assert _count_needed_decimals(0.25) == 2
+    assert _count_needed_decimals(0.005) == 3
+    assert _count_needed_decimals(0.0) == 0
+
+    # 2. Einheitliche Formatierung mit format_axis_ticks
+    # Schrittweite 2.5: 97.5 benötigt 1 Dezimalstelle -> alle Ticks erhalten 1 Dezimalstelle
+    ticks_25 = [90.0, 92.5, 95.0, 97.5, 100.0, 102.5]
+    res_25 = format_axis_ticks(ticks_25, step=2.5)
+    assert res_25 == ["90.0", "92.5", "95.0", "97.5", "100.0", "102.5"]
+    assert "100.0" in res_25
+    assert "97.5" in res_25
+    assert "95.0" in res_25
+
+    # Ticks direkt: 100, 97.5, 95 -> 100.0, 97.5, 95.0
+    res_direct = format_axis_ticks([100.0, 97.5, 95.0])
+    assert res_direct == ["100.0", "97.5", "95.0"]
+
+    # Ganze Zahlen: Schrittweite 1.0 -> 0 Nachkommastellen
+    ticks_int = [95.0, 96.0, 97.0, 98.0, 99.0, 100.0]
+    assert format_axis_ticks(ticks_int, step=1.0) == ["95", "96", "97", "98", "99", "100"]
+
+    # Schrittweite 0.25 -> 2 Nachkommastellen für alle Ticks
+    ticks_025 = [0.0, 0.25, 0.5, 0.75, 1.0]
+    assert format_axis_ticks(ticks_025, step=0.25) == ["0.00", "0.25", "0.50", "0.75", "1.00"]
+
+    # Grosse Zahlen mit Tausendertrenner
+    ticks_k = [1000.0, 1500.0, 2000.0]
+    assert format_axis_ticks(ticks_k, step=500.0) == ["1'000", "1'500", "2'000"]
+    ticks_k_dec = [997.5, 1000.0, 1002.5]
+    assert format_axis_ticks(ticks_k_dec, step=2.5) == ["997.5", "1'000.0", "1'002.5"]
+
+    # 3. _format_ch_number Einzelaufruf
+    assert _format_ch_number(100.0, step=2.5) == "100.0"
+    assert _format_ch_number(97.5, step=2.5) == "97.5"
+    assert _format_ch_number(95.0, step=2.5) == "95.0"
+    assert _format_ch_number(100.0, step=1.0) == "100"
+
+    # 4. Daten-Chart (Custom Chart Timeseries): SVG-Verifikation
+    tsv_ts = (
+        "Datum\tIndex\n"
+        "2024-01-01\t91.0\n"
+        "2024-02-01\t96.2\n"
+        "2024-03-01\t101.5\n"
+    )
+    blk_custom_ts = {
+        "id": "blk_test_ts_decimals",
+        "type": "custom_chart",
+        "chart_type": "timeseries",
+        "raw_tsv": tsv_ts,
+    }
+    svg_custom_ts = generate_custom_chart_svg(blk_custom_ts, embed_fonts=False)
+    # Ticks müssen 100.0, 97.5, 95.0 sein
+    assert ">100.0<" in svg_custom_ts
+    assert ">97.5<" in svg_custom_ts
+    assert ">95.0<" in svg_custom_ts
+    assert ">100<" not in svg_custom_ts
+    assert ">95<" not in svg_custom_ts
+
+    # 5. Daten-Chart (Custom Chart Category Bar horizontal): X-Achsen-Verifikation mit Dezimal-Ticks
+    tsv_bar_horiz = (
+        "Branche\tPerformance\n"
+        "Banken\t0.5\n"
+        "Pharma\t1.2\n"
+        "Tech\t2.5\n"
+    )
+    blk_custom_horiz = {
+        "id": "blk_test_horiz_decimals",
+        "type": "custom_chart",
+        "chart_type": "category_bar",
+        "orientation": "horizontal",
+        "raw_tsv": tsv_bar_horiz,
+    }
+    svg_custom_horiz = generate_custom_chart_svg(blk_custom_horiz, embed_fonts=False)
+    # Ticks müssen einheitlich 1 Dezimalstelle aufweisen (0.0, 0.5, 1.0, 1.5, 2.0, 2.5)
+    assert ">0.0<" in svg_custom_horiz
+    assert ">0.5<" in svg_custom_horiz
+    assert ">1.0<" in svg_custom_horiz
+    assert ">2.0<" in svg_custom_horiz
+    assert ">0<" not in svg_custom_horiz
+    assert ">1<" not in svg_custom_horiz
+    assert ">2<" not in svg_custom_horiz
+
+    # 6. DB-Chart Timeseries: SVG-Verifikation mit Leitzinsen (SNB_RATE mit 0.5er Schritten)
+    blk_db_chart = {
+        "id": "blk_test_db_decimals",
+        "type": "db_chart",
+        "series": [{"ticker": "SNB_RATE", "chart_type": "line", "label": "SNB"}],
+        "start_date": "2022-01-01",
+    }
+    svg_db_chart = generate_db_chart_svg(blk_db_chart, embed_fonts=False)
+    # Alle Ticks müssen mit 1 Dezimalstelle vorliegen (-1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0)
+    assert ">0.0<" in svg_db_chart
+    assert ">0.5<" in svg_db_chart
+    assert ">1.0<" in svg_db_chart
+    assert ">1.5<" in svg_db_chart
+    assert ">2.0<" in svg_db_chart
+    assert ">0<" not in svg_db_chart
+    assert ">1<" not in svg_db_chart
+    assert ">2<" not in svg_db_chart
+
+
 if __name__ == "__main__":
     test_parsing_helpers()
     test_auto_detection()
@@ -523,4 +640,5 @@ if __name__ == "__main__":
     test_pydantic_schema_validation()
     test_dual_output_typst_and_web_rendering()
     test_custom_chart_svg_cache()
+    test_consistent_axis_tick_decimals()
     print("ALL CUSTOM CHART TESTS PASSED SUCCESSFULLY!")

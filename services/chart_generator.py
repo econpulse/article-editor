@@ -42,6 +42,7 @@ from services.chart_common import (
     _quote_svg_font,
     _render_empty_state_svg,
     compute_plot_height_px,
+    format_axis_ticks,
     render_timeseries_svg,
     resolve_chart_palette,
     resolve_legend_columns,

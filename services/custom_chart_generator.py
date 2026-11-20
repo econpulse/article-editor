@@ -33,6 +33,7 @@ from services.chart_common import (
     _format_ch_number,
     _render_empty_state_svg,
     compute_plot_height_px,
+    format_axis_ticks,
     open_svg_document,
     parse_flexible_date,
     parse_number,
@@ -654,7 +655,7 @@ def _render_vertical_category_bar_svg(
     axis_font_size = 20.5 if is_column else 14.0
     legend_font_size = 20.5 if is_column else 14.0
 
-    y_tick_labels = [_format_ch_number(tick, y_step) for tick in y_ticks]
+    y_tick_labels = format_axis_ticks(y_ticks, y_step)
     max_y_label_w = max(
         (_estimate_label_width_px(lbl, axis_font_size) for lbl in y_tick_labels),
         default=16.0,
@@ -904,9 +905,9 @@ def _render_horizontal_bar_svg(
     svg_parts.append(f'  <rect width="{svg_w}" height="{svg_h}" fill="#FFFFFF"/>')
 
     # Vertikale Gitterlinien & X-Ticks
-    for tick in x_ticks:
+    x_tick_labels = format_axis_ticks(x_ticks, x_step)
+    for tick, lbl in zip(x_ticks, x_tick_labels):
         xp = x_px(tick)
-        lbl = _format_ch_number(tick, x_step)
         is_zero = math.isclose(tick, 0.0, abs_tol=1e-6)
         line_col = "#002855" if is_zero else "#E2E8F0"
         stroke_w = "1.5" if is_zero else "1.0"

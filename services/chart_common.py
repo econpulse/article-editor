@@ -415,23 +415,64 @@ def _compute_nice_ticks(min_val: float, max_val: float, target_ticks: int = 5) -
     return ticks
 
 
-def _format_ch_number(val: float, step: float) -> str:
+def _count_needed_decimals(val: float, max_check: int = 6) -> int:
+    """Ermittelt die minimale Anzahl an Nachkommastellen für val (bis max_check)."""
+    if math.isnan(val) or math.isinf(val) or abs(val) < 1e-9:
+        return 0
+    for d in range(max_check):
+        if abs(val - round(val, d)) < 1e-6:
+            return d
+    return max_check
+
+
+def _format_single_ch_number(val: float, decimals: int = 0) -> str:
+    """Formatiert eine einzelne Zahl mit fixer Dezimalstellenanzahl im Schweizer Format."""
+    if math.isnan(val) or math.isinf(val):
+        return ""
     if abs(val) < 1e-9:
         val = 0.0
-    if step >= 1.0 and abs(val - round(val)) < 1e-6:
+    if decimals <= 0:
         int_val = int(round(val))
         return f"{int_val:,}".replace(",", "'")
-    elif step >= 0.25:
-        s = f"{val:,.2f}".replace(",", "'")
-        if s.endswith(".00"):
-            return s[:-3]
-        if s.endswith("0") and "." in s:
-            return s[:-1]
-        return s
-    elif step >= 0.05:
-        return f"{val:,.2f}".replace(",", "'")
-    else:
-        return f"{val:,.3f}".replace(",", "'")
+    rounded = round(val, decimals)
+    if abs(rounded) < 1e-9:
+        rounded = 0.0
+    return f"{rounded:,.{decimals}f}".replace(",", "'")
+
+
+def format_axis_ticks(
+    ticks: list[float] | tuple[float, ...],
+    step: float | None = None,
+) -> list[str]:
+    """
+    Formatiert eine Liste von Achsenticks einheitlich im Schweizer Zahlenformat:
+    - Alle Ticks erhalten dieselbe Anzahl an Nachkommastellen (wie die Zahl, die die meisten benötigt).
+    - Berücksichtigt Schweizer Tausendertrenner (') und Vorzeichen.
+    """
+    if not ticks:
+        return []
+
+    needed = [_count_needed_decimals(t) for t in ticks]
+    if step is not None and not math.isnan(step) and not math.isinf(step) and step > 0:
+        needed.append(_count_needed_decimals(step))
+    decimals = max(needed) if needed else 0
+
+    return [_format_single_ch_number(t, decimals=decimals) for t in ticks]
+
+
+def _format_ch_number(val: float, step: float = 1.0, decimals: int | None = None) -> str:
+    """
+    Formatiert eine Zahl im Schweizer Zahlenformat.
+    Wenn `decimals` angegeben ist, wird diese Nachkommastellenanzahl verwendet.
+    Andernfalls wird die benötigte Anzahl anhand von `step` und `val` ermittelt.
+    """
+    if decimals is not None:
+        return _format_single_ch_number(val, decimals=decimals)
+
+    needed = _count_needed_decimals(val)
+    if step > 0 and not math.isnan(step) and not math.isinf(step):
+        needed = max(needed, _count_needed_decimals(step))
+    return _format_single_ch_number(val, decimals=needed)
 
 
 def _estimate_label_width_px(label: str, font_size: float) -> float:
@@ -634,7 +675,7 @@ def render_timeseries_svg(
     legend_rows = math.ceil(len(resolved_series) / items_per_legend_row)
     legend_row_gap = 29.0 if is_column_layout else 22.0
 
-    y_tick_labels = [_format_ch_number(tick, y_step) for tick in y_ticks]
+    y_tick_labels = format_axis_ticks(y_ticks, y_step)
     max_y_label_w = max(
         (_estimate_label_width_px(lbl, axis_font_size) for lbl in y_tick_labels),
         default=16.0,
