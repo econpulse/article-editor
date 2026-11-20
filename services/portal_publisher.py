@@ -183,8 +183,9 @@ def _render_portal_index(dist_dir: Path, manifest: dict[str, Any]) -> None:
     # Kategorien zählen
     categories: dict[str, int] = {}
     for art in articles_list:
-        cat = art.get("category", "Anlagepolitik & Märkte")
-        categories[cat] = categories.get(cat, 0) + 1
+        cat = art.get("category") or ""
+        if cat:
+            categories[cat] = categories.get(cat, 0) + 1
 
     build_date = datetime.now().strftime("%d. %B %Y")
     rendered_html = template.render(
@@ -308,7 +309,7 @@ def publish_article(
         "title": doc.metadata.title,
         "subtitle": doc.metadata.subtitle,
         "lead": doc.metadata.lead,
-        "category": doc.metadata.category or "Anlagepolitik & Märkte",
+        "category": doc.metadata.category or "",
         "template_id": doc.template_id,
         "publication_date": doc.metadata.publication_date,
         "date_display": date_display,

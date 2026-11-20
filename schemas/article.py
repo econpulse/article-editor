@@ -43,7 +43,7 @@ class ArticleMetadata(BaseModel):
         default_factory=lambda: date.today().isoformat(),
         description="Publikationsdatum (ISO oder Anzeigeformat)",
     )
-    category: str = Field(default="Anlagepolitik & Märkte", description="Rubrik / Publikationsreihe")
+    category: str = Field(default="", description="Rubrik / Publikationsreihe")
     header_series: str = Field(
         default="Investment Office News",
         description="Kopfzeile oben rechts (Investment Office News oder Finanzanalyse)",

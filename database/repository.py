@@ -68,7 +68,7 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
         subtitle=row.subtitle or "",
         lead=row.lead or "",
         publication_date=row.publication_date or "",
-        category=row.category or "Anlagepolitik & Märkte",
+        category=row.category or "",
         header_series=getattr(row, "header_series", None) or "Investment Office News",
         authors=[AuthorItem.model_validate(a) for a in authors_raw if isinstance(a, dict)],
         tags=[str(t).strip() for t in tags_raw if str(t).strip()],
@@ -345,7 +345,7 @@ def save_article(
                 and (row.subtitle or "") == base_doc.metadata.subtitle
                 and (row.lead or "") == base_doc.metadata.lead
                 and (row.publication_date or "") == base_doc.metadata.publication_date
-                and (row.category or "Anlagepolitik & Märkte") == base_doc.metadata.category
+                and (row.category or "") == base_doc.metadata.category
                 and (getattr(row, "header_series", None) or "Investment Office News") == base_doc.metadata.header_series
                 and (row.disclaimer or "") == base_doc.metadata.disclaimer
                 and (row.authors_json or "[]") == base_authors_ser
@@ -455,7 +455,7 @@ def create_new_article(
                 "Fassen Sie hier die wichtigsten Erkenntnisse (Management Summary) in zwei bis drei "
                 "prägnanten Sätzen für die Leserinnen und Leser zusammen."
             ),
-            category="Anlagepolitik & Märkte",
+            category="",
             authors=[AuthorItem(name="Titel Vorname Name", role="Funktion / Rolle")],
         ),
         blocks=[

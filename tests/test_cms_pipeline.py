@@ -2336,6 +2336,57 @@ def test_table_font_size_step_schema_and_rendering():
     assert docx_doc.tables[2].rows[1].cells[0].paragraphs[0].runs[0].font.size.pt == 7.0
 
 
+def test_empty_category_and_verfasst_von_in_pdf():
+    """
+    Prüft:
+    1. Rubrik / Publikationsreihe darf leer sein und wird beim Neuanlegen/Speichern nicht überschrieben.
+    2. Im PDF und HTML steht bei den Autoren einheitlich 'Verfasst von:' statt 'Autoren:'.
+    3. Bei leerer Rubrik erzeugt Market Flash kein hängendes ' · '.
+    """
+    import io
+    import pypdf
+    from schemas.article import ArticleDocument, ArticleMetadata, AuthorItem
+    from database.repository import create_new_article, save_article, get_article
+    from services.renderer import render_pdf_bytes, render_web_html
+
+    # 1. Standard-Default von category ist leer
+    meta_default = ArticleMetadata()
+    assert meta_default.category == "", "Default category muss ein leerer String sein"
+
+    # 2. Neuanlage über create_new_article startet mit leerer Rubrik
+    new_art = create_new_article("investment_focus", user="Author Test")
+    assert new_art.metadata.category == "", "Neuer Artikel soll mit leerer Rubrik starten"
+
+    # 3. Leere Rubrik speichern & erneut aus DB laden
+    new_art.metadata.category = ""
+    save_article(new_art, user="Author Test")
+    reloaded = get_article(new_art.id)
+    assert reloaded is not None
+    assert reloaded.metadata.category == "", "Leere Rubrik darf nach dem Speichern nicht durch Default überschrieben werden"
+
+    # 4. PDF-Rendering (Standard-Header): 'Verfasst von:' statt 'Autoren:'
+    new_art.metadata.authors = [AuthorItem(name="Sabine Lustenberger", role="Leiterin Aktienanalyse")]
+    pdf_bytes = render_pdf_bytes(new_art)
+    reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+    pdf_text = "\n".join(p.extract_text() for p in reader.pages)
+    assert "Verfasst von:" in pdf_text
+    assert "Autoren:" not in pdf_text
+
+    # 5. Web-HTML Rendering: 'Verfasst von:' statt 'Autoren:'
+    html_out = render_web_html(new_art)
+    assert "Verfasst von:" in html_out
+    assert "Autoren:" not in html_out
+
+    # 6. Market Flash (Executive Header): Leere Rubrik erzeugt kein ' · '
+    flash_art = create_new_article("market_flash", user="Author Test")
+    flash_art.metadata.category = ""
+    flash_pdf_bytes = render_pdf_bytes(flash_art)
+    flash_reader = pypdf.PdfReader(io.BytesIO(flash_pdf_bytes))
+    flash_pdf_text = "\n".join(p.extract_text() for p in flash_reader.pages)
+    assert "LUKB INVESTMENT OFFICE" in flash_pdf_text
+    assert "LUKB INVESTMENT OFFICE ·" not in flash_pdf_text
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -2364,6 +2415,7 @@ if __name__ == "__main__":
     test_typst_pdf_outline_hierarchy()
     test_pdfjs_preview_pipeline()
     test_richtext_empty_lines_and_template_spacing()
+    test_empty_category_and_verfasst_von_in_pdf()
     test_full_cms_workflow()
     import tests.test_custom_chart as tcc
     tcc.test_parsing_helpers()

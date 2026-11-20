@@ -37,7 +37,7 @@ class ArticleModel(Base):
     title: Mapped[str] = mapped_column(Unicode(500), nullable=False, default="Neue Publikation")
     subtitle: Mapped[str] = mapped_column(Unicode(500), nullable=False, default="")
     lead: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="")
-    category: Mapped[str] = mapped_column(Unicode(200), nullable=False, default="Anlagepolitik & Märkte")
+    category: Mapped[str] = mapped_column(Unicode(200), nullable=False, default="")
     header_series: Mapped[str] = mapped_column(Unicode(200), nullable=False, default="Investment Office News")
     publication_date: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="")
     authors_json: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="[]")

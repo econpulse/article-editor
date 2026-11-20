@@ -60,7 +60,7 @@
         <div class="card-top-accent {{ art.template_id }}"></div>
         <div class="card-body">
           <div class="card-meta-line">
-            <span class="card-category">{{ art.category }}</span>
+            {% if art.category %}<span class="card-category">{{ art.category }}</span>{% endif %}
             <span class="card-date">{{ art.date_display }}</span>
           </div>
 

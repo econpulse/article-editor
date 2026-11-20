@@ -253,7 +253,7 @@
           inset: (x: 10pt, y: 6pt),
           radius: 2pt
         )[
-          #text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[Autoren: ]
+          #text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[Verfasst von: ]
           #h(4pt)
           #for (idx, a) in meta.authors.enumerate() [
             #if idx > 0 [ #text(fill: lukb-muted)[ · ] ]
@@ -285,9 +285,10 @@
     #grid(
       columns: (1fr, auto),
       align(left + horizon)[
+        #let cat-text = meta.at("category", default: "")
         #cms-link-meta("meta-category")[
           #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-cyan, tracking: 0.8pt)[
-            LUKB INVESTMENT OFFICE · #upper(meta.at("category", default: ""))
+            #if cat-text != "" [LUKB INVESTMENT OFFICE · #upper(cat-text)] else [LUKB INVESTMENT OFFICE]
           ]
         ]
       ],
