@@ -150,18 +150,21 @@ def _group_blocks_into_render_items(blocks: list[dict[str, Any]]) -> list[dict[s
     """
     grouped: list[dict[str, Any]] = []
     current_box_children: list[dict[str, Any]] | None = None
+    current_box_id: str = ""
 
     for blk in blocks:
         btype = blk.get("type")
         if btype == "box_start":
             if current_box_children is not None:
                 if current_box_children:
-                    grouped.append({"type": "textbox_group", "children": current_box_children})
+                    grouped.append({"type": "textbox_group", "id": current_box_id, "children": current_box_children})
             current_box_children = []
+            current_box_id = str(blk.get("id", "") or "")
         elif btype == "box_end":
             if current_box_children is not None:
-                grouped.append({"type": "textbox_group", "children": current_box_children})
+                grouped.append({"type": "textbox_group", "id": current_box_id, "children": current_box_children})
                 current_box_children = None
+                current_box_id = ""
         else:
             if current_box_children is not None:
                 current_box_children.append(blk)
@@ -169,7 +172,7 @@ def _group_blocks_into_render_items(blocks: list[dict[str, Any]]) -> list[dict[s
                 grouped.append(blk)
 
     if current_box_children is not None and current_box_children:
-        grouped.append({"type": "textbox_group", "children": current_box_children})
+        grouped.append({"type": "textbox_group", "id": current_box_id, "children": current_box_children})
 
     return grouped
 
@@ -369,7 +372,11 @@ def _materialize_chart_svg(work_dir: Path, svg_markup: str) -> str:
     return chart_filename
 
 
-def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, Any]:
+def _prepare_typst_payload(
+    doc: ArticleDocument,
+    work_dir: Path,
+    interactive_links: bool = False,
+) -> dict[str, Any]:
     """
     Bereitet das Artikel-Dictionary für Typst auf:
     - Konvertiert HTML-Rich-Text-Blöcke in sicheres Typst-Markup.
@@ -378,6 +385,7 @@ def _prepare_typst_payload(doc: ArticleDocument, work_dir: Path) -> dict[str, An
     - Gruppiert Blöcke zwischen `box_start` und `box_end` zu einer gemeinsamen farblichen Textbox.
     """
     payload = _prepare_common_article_payload(doc)
+    payload["interactive_links"] = bool(interactive_links)
     raw_blocks = payload.get("blocks", [])
     asset_cache = _fetch_doc_asset_records(raw_blocks)
 
@@ -596,10 +604,14 @@ def _get_or_create_compiler(template_id: str, work_typ: Path, root_dir: Path) ->
         return compiler
 
 
-def _compile_typst(doc: ArticleDocument, output_format: str) -> bytes | list[bytes]:
+def _compile_typst(
+    doc: ArticleDocument,
+    output_format: str,
+    interactive_links: bool = False,
+) -> bytes | list[bytes]:
     """Gemeinsame Typst-Kompilierungspipeline für PDF (`pdf`) und Seiten-SVGs (`svg`)."""
     work_typ, work_dir = _ensure_typst_workspace(doc.template_id)
-    payload = _prepare_typst_payload(doc, work_dir)
+    payload = _prepare_typst_payload(doc, work_dir, interactive_links=interactive_links)
     article_json_str = json.dumps(payload, ensure_ascii=False)
 
     try:
@@ -623,17 +635,17 @@ def _compile_typst(doc: ArticleDocument, output_format: str) -> bytes | list[byt
         )
 
 
-def render_pdf_bytes(doc: ArticleDocument) -> bytes:
+def render_pdf_bytes(doc: ArticleDocument, interactive_links: bool = False) -> bytes:
     """Kompiliert ein ArticleDocument mit der aktuellsten Typst-Engine zu einem PDF (bytes)."""
-    pdf_bytes = _compile_typst(doc, "pdf")
+    pdf_bytes = _compile_typst(doc, "pdf", interactive_links=interactive_links)
     if isinstance(pdf_bytes, list):
         return pdf_bytes[0]
     return pdf_bytes
 
 
 def render_preview_pdf_base64(doc: ArticleDocument) -> str:
-    """Kompiliert ein ArticleDocument in-memory zu einem PDF und gibt dieses als Base64-String zurück."""
-    pdf_bytes = render_pdf_bytes(doc)
+    """Kompiliert ein ArticleDocument in-memory zu einem interaktiven Vorschau-PDF (Base64)."""
+    pdf_bytes = render_pdf_bytes(doc, interactive_links=True)
     return base64.b64encode(pdf_bytes).decode("ascii")
 
 

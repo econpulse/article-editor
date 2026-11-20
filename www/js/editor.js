@@ -2703,6 +2703,7 @@
       const pageBadge = document.getElementById("preview-page-count");
       const refreshBtn = document.getElementById("btn_refresh_preview");
       if (!pdfContainer) return;
+      if (E.ensurePdfClickNavigation) E.ensurePdfClickNavigation(pdfContainer);
 
       if (refreshBtn && !refreshBtn._hasPdfResetListener) {
         refreshBtn._hasPdfResetListener = true;
@@ -2823,6 +2824,11 @@
               return;
             }
             throw err;
+          }
+
+          if (renderSeq !== _currentPdfRenderSeq) return;
+          if (E.extractPageCmsTargets) {
+            await E.extractPageCmsTargets(page, pageWrap, unscaled, function () { return renderSeq !== _currentPdfRenderSeq; });
           }
         }
 

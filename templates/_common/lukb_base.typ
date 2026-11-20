@@ -74,6 +74,26 @@
   if s.starts-with("/") { s } else { "/" + s }
 }
 
+// Interaktive Vorschau-Links für PDF -> Editor-Fokus-Synchronisation
+#let _cms-interactive-links = {
+  let raw = sys.inputs.at("article_json", default: none)
+  if raw == none { false } else { json(bytes(raw)).at("interactive_links", default: false) == true }
+}
+
+#let cms-link-block(blk, body) = {
+  if not _cms-interactive-links { return body }
+  let bid = str(blk.at("id", default: "")).trim()
+  if bid == "" { return body }
+  link("https://cms-block.invalid/block/" + bid, body)
+}
+
+#let cms-link-meta(field-id, body) = {
+  if not _cms-interactive-links { return body }
+  let fid = str(field-id).trim()
+  if fid == "" { return body }
+  link("https://cms-block.invalid/meta/" + fid, body)
+}
+
 // ============================================================================
 // Überlappungsfreie Fusszeile (Seite 1 mit Disclaimer + Seitenzahl im Grid)
 // ============================================================================
@@ -97,7 +117,9 @@
           align: (left + bottom, right + bottom),
           [
             #set par(justify: false, leading: 0.25em)
-            #text(font: font-body, weight: "light", size: 6.8pt, fill: black)[#disclaimer]
+            #cms-link-meta("meta-disclaimer")[
+              #text(font: font-body, weight: "light", size: 6.8pt, fill: black)[#disclaimer]
+            ]
           ],
           [#page-str]
         )
@@ -133,8 +155,10 @@
       #pad(top: 3.5pt)[
         #let raw-header-series = meta.at("header_series", default: none)
         #let header-series-text = if raw-header-series != none and raw-header-series != "" { raw-header-series } else { "Investment Office News" }
-        #text(font: font-heading, weight: "medium", size: 14pt, fill: rgb("#0093D1"))[
-          #header-series-text
+        #cms-link-meta("meta-header-series")[
+          #text(font: font-heading, weight: "medium", size: 14pt, fill: rgb("#0093D1"))[
+            #header-series-text
+          ]
         ]
       ]
     ]
@@ -145,19 +169,21 @@
   let tags = meta.at("tags", default: ())
   if tags.len() > 0 [
     #if top-space > 0pt [ #v(top-space) ]
-    #stack(
-      dir: ltr,
-      spacing: 5pt,
-      ..tags.map(tag => box(
-        fill: rgb("#F1F5F9"),
-        stroke: 0.5pt + rgb("#CBD5E1"),
-        radius: 2pt,
-        inset: (x: 5pt, y: 2.5pt),
-        outset: 0pt,
-        baseline: 0%,
-        [#text(font: font-heading, size: 7.5pt, weight: "medium", fill: lukb-navy)[#tag]]
-      ))
-    )
+    #cms-link-meta("meta-tags-container")[
+      #stack(
+        dir: ltr,
+        spacing: 5pt,
+        ..tags.map(tag => box(
+          fill: rgb("#F1F5F9"),
+          stroke: 0.5pt + rgb("#CBD5E1"),
+          radius: 2pt,
+          inset: (x: 5pt, y: 2.5pt),
+          outset: 0pt,
+          baseline: 0%,
+          [#text(font: font-heading, size: 7.5pt, weight: "medium", fill: lukb-navy)[#tag]]
+        ))
+      )
+    ]
     #if bottom-space > 0pt [ #v(bottom-space) ]
   ]
 }
@@ -173,6 +199,7 @@
     #v(14pt)
 
     #let sub-line = if meta.subtitle != "" { meta.subtitle } else if meta.at("category", default: "") != "" { meta.category } else { "" }
+    #let sub-field-id = if meta.subtitle != "" { "meta-subtitle" } else { "meta-category" }
     #let display-date = format-pub-date(meta.publication_date)
 
     #if sub-line != "" or display-date != "" [
@@ -181,12 +208,16 @@
         gutter: 10pt,
         align(left + bottom)[
           #if sub-line != "" [
-            #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue)[#sub-line]
+            #cms-link-meta(sub-field-id)[
+              #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue)[#sub-line]
+            ]
           ]
         ],
         align(right + bottom)[
           #if display-date != "" [
-            #text(font: font-body, weight: "light", size: 11pt, fill: lukb-muted)[#display-date]
+            #cms-link-meta("meta-pub-date")[
+              #text(font: font-body, weight: "light", size: 11pt, fill: lukb-muted)[#display-date]
+            ]
           ]
         ]
       )
@@ -197,7 +228,9 @@
       #align(left)[
         #set par(justify: false, leading: 0.42em)
         #set text(hyphenate: false)
-        #text(font: font-heading, weight: "medium", size: 22pt, fill: lukb-navy)[#meta.title]
+        #cms-link-meta("meta-title")[
+          #text(font: font-heading, weight: "medium", size: 22pt, fill: lukb-navy)[#meta.title]
+        ]
       ]
     ]
 
@@ -205,25 +238,29 @@
       #block(above: 0pt, below: lead-below)[
         #align(left)[
           #set par(justify: false, leading: 0.68em)
-          #text(font: font-body, weight: "light", size: 10.8pt, fill: lukb-text)[#meta.lead]
+          #cms-link-meta("meta-lead")[
+            #text(font: font-body, weight: "light", size: 10.8pt, fill: lukb-text)[#meta.lead]
+          ]
         ]
       ]
     ]
 
     #if meta.authors.len() > 0 [
-      #block(
-        width: 100%,
-        fill: lukb-surface,
-        inset: (x: 10pt, y: 6pt),
-        radius: 2pt
-      )[
-        #text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[Autoren: ]
-        #h(4pt)
-        #for (idx, a) in meta.authors.enumerate() [
-          #if idx > 0 [ #text(fill: lukb-muted)[ · ] ]
-          #text(font: font-heading, weight: "medium", size: 8.2pt, fill: lukb-text)[#a.name]
-          #if a.role != "" [
-            #text(font: font-body, weight: "light", size: 8pt, fill: lukb-muted)[ (#a.role)]
+      #cms-link-meta("meta-authors-container")[
+        #block(
+          width: 100%,
+          fill: lukb-surface,
+          inset: (x: 10pt, y: 6pt),
+          radius: 2pt
+        )[
+          #text(font: font-heading, weight: "medium", size: 8pt, fill: lukb-navy)[Autoren: ]
+          #h(4pt)
+          #for (idx, a) in meta.authors.enumerate() [
+            #if idx > 0 [ #text(fill: lukb-muted)[ · ] ]
+            #text(font: font-heading, weight: "medium", size: 8.2pt, fill: lukb-text)[#a.name]
+            #if a.role != "" [
+              #text(font: font-body, weight: "light", size: 8pt, fill: lukb-muted)[ (#a.role)]
+            ]
           ]
         ]
       ]
@@ -248,51 +285,63 @@
     #grid(
       columns: (1fr, auto),
       align(left + horizon)[
-        #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-cyan, tracking: 0.8pt)[
-          LUKB INVESTMENT OFFICE · #upper(meta.at("category", default: ""))
+        #cms-link-meta("meta-category")[
+          #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-cyan, tracking: 0.8pt)[
+            LUKB INVESTMENT OFFICE · #upper(meta.at("category", default: ""))
+          ]
         ]
       ],
       align(right + horizon)[
-        #text(font: font-body, weight: "light", size: 10.5pt, fill: rgb("#D6DEE8"))[
-          #format-pub-date(meta.publication_date)
+        #cms-link-meta("meta-pub-date")[
+          #text(font: font-body, weight: "light", size: 10.5pt, fill: rgb("#D6DEE8"))[
+            #format-pub-date(meta.publication_date)
+          ]
         ]
       ]
     )
     #v(6pt)
     #if meta.subtitle != "" [
-      #text(font: font-body, weight: "light", size: 10pt, fill: rgb("#B8C7D9"))[#meta.subtitle]
+      #cms-link-meta("meta-subtitle")[
+        #text(font: font-body, weight: "light", size: 10pt, fill: rgb("#B8C7D9"))[#meta.subtitle]
+      ]
       #v(3pt)
     ]
     #align(left)[
       #set par(justify: false, leading: 0.42em)
       #set text(hyphenate: false)
-      #text(font: font-heading, weight: "medium", size: 20.5pt, fill: white)[#meta.title]
+      #cms-link-meta("meta-title")[
+        #text(font: font-heading, weight: "medium", size: 20.5pt, fill: white)[#meta.title]
+      ]
     ]
   ]
 
   v(2.5em)
 
   if meta.lead != "" [
-    #block(
-      width: 100%,
-      stroke: (left: 3pt + lukb-cyan),
-      inset: (left: 12pt, y: 4pt)
-    )[
-      #align(left)[
-        #set par(justify: false, leading: 0.68em)
-        #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-navy)[#meta.lead]
+    #cms-link-meta("meta-lead")[
+      #block(
+        width: 100%,
+        stroke: (left: 3pt + lukb-cyan),
+        inset: (left: 12pt, y: 4pt)
+      )[
+        #align(left)[
+          #set par(justify: false, leading: 0.68em)
+          #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-navy)[#meta.lead]
+        ]
       ]
     ]
     #v(2.5em)
   ]
 
   if meta.authors.len() > 0 [
-    #text(font: font-body, weight: "light", size: 8.5pt, fill: lukb-muted)[
-      Verfasst von:
-      #for (idx, a) in meta.authors.enumerate() [
-        #if idx > 0 [ · ]
-        #text(font: font-heading, weight: "medium", fill: lukb-text)[#a.name]
-        #if a.role != "" [ (#a.role) ]
+    #cms-link-meta("meta-authors-container")[
+      #text(font: font-body, weight: "light", size: 8.5pt, fill: lukb-muted)[
+        Verfasst von:
+        #for (idx, a) in meta.authors.enumerate() [
+          #if idx > 0 [ · ]
+          #text(font: font-heading, weight: "medium", fill: lukb-text)[#a.name]
+          #if a.role != "" [ (#a.role) ]
+        ]
       ]
     ]
     #v(6pt)
@@ -1090,104 +1139,107 @@
   heading-below: 0.68em,
 ) = {
   let can-float = allow-float and (not in-box) and (not inline-full)
-  if blk.type == "heading" {
-    let out-lvl = blk.at("outline_level", default: none)
-    render-heading(blk.level, blk.text, outline-level: out-lvl, below-space: heading-below)
-  } else if blk.type == "richtext" {
-    if blk.typst_markup != none and blk.typst_markup.trim() != "" {
-      eval(blk.typst_markup, mode: "markup")
-      parbreak()
-    }
-  } else if blk.type == "callout" {
-    render-callout(blk.title, blk.typst_markup, accent-color: callout-accent)
-  } else if blk.type in ("figure", "db_chart", "custom_chart") {
-    let bcopy = blk
-    if in-box {
-      bcopy.insert("layout", "column")
-    } else if inline-full {
-      bcopy.insert("_inline_full", true)
-    }
-    render-figure-box(bcopy, is-margin: is-margin, allow-float: allow-float)
-  } else if blk.type == "table" {
-    let bcopy = blk
-    if in-box {
-      bcopy.insert("layout", "column")
-    } else if inline-full {
-      bcopy.insert("_inline_full", true)
-    }
-    render-table-box(bcopy, is-margin: is-margin, allow-float: allow-float, style-variant: table-style)
-  } else if blk.type == "media_text" {
-    let bcopy = blk
-    if in-box {
-      bcopy.insert("layout", "column")
-    } else if inline-full {
-      bcopy.insert("_inline_full", true)
-    }
-    render-media-text-box(bcopy, is-margin: is-margin, allow-float: allow-float)
-  } else if blk.type == "textbox_group" {
-    let has-colbreak = blk.children.any(c => c.type == "colbreak")
-    layout(bounds => {
-      let inner-content = [
-        #for child in blk.children [
-          #render-single-block(
-            child,
-            in-box: true,
-            is-margin: is-margin,
-            allow-float: allow-float,
-            table-style: table-style,
-            callout-accent: callout-accent,
-            quote-accent: quote-accent,
-            heading-below: heading-below,
-          )
-        ]
-      ]
-      let box-breakable = render-textbox-container(breakable: true, inner-content)
-      // Typografische Regel:
-      // Kurze Boxen (1 Kind-Element und <= 90pt / ca. 3.2cm) ohne manuellen Umbruch werden zusammengehalten.
-      let is-short-single-box = if blk.children.len() <= 1 {
-        measure(box-breakable, width: bounds.width).height <= 90pt
-      } else {
-        false
-      }
-      if (not has-colbreak) and is-short-single-box {
-        render-textbox-container(breakable: false, inner-content)
-      } else {
-        box-breakable
-      }
-    })
-  } else if blk.type == "spacer" {
-    let h-mm = blk.at("height_mm", default: 8)
-    block(height: h-mm * 1mm, width: 100%)[]
-  } else if blk.type == "colbreak" {
+  if blk.type == "colbreak" {
     colbreak()
-  } else if blk.type == "quote" {
-    let q-box = render-quote-box(
-      get-typst-attr(blk, "quote"),
-      get-typst-attr(blk, "author"),
-      get-typst-attr(blk, "source"),
-      accent-color: quote-accent,
-    )
-    maybe-place-bottom(blk, q-box, can-float)
-  } else if blk.type == "divider" {
-    render-divider(blk.at("style", default: "solid"))
-  } else if blk.type == "footnotes" {
-    let fn-box = render-footnotes-box(
-      get-typst-attr(blk, "title", default: "Anmerkungen & Quellen"),
-      get-typst-attr(blk, "items", default: ()),
-    )
-    maybe-place-bottom(blk, fn-box, can-float)
-  } else if blk.type == "glossary" {
-    let g-box = render-glossary-box(
-      get-typst-attr(blk, "title", default: "Glossar & Begriffserklärungen"),
-      get-typst-attr(blk, "items", default: ()),
-    )
-    maybe-place-bottom(blk, g-box, can-float)
-  } else if blk.type == "publications" {
-    let pub-box = render-publications-box(
-      get-typst-attr(blk, "title", default: "Weitere Publikationen"),
-      get-typst-attr(blk, "items", default: ()),
-    )
-    maybe-place-bottom(blk, pub-box, can-float)
+  } else {
+    let rendered = if blk.type == "heading" {
+      let out-lvl = blk.at("outline_level", default: none)
+      render-heading(blk.level, blk.text, outline-level: out-lvl, below-space: heading-below)
+    } else if blk.type == "richtext" {
+      if blk.typst_markup != none and blk.typst_markup.trim() != "" {
+        eval(blk.typst_markup, mode: "markup")
+        parbreak()
+      }
+    } else if blk.type == "callout" {
+      render-callout(blk.title, blk.typst_markup, accent-color: callout-accent)
+    } else if blk.type in ("figure", "db_chart", "custom_chart") {
+      let bcopy = blk
+      if in-box {
+        bcopy.insert("layout", "column")
+      } else if inline-full {
+        bcopy.insert("_inline_full", true)
+      }
+      render-figure-box(bcopy, is-margin: is-margin, allow-float: allow-float)
+    } else if blk.type == "table" {
+      let bcopy = blk
+      if in-box {
+        bcopy.insert("layout", "column")
+      } else if inline-full {
+        bcopy.insert("_inline_full", true)
+      }
+      render-table-box(bcopy, is-margin: is-margin, allow-float: allow-float, style-variant: table-style)
+    } else if blk.type == "media_text" {
+      let bcopy = blk
+      if in-box {
+        bcopy.insert("layout", "column")
+      } else if inline-full {
+        bcopy.insert("_inline_full", true)
+      }
+      render-media-text-box(bcopy, is-margin: is-margin, allow-float: allow-float)
+    } else if blk.type == "textbox_group" {
+      let has-colbreak = blk.children.any(c => c.type == "colbreak")
+      layout(bounds => {
+        let inner-content = [
+          #for child in blk.children [
+            #render-single-block(
+              child,
+              in-box: true,
+              is-margin: is-margin,
+              allow-float: allow-float,
+              table-style: table-style,
+              callout-accent: callout-accent,
+              quote-accent: quote-accent,
+              heading-below: heading-below,
+            )
+          ]
+        ]
+        let box-breakable = render-textbox-container(breakable: true, inner-content)
+        // Typografische Regel:
+        // Kurze Boxen (1 Kind-Element und <= 90pt / ca. 3.2cm) ohne manuellen Umbruch werden zusammengehalten.
+        let is-short-single-box = if blk.children.len() <= 1 {
+          measure(box-breakable, width: bounds.width).height <= 90pt
+        } else {
+          false
+        }
+        if (not has-colbreak) and is-short-single-box {
+          render-textbox-container(breakable: false, inner-content)
+        } else {
+          box-breakable
+        }
+      })
+    } else if blk.type == "spacer" {
+      let h-mm = blk.at("height_mm", default: 8)
+      block(height: h-mm * 1mm, width: 100%)[]
+    } else if blk.type == "quote" {
+      let q-box = render-quote-box(
+        get-typst-attr(blk, "quote"),
+        get-typst-attr(blk, "author"),
+        get-typst-attr(blk, "source"),
+        accent-color: quote-accent,
+      )
+      maybe-place-bottom(blk, q-box, can-float)
+    } else if blk.type == "divider" {
+      render-divider(blk.at("style", default: "solid"))
+    } else if blk.type == "footnotes" {
+      let fn-box = render-footnotes-box(
+        get-typst-attr(blk, "title", default: "Anmerkungen & Quellen"),
+        get-typst-attr(blk, "items", default: ()),
+      )
+      maybe-place-bottom(blk, fn-box, can-float)
+    } else if blk.type == "glossary" {
+      let g-box = render-glossary-box(
+        get-typst-attr(blk, "title", default: "Glossar & Begriffserklärungen"),
+        get-typst-attr(blk, "items", default: ()),
+      )
+      maybe-place-bottom(blk, g-box, can-float)
+    } else if blk.type == "publications" {
+      let pub-box = render-publications-box(
+        get-typst-attr(blk, "title", default: "Weitere Publikationen"),
+        get-typst-attr(blk, "items", default: ()),
+      )
+      maybe-place-bottom(blk, pub-box, can-float)
+    }
+    cms-link-block(blk, rendered)
   }
 }
 
@@ -1546,102 +1598,105 @@
 }
 
 #let render-tufte-single-block(blk, is-margin: false, build-rows-fn: none) = {
-  if blk.type == "heading" {
-    let out-lvl = blk.at("outline_level", default: none)
-    render-heading(
-      blk.level,
-      blk.text,
-      outline-level: out-lvl,
-      h1-size: 13.5pt,
-      h2-size: 10.5pt,
-      h3-size: 9.6pt,
-      above-space: 1.8em,
-      h1-below: 6pt,
-      below-space: 0.65em,
-    )
-  } else if blk.type == "richtext" {
-    if blk.typst_markup != none and blk.typst_markup.trim() != "" {
-      eval(blk.typst_markup, mode: "markup")
-      parbreak()
-    }
-  } else if blk.type == "callout" {
-    render-callout(blk.title, blk.typst_markup, accent-color: lukb-cyan, title-size: 9.5pt, body-size: 8.8pt)
-  } else if blk.type in ("figure", "db_chart", "custom_chart") {
-    render-figure-box(blk, is-margin: is-margin, allow-float: false)
-  } else if blk.type == "table" {
-    render-table-box(blk, is-margin: is-margin, allow-float: false, style-variant: "tufte")
-  } else if blk.type == "media_text" {
-    render-media-text-box(blk, is-margin: is-margin, allow-float: false)
-  } else if blk.type == "textbox_group" {
-    let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "custom_chart", "table"))
-    let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "custom_chart", "table")))
-    let has-visuals = visual-children.len() > 0
-    let has-text = text-children.len() > 0
-    let is-split = has-visuals and has-text and (not is-margin)
+  if blk.type == "colbreak" {
+    // Wird auf Run-Ebene als Seitenumbruch behandelt
+  } else {
+    let rendered = if blk.type == "heading" {
+      let out-lvl = blk.at("outline_level", default: none)
+      render-heading(
+        blk.level,
+        blk.text,
+        outline-level: out-lvl,
+        h1-size: 13.5pt,
+        h2-size: 10.5pt,
+        h3-size: 9.6pt,
+        above-space: 1.8em,
+        h1-below: 6pt,
+        below-space: 0.65em,
+      )
+    } else if blk.type == "richtext" {
+      if blk.typst_markup != none and blk.typst_markup.trim() != "" {
+        eval(blk.typst_markup, mode: "markup")
+        parbreak()
+      }
+    } else if blk.type == "callout" {
+      render-callout(blk.title, blk.typst_markup, accent-color: lukb-cyan, title-size: 9.5pt, body-size: 8.8pt)
+    } else if blk.type in ("figure", "db_chart", "custom_chart") {
+      render-figure-box(blk, is-margin: is-margin, allow-float: false)
+    } else if blk.type == "table" {
+      render-table-box(blk, is-margin: is-margin, allow-float: false, style-variant: "tufte")
+    } else if blk.type == "media_text" {
+      render-media-text-box(blk, is-margin: is-margin, allow-float: false)
+    } else if blk.type == "textbox_group" {
+      let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "custom_chart", "table"))
+      let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "custom_chart", "table")))
+      let has-visuals = visual-children.len() > 0
+      let has-text = text-children.len() > 0
+      let is-split = has-visuals and has-text and (not is-margin)
 
-    render-textbox-container(above: 1.25em, below: 1.25em)[
-      #if is-split and build-rows-fn != none [
-        #let box-rows = build-rows-fn(blk.children, main-w: tufte-main-w - 10pt, margin-w: tufte-margin-w - 10pt)
-        #let box-gutters = compute-tufte-row-gutters(box-rows)
-        #grid(
-          columns: (1fr, tufte-margin-w),
-          column-gutter: tufte-gutter,
-          row-gutter: box-gutters,
-          ..box-rows.map(r => (
-            [
-              #for l-it in r.left [
-                #render-tufte-single-block(l-it, is-margin: false, build-rows-fn: build-rows-fn)
+      render-textbox-container(above: 1.25em, below: 1.25em)[
+        #if is-split and build-rows-fn != none [
+          #let box-rows = build-rows-fn(blk.children, main-w: tufte-main-w - 10pt, margin-w: tufte-margin-w - 10pt)
+          #let box-gutters = compute-tufte-row-gutters(box-rows)
+          #grid(
+            columns: (1fr, tufte-margin-w),
+            column-gutter: tufte-gutter,
+            row-gutter: box-gutters,
+            ..box-rows.map(r => (
+              [
+                #for l-it in r.left [
+                  #render-tufte-single-block(l-it, is-margin: false, build-rows-fn: build-rows-fn)
+                ]
+              ],
+              [
+                #if r.right.len() > 0 [
+                  #stack(
+                    spacing: 8pt,
+                    ..r.right.map(r-it => render-tufte-single-block(r-it, is-margin: true, build-rows-fn: build-rows-fn))
+                  )
+                ]
               ]
-            ],
-            [
-              #if r.right.len() > 0 [
-                #stack(
-                  spacing: 8pt,
-                  ..r.right.map(r-it => render-tufte-single-block(r-it, is-margin: true, build-rows-fn: build-rows-fn))
-                )
-              ]
-            ]
-          )).flatten()
-        )
-      ] else [
-        #for child in blk.children [
-          #render-tufte-single-block(child, is-margin: is-margin, build-rows-fn: build-rows-fn)
+            )).flatten()
+          )
+        ] else [
+          #for child in blk.children [
+            #render-tufte-single-block(child, is-margin: is-margin, build-rows-fn: build-rows-fn)
+          ]
         ]
       ]
-    ]
-  } else if blk.type == "spacer" {
-    let h-mm = blk.at("height_mm", default: 8)
-    block(height: h-mm * 1mm, width: 100%)[]
-  } else if blk.type == "colbreak" {
-    // Wird auf Run-Ebene als Seitenumbruch behandelt
-  } else if blk.type == "quote" {
-    render-quote-box(
-      get-typst-attr(blk, "quote"),
-      get-typst-attr(blk, "author"),
-      get-typst-attr(blk, "source"),
-      accent-color: lukb-gold,
-      is-margin: is-margin,
-      tufte-style: true,
-    )
-  } else if blk.type == "divider" {
-    render-divider(blk.at("style", default: "solid"))
-  } else if blk.type == "footnotes" {
-    render-footnotes-box(
-      get-typst-attr(blk, "title", default: "Anmerkungen & Quellen"),
-      get-typst-attr(blk, "items", default: ()),
-    )
-  } else if blk.type == "glossary" {
-    render-glossary-box(
-      get-typst-attr(blk, "title", default: "Glossar & Begriffserklärungen"),
-      get-typst-attr(blk, "items", default: ()),
-      two-columns: true,
-    )
-  } else if blk.type == "publications" {
-    render-publications-box(
-      get-typst-attr(blk, "title", default: "Weitere Publikationen"),
-      get-typst-attr(blk, "items", default: ()),
-      two-columns: false,
-    )
+    } else if blk.type == "spacer" {
+      let h-mm = blk.at("height_mm", default: 8)
+      block(height: h-mm * 1mm, width: 100%)[]
+    } else if blk.type == "quote" {
+      render-quote-box(
+        get-typst-attr(blk, "quote"),
+        get-typst-attr(blk, "author"),
+        get-typst-attr(blk, "source"),
+        accent-color: lukb-gold,
+        is-margin: is-margin,
+        tufte-style: true,
+      )
+    } else if blk.type == "divider" {
+      render-divider(blk.at("style", default: "solid"))
+    } else if blk.type == "footnotes" {
+      render-footnotes-box(
+        get-typst-attr(blk, "title", default: "Anmerkungen & Quellen"),
+        get-typst-attr(blk, "items", default: ()),
+      )
+    } else if blk.type == "glossary" {
+      render-glossary-box(
+        get-typst-attr(blk, "title", default: "Glossar & Begriffserklärungen"),
+        get-typst-attr(blk, "items", default: ()),
+        two-columns: true,
+      )
+    } else if blk.type == "publications" {
+      render-publications-box(
+        get-typst-attr(blk, "title", default: "Weitere Publikationen"),
+        get-typst-attr(blk, "items", default: ()),
+        two-columns: false,
+      )
+    }
+    cms-link-block(blk, rendered)
   }
 }
 

@@ -51,7 +51,9 @@
         align: (left + bottom, right + bottom),
         [
           #set par(justify: false, leading: 0.22em)
-          #text(font: font-body, weight: "light", size: 5.6pt, fill: rgb("#555555"))[#disclaimer]
+          #cms-link-meta("meta-disclaimer")[
+            #text(font: font-body, weight: "light", size: 5.6pt, fill: rgb("#555555"))[#disclaimer]
+          ]
         ],
         [
           #text(font: font-heading, weight: "medium", size: 7.2pt, fill: lukb-muted)[#page-num/#total-pages]
@@ -87,12 +89,15 @@
       #image(resolve-asset-path("LUKB-Logo.svg"), height: 25pt)
     ],
     [
-      #let pub-str = if meta.at("header_series", default: "") != "" {
+      #let has-series = meta.at("header_series", default: "") != ""
+      #let pub-str = if has-series {
         meta.header_series
       } else {
         "Factsheet per " + format-pub-date(meta.publication_date)
       }
-      #text(font: font-heading, weight: "medium", size: 8.8pt, fill: lukb-muted)[#pub-str]
+      #cms-link-meta(if has-series { "meta-header-series" } else { "meta-pub-date" })[
+        #text(font: font-heading, weight: "medium", size: 8.8pt, fill: lukb-muted)[#pub-str]
+      ]
     ]
   )
   v(6pt)
@@ -105,15 +110,21 @@
       columns: (1fr, auto),
       align: (left + bottom, right + bottom),
       [
-        #text(font: font-heading, weight: "medium", size: title-size, fill: title-color)[#title-text]
+        #cms-link-meta("meta-title")[
+          #text(font: font-heading, weight: "medium", size: title-size, fill: title-color)[#title-text]
+        ]
         #if subtitle-text != "" [
           #v(2pt)
-          #text(font: font-body, weight: "light", size: 9pt, fill: subtitle-color)[#subtitle-text]
+          #cms-link-meta("meta-subtitle")[
+            #text(font: font-body, weight: "light", size: 9pt, fill: subtitle-color)[#subtitle-text]
+          ]
         ]
       ],
       [
         #if kicker-text != "" [
-          #text(font: font-heading, weight: "medium", size: 8.2pt, fill: kicker-color)[#kicker-text]
+          #cms-link-meta("meta-category")[
+            #text(font: font-heading, weight: "medium", size: 8.2pt, fill: kicker-color)[#kicker-text]
+          ]
         ]
       ]
     )

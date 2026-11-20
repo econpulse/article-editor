@@ -1350,7 +1350,8 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   font-weight: 500;
 }
 
-.cms-block-card.anchor-target-highlight {
+.cms-block-card.anchor-target-highlight,
+.anchor-target-highlight {
   outline: 2.5px solid #009FE3 !important;
   box-shadow: 0 0 14px rgba(0, 159, 227, 0.45) !important;
   transition: all 0.2s ease;

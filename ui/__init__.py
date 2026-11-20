@@ -25,6 +25,7 @@ JS_MODULES = (
     "js/modules/media-text.js",
     "js/modules/sidebar-modal.js",
     "js/modules/collab.js",
+    "js/modules/preview-sync.js",
 )
 
 
