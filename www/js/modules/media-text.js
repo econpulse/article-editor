@@ -189,6 +189,7 @@
     const widthCtrl = makeSelectField(
       "Medien-Breite (Nebeneinander)",
       [
+        { val: 20, label: "20 % (sehr schmal)" },
         { val: 25, label: "25 % (schmales Thumbnail)" },
         { val: 30, label: "30 % (Standard Advisory)" },
         { val: 35, label: "35 % (ausgewogen)" },
