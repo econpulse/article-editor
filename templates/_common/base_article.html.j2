@@ -727,6 +727,16 @@
       font-size: 0.86rem;
     }
 
+    table.lukb-data-table.table-font-sm-1 th,
+    table.lukb-data-table.table-font-sm-1 td {
+      font-size: 0.78rem;
+    }
+
+    table.lukb-data-table.table-font-sm-2 th,
+    table.lukb-data-table.table-font-sm-2 td {
+      font-size: 0.70rem;
+    }
+
     table.lukb-data-table th,
     table.lukb-data-table td {
       overflow-wrap: break-word;
@@ -891,7 +901,9 @@
           {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}
           {% set col_ns.total = col_ns.total + (cw if cw > 0 else fallback_w) %}
         {% endfor %}
-        <table class="lukb-data-table">
+        {% set font_step = blk.font_size_step if blk.font_size_step is defined and blk.font_size_step in (-1, -2) else 0 %}
+        {% set font_cls = 'table-font-sm-1' if font_step == -1 else ('table-font-sm-2' if font_step == -2 else '') %}
+        <table class="lukb-data-table{% if font_cls %} {{ font_cls }}{% endif %}">
           <colgroup>
             {% for col in blk.columns %}
               {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}

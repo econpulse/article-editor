@@ -1287,6 +1287,12 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             cols = blk.get("columns", [])
             rows = blk.get("rows", [])
             show_header = blk.get("show_header", True)
+            raw_font_step = blk.get("font_size_step", 0)
+            try:
+                font_step = max(-2, min(0, int(raw_font_step or 0)))
+            except (TypeError, ValueError):
+                font_step = 0
+            table_font_pt = max(5.0, 8.5 + font_step * 0.7)
             if cols:
                 total_rows = len(rows) + (1 if show_header else 0)
                 t = container.add_table(rows=total_rows, cols=len(cols))
@@ -1325,7 +1331,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         run = p.add_run(col.get("title", ""))
                         run.bold = True
                         run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
-                        run.font.size = Pt(8.5)
+                        run.font.size = Pt(table_font_pt)
 
                 src = blk.get("source", "").strip()
                 row_offset = 1 if show_header else 0
@@ -1357,7 +1363,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         run = p.add_run(val)
                         run.bold = is_total
                         run.font.color.rgb = RGBColor(0x00, 0x28, 0x55) if is_total else RGBColor(0x1A, 0x24, 0x33)
-                        run.font.size = Pt(8.5)
+                        run.font.size = Pt(table_font_pt)
 
             if src:
                 psrc = container.add_paragraph()

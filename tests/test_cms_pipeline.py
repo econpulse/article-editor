@@ -2287,6 +2287,55 @@ def test_richtext_empty_lines_and_template_spacing():
         assert "Zweiter Absatz" in html
 
 
+def test_table_font_size_step_schema_and_rendering():
+    """
+    Stellt sicher, dass Tabellen-Schriftgrösse (Kopfzeile + Body) relativ zur Standardgrösse
+    um 1 oder 2 Stufen verkleinert werden kann (grösser ist nicht zulässig) und in HTML,
+    Typst/PDF sowie DOCX korrekt verarbeitet wird.
+    """
+    import io
+    from docx import Document
+    from schemas.article import ArticleDocument, ArticleMetadata, TableBlock
+    from services.renderer import render_docx_bytes, render_pdf_bytes, render_web_html
+
+    assert TableBlock().font_size_step == 0
+    assert TableBlock(font_size_step=-1).font_size_step == -1
+    assert TableBlock(font_size_step=-2).font_size_step == -2
+    assert TableBlock(font_size_step=1).font_size_step == 0
+    assert TableBlock(font_size_step=5).font_size_step == 0
+    assert TableBlock(font_size_step=-5).font_size_step == -2
+    assert TableBlock(font_size_step=None).font_size_step == 0
+    assert TableBlock(font_size_step="invalid").font_size_step == 0
+
+    t_default = TableBlock(id="t0", title="Standardtabelle", font_size_step=0).model_dump()
+    t_sm1 = TableBlock(id="t1", title="Kleinere Tabelle 1", font_size_step=-1).model_dump()
+    t_sm2 = TableBlock(id="t2", title="Kleinere Tabelle 2", font_size_step=-2).model_dump()
+
+    doc = ArticleDocument(
+        metadata=ArticleMetadata(title="Tabellen Schriftgrössen Test"),
+        template_id="investment_focus",
+        blocks=[t_default, t_sm1, t_sm2],
+    )
+
+    html = render_web_html(doc)
+    assert 'class="lukb-data-table"' in html
+    assert 'class="lukb-data-table table-font-sm-1"' in html
+    assert 'class="lukb-data-table table-font-sm-2"' in html
+
+    pdf = render_pdf_bytes(doc)
+    assert pdf.startswith(b"%PDF-")
+
+    docx_bytes = render_docx_bytes(doc)
+    docx_doc = Document(io.BytesIO(docx_bytes))
+    assert len(docx_doc.tables) == 3
+    assert docx_doc.tables[0].rows[0].cells[0].paragraphs[0].runs[0].font.size.pt == 8.5
+    assert docx_doc.tables[0].rows[1].cells[0].paragraphs[0].runs[0].font.size.pt == 8.5
+    assert docx_doc.tables[1].rows[0].cells[0].paragraphs[0].runs[0].font.size.pt == 7.5
+    assert docx_doc.tables[1].rows[1].cells[0].paragraphs[0].runs[0].font.size.pt == 7.5
+    assert docx_doc.tables[2].rows[0].cells[0].paragraphs[0].runs[0].font.size.pt == 7.0
+    assert docx_doc.tables[2].rows[1].cells[0].paragraphs[0].runs[0].font.size.pt == 7.0
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()

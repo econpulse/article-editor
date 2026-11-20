@@ -346,6 +346,42 @@
     totalToggleWrap.appendChild(totalCheckbox);
     totalToggleWrap.appendChild(document.createTextNode("Letzte Zeile als Total hervorheben"));
 
+    const fontSizeWrap = document.createElement("label");
+    fontSizeWrap.style.display = "inline-flex";
+    fontSizeWrap.style.alignItems = "center";
+    fontSizeWrap.style.gap = "5px";
+    fontSizeWrap.style.fontSize = "12px";
+    fontSizeWrap.style.marginLeft = "8px";
+    fontSizeWrap.appendChild(document.createTextNode("Schriftgrösse:"));
+
+    const fontSizeSelect = document.createElement("select");
+    fontSizeSelect.className = "cms-select";
+    fontSizeSelect.style.width = "auto";
+    fontSizeSelect.style.minWidth = "130px";
+    fontSizeSelect.style.height = "26px";
+    fontSizeSelect.style.padding = "2px 6px";
+    fontSizeSelect.style.fontSize = "12px";
+    fontSizeSelect.title = "Schriftgrösse für Kopfzeile und Tabellen-Body relativ zur Standardgrösse";
+    [
+      { value: "0", label: "Standard" },
+      { value: "-1", label: "-1 (Kleiner)" },
+      { value: "-2", label: "-2 (Sehr klein)" },
+    ].forEach(function (opt) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      fontSizeSelect.appendChild(o);
+    });
+    const curFontStep = (blk.font_size_step === -1 || blk.font_size_step === -2) ? blk.font_size_step : 0;
+    blk.font_size_step = curFontStep;
+    fontSizeSelect.value = String(curFontStep);
+    fontSizeSelect.addEventListener("change", function () {
+      const parsed = parseInt(fontSizeSelect.value, 10);
+      blk.font_size_step = (parsed === -1 || parsed === -2) ? parsed : 0;
+      markDirty();
+    });
+    fontSizeWrap.appendChild(fontSizeSelect);
+
     btnGroup.appendChild(addRowBtn);
     btnGroup.appendChild(addColBtn);
     btnGroup.appendChild(useFirstRowHeaderBtn);
@@ -353,6 +389,7 @@
     btnGroup.appendChild(widthSumBadge);
     btnGroup.appendChild(headerToggleWrap);
     btnGroup.appendChild(totalToggleWrap);
+    btnGroup.appendChild(fontSizeWrap);
 
     const excelHint = document.createElement("span");
     excelHint.style.fontSize = "11.5px";
