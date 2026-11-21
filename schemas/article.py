@@ -11,6 +11,8 @@ from datetime import date
 from typing import Annotated, Any, Literal, Optional, Union
 from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_validator
 
+from services.kpi_icons import VALID_KPI_TONES, normalize_kpi_icon_id
+
 
 def _new_block_id() -> str:
     return f"blk_{uuid.uuid4().hex[:10]}"
@@ -729,6 +731,116 @@ class MediaTextBlock(MarginAnchorBlockBase):
         return out
 
 
+KpiCardTone = Literal["navy", "blue", "cyan", "gold", "positive", "negative", "neutral"]
+KpiCardsStylePreset = Literal["tint", "card_accent_top", "card_accent_left", "clean"]
+
+
+class KpiCardItem(BaseModel):
+    icon: str = Field(default="trend_up", description="Icon-ID aus dem LUKB Finanz-Icon-Set (leer = ohne Icon)")
+    label: str = Field(default="", description="Kurze Dachzeile / Kennzahl-Bezeichnung")
+    value: str = Field(default="", description="Dominanter Wert oder kurze Kernaussage")
+    subtext: str = Field(default="", description="Optionaler Kontext- oder Delta-Hinweis")
+    tone: KpiCardTone = Field(default="navy", description="Dezente Akzentfarbe der Karte")
+
+    @field_validator("icon", mode="before")
+    @classmethod
+    def validate_icon(cls, v: Any) -> str:
+        return normalize_kpi_icon_id(v)
+
+    @field_validator("tone", mode="before")
+    @classmethod
+    def validate_tone(cls, v: Any) -> str:
+        s = str(v or "navy").strip().lower()
+        return s if s in VALID_KPI_TONES else "navy"
+
+
+def _default_kpi_cards() -> list[KpiCardItem]:
+    return [
+        KpiCardItem(
+            icon="central_bank",
+            label="SNB Leitzins",
+            value="0.50 %",
+            subtext="−25 Bp vs. Vorquartal",
+            tone="navy",
+        ),
+        KpiCardItem(
+            icon="trend_up",
+            label="Aktien Schweiz",
+            value="Übergewichten",
+            subtext="Attraktive Dividendenrendite",
+            tone="cyan",
+        ),
+        KpiCardItem(
+            icon="shield",
+            label="Qualitätsfokus",
+            value="Defensive Titel",
+            subtext="Stabile Margen im Umfeld",
+            tone="gold",
+        ),
+    ]
+
+
+class KpiCardsBlock(MarginAnchorBlockBase):
+    id: str = Field(default_factory=_new_block_id)
+    type: Literal["kpi_cards"] = "kpi_cards"
+    layout: Literal["column", "full"] = Field(
+        default="full",
+        description="Spaltenbreite ('column') oder gesamte Seitenbreite ('full')",
+    )
+    full_position: FullPositionMode = Field(
+        default="inline",
+        description="Seitenposition bei 2-spaltigem Layout ('auto', 'top', 'bottom', 'inline')",
+    )
+    title: str = Field(default="", description="Optionaler Titel über den KPI-Karten")
+    subtitle: str = Field(default="", description="Optionaler Untertitel")
+    source: str = Field(default="", description="Optionale Quellenangabe unterhalb der Karten")
+    columns_count: int = Field(
+        default=0,
+        ge=0,
+        le=4,
+        description="Anzahl Spalten (0 = Auto je nach verfügbarer Breite, 1–4 = fixe Obergrenze)",
+    )
+    style_preset: KpiCardsStylePreset = Field(
+        default="tint",
+        description="Visueller Kartenstil ('tint', 'card_accent_top', 'card_accent_left', 'clean')",
+    )
+    cards: list[KpiCardItem] = Field(
+        default_factory=_default_kpi_cards,
+        description="1 bis 8 KPI-/Dashboard-Karten",
+    )
+
+    @field_validator("full_position", mode="before")
+    @classmethod
+    def validate_kpi_full_pos(cls, v: Any) -> str:
+        if v is None or v == "":
+            return "inline"
+        return _normalize_full_position(v)
+
+    @field_validator("columns_count", mode="before")
+    @classmethod
+    def validate_columns_count(cls, v: Any) -> int:
+        if v is None or v == "" or str(v).strip().lower() == "auto":
+            return 0
+        try:
+            n = int(float(v))
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(4, n))
+
+    @field_validator("style_preset", mode="before")
+    @classmethod
+    def validate_style_preset(cls, v: Any) -> str:
+        s = str(v or "tint").strip().lower()
+        return s if s in ("tint", "card_accent_top", "card_accent_left", "clean") else "tint"
+
+    @field_validator("cards", mode="before")
+    @classmethod
+    def validate_cards_seq(cls, v: Any) -> list[Any]:
+        if isinstance(v, (list, tuple)):
+            return list(v)[:8]
+        return []
+
+
 ContentBlock = Union[
     HeadingBlock,
     RichTextBlock,
@@ -747,6 +859,7 @@ ContentBlock = Union[
     PublicationsBlock,
     CustomChartBlock,
     MediaTextBlock,
+    KpiCardsBlock,
 ]
 
 
@@ -768,6 +881,7 @@ _KNOWN_BLOCK_TYPES = {
     "glossary",
     "publications",
     "media_text",
+    "kpi_cards",
 }
 
 _DISCRIMINATED_BLOCK_ADAPTER = TypeAdapter(Annotated[ContentBlock, Field(discriminator="type")])

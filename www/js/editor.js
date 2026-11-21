@@ -1016,13 +1016,16 @@
     });
   }
 
+  const MARGIN_BLOCK_TYPES = new Set(["figure", "db_chart", "custom_chart", "table", "media_text", "kpi_cards"]);
+  function isMarginColumnBlock(b) { return !!(b && MARGIN_BLOCK_TYPES.has(b.type) && (b.layout || "column") === "column"); }
+
   function updateCardAnchorBadges(card, blk, anchorCountMap) {
     const headerLeft = card.querySelector(".block-header-left");
     if (!headerLeft) return;
 
     // 1. Anchor-Pill auf dem Randelement selbst
     let anchorPill = headerLeft.querySelector(".block-anchor-pill");
-    const isMarginType = (blk.type === "figure" || blk.type === "db_chart" || blk.type === "custom_chart" || blk.type === "table" || blk.type === "media_text") && (blk.layout || "column") === "column";
+    const isMarginType = isMarginColumnBlock(blk);
 
     if (isMarginType && blk.anchor_to) {
       if (!anchorPill) {
@@ -1066,9 +1069,7 @@
       attachedMarginCount = anchorCountMap.get(blk.id) || 0;
     } else {
       const blocksList = (state.article && state.article.blocks) ? state.article.blocks : [];
-      attachedMarginCount = blocksList.filter(function (o) {
-        return o && o.anchor_to === blk.id && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table" || o.type === "media_text") && (o.layout || "column") === "column";
-      }).length;
+      attachedMarginCount = blocksList.filter(function (o) { return o && o.anchor_to === blk.id && isMarginColumnBlock(o); }).length;
     }
 
     if (attachedMarginCount > 0) {
@@ -1090,9 +1091,7 @@
 
     const anchorCountMap = new Map();
     state.article.blocks.forEach(function (o) {
-      if (o && o.anchor_to && (o.type === "figure" || o.type === "db_chart" || o.type === "custom_chart" || o.type === "table" || o.type === "media_text") && (o.layout || "column") === "column") {
-        anchorCountMap.set(o.anchor_to, (anchorCountMap.get(o.anchor_to) || 0) + 1);
-      }
+      if (o && o.anchor_to && isMarginColumnBlock(o)) { anchorCountMap.set(o.anchor_to, (anchorCountMap.get(o.anchor_to) || 0) + 1); }
     });
 
     const cardElements = Array.from(canvas.querySelectorAll(":scope > .cms-block-card"));
@@ -1407,6 +1406,7 @@
       custom_chart: buildCustomChartBlockBody,
       table: buildTableBlockBody,
       media_text: buildMediaTextBlockBody,
+      kpi_cards: E.buildKpiCardsBlockBody,
       spacer: buildSpacerBlockBody,
       colbreak: buildColbreakBlockBody,
       quote: buildQuoteBlockBody,

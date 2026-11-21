@@ -5,9 +5,11 @@ Modularer Aufbau der Benutzeroberfläche: Header, Sidebar, Editor, Preview und M
 
 from __future__ import annotations
 
+import json
 from shiny import ui
 
 from config import WWW_DIR
+from services.kpi_icons import get_kpi_icons_catalog
 from services.renderer import list_available_templates
 from ui.editor import editor_ui
 from ui.header import header_ui
@@ -23,6 +25,7 @@ JS_MODULES = (
     "js/modules/custom-chart.js",
     "js/modules/table-editor.js",
     "js/modules/media-text.js",
+    "js/modules/kpi-cards.js",
     "js/modules/sidebar-modal.js",
     "js/modules/collab.js",
     "js/modules/preview-sync.js",
@@ -56,6 +59,11 @@ def build_app_ui() -> ui.Tag:
             ui.tags.meta(name="viewport", content="width=device-width, initial-scale=1"),
             ui.tags.title("LUKB Investment Office — Publikations-Editor & CMS"),
             ui.tags.link(rel="stylesheet", href=f"css/editor.css?v={asset_ver}"),
+            ui.tags.script(
+                json.dumps(get_kpi_icons_catalog()),
+                id="lukb-kpi-icons-data",
+                type="application/json",
+            ),
             ui.tags.script(src="js/vendor/Sortable.min.js"),
             ui.tags.script(src="js/vendor/pdf.min.js"),
             *[ui.tags.script(src=f"{mod}?v={asset_ver}") for mod in JS_MODULES],

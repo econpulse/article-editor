@@ -895,6 +895,42 @@
         },
       };
     }
+    if (type === "kpi_cards") {
+      return {
+        id: uid("blk"),
+        type: "kpi_cards",
+        title: "",
+        subtitle: "",
+        source: "",
+        layout: "full",
+        full_position: "inline",
+        columns_count: 0,
+        style_preset: "tint",
+        cards: [
+          {
+            icon: "central_bank",
+            label: "SNB Leitzins",
+            value: "0.50 %",
+            subtext: "−25 Bp vs. Vorquartal",
+            tone: "navy",
+          },
+          {
+            icon: "trend_up",
+            label: "Aktien Schweiz",
+            value: "Übergewichten",
+            subtext: "Attraktive Dividendenrendite",
+            tone: "cyan",
+          },
+          {
+            icon: "shield",
+            label: "Qualitätsfokus",
+            value: "Defensive Titel",
+            subtext: "Stabile Margen im Umfeld",
+            tone: "gold",
+          },
+        ],
+      };
+    }
     if (type === "callout") {
       return {
         id: uid("blk"),
@@ -998,6 +1034,8 @@
         return "Daten-Tabelle";
       case "media_text":
         return "Media & Text (Kombi-Block)";
+      case "kpi_cards":
+        return "KPI-Karten (Dashboard)";
       case "callout":
         return "Kernaussagen / Callout";
       case "box_start":
@@ -1045,6 +1083,7 @@
         { type: "figure", label: "Grafik-Upload", icon: "🖼" },
         { type: "table", label: "Tabelle (Excel)", icon: "📋" },
         { type: "media_text", label: "Media & Text (Kombi)", icon: "📰" },
+        { type: "kpi_cards", label: "KPI-Karten (Dashboard)", icon: "💠" },
       ],
     },
     {
@@ -1180,7 +1219,7 @@
       allBlocks.forEach(function (b, bIdx) {
         if (!b || b.id === blk.id) return;
         if (b.type === "spacer" || b.type === "colbreak" || b.type === "divider" || b.type === "box_start" || b.type === "box_end") return;
-        if ((b.type === "figure" || b.type === "db_chart" || b.type === "custom_chart" || b.type === "table" || b.type === "media_text") && (b.layout || "column") === "column") return;
+        if ((b.type === "figure" || b.type === "db_chart" || b.type === "custom_chart" || b.type === "table" || b.type === "media_text" || b.type === "kpi_cards") && (b.layout || "column") === "column") return;
 
         let label = (bIdx + 1) + ". ";
         if (b.type === "heading") {

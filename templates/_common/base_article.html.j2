@@ -672,6 +672,118 @@
       }
     }
 
+    /* KPI- / Dashboard-Karten */
+    .blk-kpi-cards {
+      break-inside: avoid;
+      page-break-inside: avoid;
+      margin: 1.4em 0;
+    }
+
+    .kpi-cards-grid {
+      display: grid;
+      gap: 12px;
+      align-items: stretch;
+    }
+
+    .kpi-cards-grid.kpi-cols-1 { grid-template-columns: 1fr; }
+    .kpi-cards-grid.kpi-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .kpi-cards-grid.kpi-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .kpi-cards-grid.kpi-cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+    @media (max-width: 780px) {
+      .kpi-cards-grid.kpi-cols-3,
+      .kpi-cards-grid.kpi-cols-4 {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 520px) {
+      .kpi-cards-grid.kpi-cols-2,
+      .kpi-cards-grid.kpi-cols-3,
+      .kpi-cards-grid.kpi-cols-4 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .kpi-card {
+      border-radius: 4px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      break-inside: avoid;
+    }
+
+    .kpi-card.kpi-style-tint {
+      background: var(--kpi-tint, #EEF3F8);
+      border: 1px solid var(--kpi-border, #C2D1E2);
+    }
+
+    .kpi-card.kpi-style-card_accent_top {
+      background: #FFFFFF;
+      border: 1px solid var(--lukb-border);
+      border-top: 3px solid var(--kpi-accent, var(--lukb-navy));
+    }
+
+    .kpi-card.kpi-style-card_accent_left {
+      background: #FAFBFD;
+      border: 1px solid var(--lukb-border);
+      border-left: 4px solid var(--kpi-accent, var(--lukb-navy));
+    }
+
+    .kpi-card.kpi-style-clean {
+      background: #FFFFFF;
+      border: 1px solid var(--lukb-border);
+    }
+
+    .kpi-card-head {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      margin-bottom: 7px;
+    }
+
+    .kpi-card-icon-badge {
+      width: 30px;
+      height: 30px;
+      border-radius: 5px;
+      background: var(--kpi-badge, #DCE6F2);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .kpi-card-icon-badge svg {
+      display: block;
+      width: 18px;
+      height: 18px;
+    }
+
+    .kpi-card-label {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      font-size: 0.78rem;
+      color: var(--lukb-muted);
+      line-height: 1.25;
+    }
+
+    .kpi-card-value {
+      font-family: var(--font-heading);
+      font-weight: 500;
+      font-size: 1.32rem;
+      color: var(--lukb-navy);
+      line-height: 1.18;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .kpi-card-subtext {
+      margin-top: 4px;
+      font-size: 0.80rem;
+      color: var(--lukb-muted);
+      line-height: 1.35;
+    }
+
     .blk-box-title {
       font-family: var(--font-heading);
       font-weight: 500;
@@ -984,6 +1096,51 @@
           </div>
           {% endif %}
         </div>
+      </div>
+
+    {% elif blk.type == "kpi_cards" %}
+      {% set cards = blk.cards or [] %}
+      {% set card_count = cards|length %}
+      {% set req_cols = blk.columns_count or 0 %}
+      {% set max_by_layout = 2 if (blk.layout == 'column' and not in_box) else 4 %}
+      {% set wanted_cols = ([req_cols, card_count] | min) if req_cols > 0 else ([card_count, 4] | min) %}
+      {% set eff_cols = [1, ([wanted_cols, max_by_layout] | min)] | max %}
+      {% set style_preset = blk.style_preset or 'tint' %}
+      <div class="blk-kpi-cards {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">
+        {% if blk.title %}
+          <div class="blk-box-title">{{ blk.title }}</div>
+        {% endif %}
+        {% if blk.subtitle %}
+          <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
+        {% endif %}
+        {% if card_count > 0 %}
+        <div class="kpi-cards-grid kpi-cols-{{ eff_cols }}">
+          {% for card in cards %}
+          {% set pal = card.palette or {} %}
+          <div class="kpi-card kpi-style-{{ style_preset }}" style="--kpi-accent: {{ pal.accent or '#002855' }}; --kpi-tint: {{ pal.tint or '#EEF3F8' }}; --kpi-badge: {{ pal.badge or '#DCE6F2' }}; --kpi-border: {{ pal.border or '#C2D1E2' }};">
+            {% if card.icon_svg or card.label %}
+            <div class="kpi-card-head">
+              {% if card.icon_svg %}
+              <span class="kpi-card-icon-badge" aria-hidden="true">{{ card.icon_svg | safe }}</span>
+              {% endif %}
+              {% if card.label %}
+              <span class="kpi-card-label">{{ card.label }}</span>
+              {% endif %}
+            </div>
+            {% endif %}
+            {% if card.value %}
+            <div class="kpi-card-value">{{ card.value }}</div>
+            {% endif %}
+            {% if card.subtext %}
+            <div class="kpi-card-subtext">{{ card.subtext }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        {% if blk.source %}
+          <div class="blk-box-source">{{ blk.source }}</div>
+        {% endif %}
       </div>
 
     {% elif blk.type == "spacer" %}

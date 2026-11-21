@@ -40,6 +40,12 @@ TOOLBAR_BLOCKS: list[BlockButtonDef] = [
         title="Kombiniert Grafik, Chart oder Tabelle mit einem Textblock (und optionaler Produkt-/ISIN-Spalte)",
         style="border-color:#005A9C;background:#F0F7FF;color:#002855;",
     ),
+    BlockButtonDef(
+        "kpi_cards",
+        "+ KPI-Karten (Dashboard)",
+        title="Hervorgehobene Dashboard-Karten mit Finanz-Icons, Kennzahlen und optionaler Akzenttönung",
+        style="border-color:#009FE3;background:#F0F9FF;color:#002855;",
+    ),
     BlockButtonDef("callout", "+ Kernaussagen-Box"),
     BlockButtonDef(
         "textbox_pair",

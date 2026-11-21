@@ -951,6 +951,184 @@
   ]
 }
 
+#let render-kpi-cards-box(blk, is-margin: false, allow-float: true) = {
+  let is-floating = allow-float and (not is-margin) and (blk.at("layout", default: "full") == "full") and (not blk.at("_inline_full", default: false))
+  let title-txt = str(blk.at("title", default: "")).trim()
+  let sub-txt = str(blk.at("subtitle", default: "")).trim()
+  let src-txt = str(blk.at("source", default: "")).trim()
+  let cards = blk.at("cards", default: ())
+  let style-preset = blk.at("style_preset", default: "tint")
+  let req-cols = int(blk.at("columns_count", default: 0))
+
+  let title-sz = if is-margin { 8.8pt } else { 10pt }
+  let sub-sz = if is-margin { 7.6pt } else { 8.3pt }
+
+  let render-single-kpi-card(card, card-h: auto) = {
+    let accent-col = rgb(card.at("accent_hex", default: "#002855"))
+    let tint-col = rgb(card.at("tint_hex", default: "#EEF3F8"))
+    let badge-col = rgb(card.at("badge_hex", default: "#DCE6F2"))
+    let border-col = rgb(card.at("border_hex", default: "#C2D1E2"))
+
+    let card-fill = if style-preset == "tint" {
+      tint-col
+    } else if style-preset == "card_accent_left" {
+      rgb("#FAFBFD")
+    } else {
+      white
+    }
+
+    let card-stroke = if style-preset == "tint" {
+      0.6pt + border-col
+    } else if style-preset == "card_accent_top" {
+      (top: 2.2pt + accent-col, left: 0.6pt + lukb-border, right: 0.6pt + lukb-border, bottom: 0.6pt + lukb-border)
+    } else if style-preset == "card_accent_left" {
+      (left: 2.8pt + accent-col, top: 0.6pt + lukb-border, right: 0.6pt + lukb-border, bottom: 0.6pt + lukb-border)
+    } else {
+      0.6pt + lukb-border
+    }
+
+    let icon-path = resolve-asset-path(card.at("resolved_icon", default: ""))
+    let lbl-txt = str(card.at("label", default: "")).trim()
+    let val-txt = str(card.at("value", default: "")).trim()
+    let sub-card-txt = str(card.at("subtext", default: "")).trim()
+
+    let icon-box-sz = if is-margin { 17pt } else { 20pt }
+    let icon-img-sz = if is-margin { 10.5pt } else { 12.5pt }
+    let pad-x = if is-margin { 7.5pt } else { 9.5pt }
+    let pad-y = if is-margin { 6.5pt } else { 8.5pt }
+
+    block(
+      width: 100%,
+      height: card-h,
+      breakable: false,
+      fill: card-fill,
+      stroke: card-stroke,
+      radius: 2.5pt,
+      inset: (x: pad-x, y: pad-y),
+      above: 0pt,
+      below: 0pt,
+    )[
+      #set par(justify: false, leading: 0.34em, spacing: 0.35em)
+      #set text(hyphenate: false)
+      #if icon-path != "" or lbl-txt != "" [
+        #if icon-path != "" and lbl-txt != "" [
+          #grid(
+            columns: (auto, 1fr),
+            column-gutter: if is-margin { 5.5pt } else { 7pt },
+            align: (left + horizon, left + horizon),
+            box(
+              width: icon-box-sz,
+              height: icon-box-sz,
+              fill: badge-col,
+              radius: 3.5pt,
+              align(center + horizon)[#image(icon-path, width: icon-img-sz, height: icon-img-sz)]
+            ),
+            text(
+              font: font-heading,
+              weight: "medium",
+              size: if is-margin { 7.3pt } else { 7.9pt },
+              fill: lukb-muted,
+            )[#lbl-txt]
+          )
+        ] else if icon-path != "" [
+          #box(
+            width: icon-box-sz,
+            height: icon-box-sz,
+            fill: badge-col,
+            radius: 3.5pt,
+            align(center + horizon)[#image(icon-path, width: icon-img-sz, height: icon-img-sz)]
+          )
+        ] else [
+          #text(
+            font: font-heading,
+            weight: "medium",
+            size: if is-margin { 7.3pt } else { 7.9pt },
+            fill: lukb-muted,
+          )[#lbl-txt]
+        ]
+      ]
+      #if val-txt != "" [
+        #block(
+          above: if icon-path != "" or lbl-txt != "" { if is-margin { 4pt } else { 5.5pt } } else { 0pt },
+          below: 0pt,
+        )[
+          #set par(leading: 0.28em, justify: false)
+          #text(
+            font: font-heading,
+            weight: "medium",
+            size: if is-margin { 11.2pt } else { 13.2pt },
+            fill: lukb-navy,
+          )[#val-txt]
+        ]
+      ]
+      #if sub-card-txt != "" [
+        #block(
+          above: if is-margin { 2.5pt } else { 3.5pt },
+          below: 0pt,
+        )[
+          #set par(leading: 0.34em, justify: false)
+          #text(
+            font: font-body,
+            weight: "light",
+            size: if is-margin { 7.2pt } else { 7.9pt },
+            fill: lukb-muted,
+          )[#sub-card-txt]
+        ]
+      ]
+    ]
+  }
+
+  let kpi-box = block(
+    width: 100%,
+    breakable: false,
+    above: if is-floating { 0pt } else if is-margin { 0.45em } else { 1.15em },
+    below: if is-floating { 0pt } else if is-margin { 0.6em } else { 1.15em },
+  )[
+    #if title-txt != "" or sub-txt != "" [
+      #render-box-title-subtitle(
+        title-txt,
+        sub-txt,
+        title-sz,
+        sub-sz,
+        is-margin: is-margin,
+        title-below-no-sub: if is-margin { 4.5pt } else { 6pt },
+        sub-below: if is-margin { 4.5pt } else { 6pt },
+        sticky-blocks: true,
+      )
+    ]
+    #if cards.len() > 0 [
+      #layout(bounds => {
+        let max-by-w = if is-margin or bounds.width < 200pt { 1 } else if bounds.width < 340pt { 2 } else { 4 }
+        let wanted = if req-cols > 0 { calc.min(req-cols, cards.len()) } else { calc.min(cards.len(), 4) }
+        let eff-cols = calc.max(1, calc.min(wanted, max-by-w))
+        let col-gutter = if is-margin { 6pt } else { 9pt }
+        let row-gutter = if is-margin { 6pt } else { 9pt }
+        let card-w = (bounds.width - (eff-cols - 1) * col-gutter) / eff-cols
+        let card-rows = cards.chunks(eff-cols)
+        stack(
+          spacing: row-gutter,
+          ..card-rows.map(row-cards => {
+            let max-h = row-cards.map(c => measure(block(width: card-w, render-single-kpi-card(c))).height).fold(0pt, (a, b) => calc.max(a, b))
+            grid(
+              columns: range(eff-cols).map(_ => 1fr),
+              column-gutter: col-gutter,
+              align: top + left,
+              ..row-cards.map(c => render-single-kpi-card(c, card-h: max-h))
+            )
+          })
+        )
+      })
+    ]
+    #render-box-source(src-txt, is-margin: is-margin)
+  ]
+
+  if is-floating {
+    place-full-float(blk, kpi-box)
+  } else {
+    kpi-box
+  }
+}
+
 #let render-divider(style) = {
   if style == "double" {
     block(
@@ -1180,6 +1358,14 @@
         bcopy.insert("_inline_full", true)
       }
       render-media-text-box(bcopy, is-margin: is-margin, allow-float: allow-float)
+    } else if blk.type == "kpi_cards" {
+      let bcopy = blk
+      if in-box {
+        bcopy.insert("layout", "column")
+      } else if inline-full {
+        bcopy.insert("_inline_full", true)
+      }
+      render-kpi-cards-box(bcopy, is-margin: is-margin, allow-float: allow-float)
     } else if blk.type == "textbox_group" {
       let has-colbreak = blk.children.any(c => c.type == "colbreak")
       layout(bounds => {
@@ -1267,7 +1453,7 @@
       heading-below: heading-below,
     )
 
-    let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "custom_chart", "table", "media_text")) and (it.at("layout", default: "column") == "full"))
+    let has-full-float = items.any(it => (it.type in ("figure", "db_chart", "custom_chart", "table", "media_text", "kpi_cards")) and (it.at("layout", default: "column") == "full"))
     let manual-colbreak-idx = items.position(it => it.type == "colbreak")
     let has-internal-colbreak = items.any(it => it.type == "textbox_group" and it.children.any(c => c.type == "colbreak"))
 
@@ -1415,7 +1601,7 @@
     let overflow-idx = none
 
     for (idx, it) in items.enumerate() {
-      let is-full = (it.type in ("figure", "db_chart", "custom_chart", "table", "media_text")) and (it.at("layout", default: "column") == "full")
+      let is-full = (it.type in ("figure", "db_chart", "custom_chart", "table", "media_text", "kpi_cards")) and (it.at("layout", default: "column") == "full")
       if not is-full {
         let ih = if it.type == "spacer" {
           (it.at("height_mm", default: 8) * 1mm)
@@ -1448,6 +1634,8 @@
         b-probe.insert("_inline_full", true)
         let box-h = if it.type == "table" {
           measure(block(width: bounds.width, render-table-box(b-probe))).height
+        } else if it.type == "kpi_cards" {
+          measure(block(width: bounds.width, render-kpi-cards-box(b-probe))).height
         } else {
           measure(block(width: bounds.width, render-figure-box(b-probe))).height
         }
@@ -1520,7 +1708,7 @@
   let runs = ()
   let curr-cols = ()
     for blk in blocks {
-      let is-full-block = (blk.type in ("figure", "db_chart", "custom_chart", "table", "media_text")) and (blk.at("layout", default: "column") == "full")
+      let is-full-block = (blk.type in ("figure", "db_chart", "custom_chart", "table", "media_text", "kpi_cards")) and (blk.at("layout", default: "column") == "full")
       let is-inline-full = false
       if is-full-block {
         let pos-mode = blk.at("full_position", default: "auto")
@@ -1631,6 +1819,8 @@
       render-table-box(blk, is-margin: is-margin, allow-float: false, style-variant: "tufte")
     } else if blk.type == "media_text" {
       render-media-text-box(blk, is-margin: is-margin, allow-float: false)
+    } else if blk.type == "kpi_cards" {
+      render-kpi-cards-box(blk, is-margin: is-margin, allow-float: false)
     } else if blk.type == "textbox_group" {
       let visual-children = blk.children.filter(c => c.type in ("figure", "db_chart", "custom_chart", "table"))
       let text-children = blk.children.filter(c => not (c.type in ("figure", "db_chart", "custom_chart", "table")))
@@ -1724,7 +1914,7 @@
   ).height + 10pt
 
   for it in items {
-    let is-margin = (it.type in ("figure", "db_chart", "custom_chart", "table")) and (it.at("layout", default: "column") == "column")
+    let is-margin = (it.type in ("figure", "db_chart", "custom_chart", "table", "kpi_cards")) and (it.at("layout", default: "column") == "column")
     if is-margin {
       let mh = measure-margin(it)
       let anchor-id = it.at("anchor_to", default: none)
@@ -1825,8 +2015,8 @@
       }
       runs.push((kind: "break"))
     } else {
-      let has-box-visuals = (blk.type == "textbox_group") and blk.children.any(c => c.type in ("figure", "db_chart", "custom_chart", "table", "media_text"))
-      let is-full = ((blk.type in ("figure", "db_chart", "custom_chart", "table", "media_text", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")) or ((blk.type == "textbox_group") and (has-box-visuals or blk.at("layout", default: "column") == "full"))
+      let has-box-visuals = (blk.type == "textbox_group") and blk.children.any(c => c.type in ("figure", "db_chart", "custom_chart", "table", "media_text", "kpi_cards"))
+      let is-full = ((blk.type in ("figure", "db_chart", "custom_chart", "table", "media_text", "kpi_cards", "quote", "footnotes", "glossary", "publications")) and (blk.at("layout", default: "column") == "full")) or ((blk.type == "textbox_group") and (has-box-visuals or blk.at("layout", default: "column") == "full"))
       if is-full {
         if curr-grid-items.len() > 0 {
           runs.push((kind: "grid", items: curr-grid-items))

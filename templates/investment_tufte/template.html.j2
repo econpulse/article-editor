@@ -38,12 +38,17 @@
 
     /* Einspaltige Grafiken und Tabellen im Randbereich (rechts, gestapelt ohne Textlücken) */
     .blk-figure:not(.blk-full-span),
-    .blk-table-wrap:not(.blk-full-span) {
+    .blk-table-wrap:not(.blk-full-span),
+    .blk-kpi-cards:not(.blk-full-span) {
       float: right;
       clear: right;
       width: calc(35.5% - 16px);
       margin: 0 0 1.1rem 36px;
       padding: 10px 0 8px 0;
+    }
+
+    .blk-kpi-cards:not(.blk-full-span) .kpi-cards-grid {
+      grid-template-columns: 1fr;
     }
 
     .blk-figure:not(.blk-full-span) .blk-box-title,
@@ -134,6 +139,7 @@
       }
       .blk-figure:not(.blk-full-span),
       .blk-table-wrap:not(.blk-full-span),
+      .blk-kpi-cards:not(.blk-full-span),
       .blk-full-span,
       .blk-h1, .blk-h2, .blk-h3, .blk-richtext, .blk-callout, .blk-richtext-textbox, .blk-quote {
         float: none !important;
@@ -151,7 +157,7 @@
       {% set visual_children = [] %}
       {% set text_children = [] %}
       {% for child in blk.children %}
-        {% if child.type in ["figure", "db_chart", "custom_chart", "table"] %}
+        {% if child.type in ["figure", "db_chart", "custom_chart", "table", "kpi_cards"] %}
           {% set _ = visual_children.append(child) %}
         {% else %}
           {% set _ = text_children.append(child) %}

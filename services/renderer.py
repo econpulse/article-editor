@@ -39,6 +39,7 @@ from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg
 from services.custom_chart_generator import generate_custom_chart_svg
 from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html
+from services.kpi_icons import get_kpi_tone_palette, render_kpi_icon_svg
 
 logger = logging.getLogger("lukb_cms.renderer")
 
@@ -361,15 +362,20 @@ def render_block_chart_svg(
     return generate_custom_chart_svg(blk, embed_fonts=embed_fonts)
 
 
+def _materialize_svg_asset(work_dir: Path, svg_markup: str, prefix: str = "chart_") -> str:
+    """Schreibt SVG-Markup unter deterministischem Content-Hash in `work_dir` (thread-safe)."""
+    svg_bytes = svg_markup.encode("utf-8")
+    digest = hashlib.sha256(svg_bytes).hexdigest()[:16]
+    filename = f"{prefix}{digest}.svg"
+    file_path = work_dir / filename
+    if not file_path.exists():
+        file_path.write_bytes(svg_bytes)
+    return filename
+
+
 def _materialize_chart_svg(work_dir: Path, svg_markup: str) -> str:
     """Schreibt Chart-SVG unter deterministischem Content-Hash in `work_dir` (thread-safe, kein Überschreiben)."""
-    chart_bytes = svg_markup.encode("utf-8")
-    digest = hashlib.sha256(chart_bytes).hexdigest()[:16]
-    chart_filename = f"chart_{digest}.svg"
-    chart_file_path = work_dir / chart_filename
-    if not chart_file_path.exists():
-        chart_file_path.write_bytes(chart_bytes)
-    return chart_filename
+    return _materialize_svg_asset(work_dir, svg_markup, prefix="chart_")
 
 
 def _prepare_typst_payload(
@@ -516,6 +522,32 @@ def _prepare_typst_payload(
                     "enabled": bool(it.get("enabled", True)),
                 })
             bcopy["items_typst"] = items_typst
+
+        elif btype == "kpi_cards":
+            enriched_cards: list[dict[str, Any]] = []
+            for card in blk.get("cards", []):
+                if not isinstance(card, dict):
+                    continue
+                pal = get_kpi_tone_palette(card.get("tone"))
+                icon_id = str(card.get("icon", "") or "").strip()
+                resolved_icon = ""
+                if icon_id:
+                    icon_svg = render_kpi_icon_svg(icon_id, stroke_color=pal["accent"], size_px=24)
+                    if icon_svg:
+                        resolved_icon = _materialize_svg_asset(work_dir, icon_svg, prefix="kpi_icon_")
+                enriched_cards.append({
+                    "icon": icon_id,
+                    "resolved_icon": resolved_icon,
+                    "label": str(card.get("label", "") or ""),
+                    "value": str(card.get("value", "") or ""),
+                    "subtext": str(card.get("subtext", "") or ""),
+                    "tone": pal["id"],
+                    "accent_hex": pal["accent"],
+                    "tint_hex": pal["tint"],
+                    "badge_hex": pal["badge"],
+                    "border_hex": pal["border"],
+                })
+            bcopy["cards"] = enriched_cards
 
         enriched_blocks.append(bcopy)
 
@@ -809,6 +841,21 @@ def render_web_html(doc: ArticleDocument) -> str:
                 b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
                 media["data_uri"] = f"data:image/svg+xml;base64,{b64}"
             blk["media"] = media
+        elif blk.get("type") == "kpi_cards":
+            web_cards: list[dict[str, Any]] = []
+            for card in blk.get("cards", []):
+                if not isinstance(card, dict):
+                    continue
+                pal = get_kpi_tone_palette(card.get("tone"))
+                icon_id = str(card.get("icon", "") or "").strip()
+                icon_svg = render_kpi_icon_svg(icon_id, stroke_color=pal["accent"], size_px=20) if icon_id else ""
+                web_cards.append({
+                    **card,
+                    "tone": pal["id"],
+                    "palette": pal,
+                    "icon_svg": icon_svg,
+                })
+            blk["cards"] = web_cards
 
     payload["blocks"] = _group_blocks_into_render_items(payload.get("blocks", []))
 
@@ -1494,6 +1541,150 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             p = container.add_paragraph()
             p.paragraph_format.space_before = Pt(10)
             p.paragraph_format.space_after = Pt(10)
+
+        elif btype == "kpi_cards":
+            kpi_title = str(blk.get("title", "") or "").strip()
+            kpi_sub = str(blk.get("subtitle", "") or "").strip()
+            if kpi_title:
+                pt = container.add_paragraph()
+                pt.paragraph_format.space_before = Pt(10)
+                pt.paragraph_format.space_after = Pt(2 if kpi_sub else 5)
+                r = pt.add_run(kpi_title)
+                r.bold = True
+                r.font.size = Pt(10.5)
+                r.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
+            if kpi_sub:
+                ps = container.add_paragraph()
+                ps.paragraph_format.space_before = Pt(0)
+                ps.paragraph_format.space_after = Pt(5)
+                r = ps.add_run(kpi_sub)
+                r.font.size = Pt(8.5)
+                r.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
+
+            cards = [c for c in (blk.get("cards") or []) if isinstance(c, dict)]
+            if cards:
+                req_cols = int(blk.get("columns_count") or 0)
+                is_col = blk.get("layout", "full") == "column"
+                max_cols = 2 if is_col else 4
+                n_cols = min(len(cards), req_cols if req_cols > 0 else max_cols, max_cols)
+                n_cols = max(1, n_cols)
+                n_rows = (len(cards) + n_cols - 1) // n_cols
+                style_preset = blk.get("style_preset", "tint")
+
+                tbl = container.add_table(rows=n_rows, cols=n_cols)
+                tbl.alignment = WD_TABLE_ALIGNMENT.CENTER
+                tbl.autofit = False
+                col_w = Inches(6.5 / n_cols)
+
+                for r_idx in range(n_rows):
+                    for c_idx in range(n_cols):
+                        card_idx = r_idx * n_cols + c_idx
+                        cell = tbl.rows[r_idx].cells[c_idx]
+                        cell.width = col_w
+                        cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+                        if card_idx >= len(cards):
+                            tcPr = cell._tc.get_or_add_tcPr()
+                            tcPr.append(parse_xml(
+                                f'<w:tcBorders {nsdecls("w")}>'
+                                f'<w:top w:val="none"/><w:left w:val="none"/>'
+                                f'<w:bottom w:val="none"/><w:right w:val="none"/>'
+                                f'</w:tcBorders>'
+                            ))
+                            continue
+
+                        card = cards[card_idx]
+                        pal = get_kpi_tone_palette(card.get("tone"))
+                        accent_hex = pal["accent"].lstrip("#")
+                        tint_hex = pal["tint"].lstrip("#")
+                        border_hex = pal["border"].lstrip("#")
+
+                        if style_preset == "tint":
+                            bg_hex = tint_hex
+                            top_b, left_b, bot_b, right_b = (
+                                f'w:val="single" w:sz="6" w:color="{border_hex}"',
+                                f'w:val="single" w:sz="6" w:color="{border_hex}"',
+                                f'w:val="single" w:sz="6" w:color="{border_hex}"',
+                                f'w:val="single" w:sz="6" w:color="{border_hex}"',
+                            )
+                        elif style_preset == "card_accent_top":
+                            bg_hex = "FFFFFF"
+                            top_b = f'w:val="single" w:sz="16" w:color="{accent_hex}"'
+                            left_b = right_b = bot_b = 'w:val="single" w:sz="4" w:color="D6DEE8"'
+                        elif style_preset == "card_accent_left":
+                            bg_hex = "FAFBFD"
+                            left_b = f'w:val="single" w:sz="20" w:color="{accent_hex}"'
+                            top_b = right_b = bot_b = 'w:val="single" w:sz="4" w:color="D6DEE8"'
+                        else:
+                            bg_hex = "FFFFFF"
+                            top_b = left_b = right_b = bot_b = 'w:val="single" w:sz="4" w:color="D6DEE8"'
+
+                        _set_docx_cell_background(cell, bg_hex)
+                        _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
+                        tcPr = cell._tc.get_or_add_tcPr()
+                        tcPr.append(parse_xml(
+                            f'<w:tcBorders {nsdecls("w")}>'
+                            f'<w:top {top_b} w:space="0"/>'
+                            f'<w:left {left_b} w:space="0"/>'
+                            f'<w:bottom {bot_b} w:space="0"/>'
+                            f'<w:right {right_b} w:space="0"/>'
+                            f'</w:tcBorders>'
+                        ))
+
+                        p_head = cell.paragraphs[0]
+                        p_head.paragraph_format.space_before = Pt(0)
+                        p_head.paragraph_format.space_after = Pt(3)
+                        icon_id = str(card.get("icon", "") or "").strip()
+                        if icon_id:
+                            badge_svg = render_kpi_icon_svg(
+                                icon_id,
+                                stroke_color=pal["accent"],
+                                size_px=36,
+                                badge_bg=pal["badge"],
+                            )
+                            png_bytes = _svg_to_png_bytes(badge_svg, ppi=144.0) if badge_svg else None
+                            if png_bytes:
+                                try:
+                                    p_head.add_run().add_picture(io.BytesIO(png_bytes), width=Inches(0.24))
+                                    p_head.add_run("  ")
+                                except Exception:
+                                    pass
+                        lbl_txt = str(card.get("label", "") or "").strip()
+                        if lbl_txt:
+                            r_lbl = p_head.add_run(lbl_txt)
+                            r_lbl.bold = True
+                            r_lbl.font.size = Pt(8.0)
+                            r_lbl.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
+
+                        val_txt = str(card.get("value", "") or "").strip()
+                        if val_txt:
+                            p_val = cell.add_paragraph()
+                            p_val.paragraph_format.space_before = Pt(0)
+                            p_val.paragraph_format.space_after = Pt(2)
+                            r_val = p_val.add_run(val_txt)
+                            r_val.bold = True
+                            r_val.font.size = Pt(13.0)
+                            r_val.font.color.rgb = RGBColor(0x00, 0x28, 0x55)
+
+                        sub_txt = str(card.get("subtext", "") or "").strip()
+                        if sub_txt:
+                            p_sub = cell.add_paragraph()
+                            p_sub.paragraph_format.space_before = Pt(0)
+                            p_sub.paragraph_format.space_after = Pt(0)
+                            r_sub = p_sub.add_run(sub_txt)
+                            r_sub.font.size = Pt(8.0)
+                            r_sub.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
+
+            kpi_src = str(blk.get("source", "") or "").strip()
+            if kpi_src:
+                psrc = container.add_paragraph()
+                psrc.paragraph_format.space_before = Pt(3)
+                psrc.paragraph_format.space_after = Pt(6)
+                r = psrc.add_run(kpi_src)
+                r.font.size = Pt(8.0)
+                r.font.color.rgb = RGBColor(0x5A, 0x68, 0x7C)
+                r.italic = True
+            else:
+                container.add_paragraph().paragraph_format.space_after = Pt(4)
 
         elif btype == "quote":
             tbl = container.add_table(rows=1, cols=1)
