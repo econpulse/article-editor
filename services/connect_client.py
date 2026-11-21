@@ -209,21 +209,27 @@ def deploy_bundle_to_connect(bundle_path: Path) -> dict[str, Any]:
         logger.error(f"Verbindungsfehler bei Connect Deploy: {exc}")
         return {"success": False, "deployed": False, "error": str(exc)}
 
-    # 3. Optional: Kurzer Statuscheck (Task polling bis zu 10s)
+    # 3. Task-Status abfragen (nur explizites finished=True & code=0 gilt als Erfolg!)
     if task_id:
-        poll_url = f"{base_api}/tasks/{task_id}"
-        poll_req = urllib.request.Request(poll_url, headers=headers, method="GET")
-        for _ in range(5):
-            time.sleep(1.0)
-            try:
-                with urllib.request.urlopen(poll_req, context=ctx, timeout=10) as resp:
-                    task_data = json.loads(resp.read().decode("utf-8"))
-                    if task_data.get("finished", False):
-                        if task_data.get("code", 0) != 0:
-                            logger.warning(f"Connect Task finished with non-zero code: {task_data}")
-                        break
-            except Exception:
-                break
+        task_res = poll_connect_task(task_id, max_polls=5, interval_sec=1.0)
+        if task_res["state"] == "failed":
+            return {
+                "success": False,
+                "deployed": False,
+                "state": "failed",
+                "bundle_id": bundle_id,
+                "task_id": task_id,
+                "error": task_res.get("error") or "Connect Deployment-Task fehlgeschlagen.",
+            }
+        if task_res["state"] != "succeeded":
+            return {
+                "success": False,
+                "deployed": False,
+                "state": "unknown",
+                "bundle_id": bundle_id,
+                "task_id": task_id,
+                "error": task_res.get("error") or "Connect Deployment-Task noch nicht abgeschlossen.",
+            }
 
     target_url = get_portal_target_url()
     logger.info(f"Deployment auf Posit Connect erfolgreich abgeschlossen! Ziel-URL: {target_url}")
@@ -231,7 +237,63 @@ def deploy_bundle_to_connect(bundle_path: Path) -> dict[str, Any]:
     return {
         "success": True,
         "deployed": True,
+        "state": "succeeded",
         "bundle_id": bundle_id,
         "task_id": task_id,
         "url": target_url,
+    }
+
+
+def poll_connect_task(
+    task_id: str,
+    *,
+    max_polls: int = 5,
+    interval_sec: float = 1.0,
+) -> dict[str, Any]:
+    """
+    Fragt den Status eines laufenden Posit-Connect-Tasks ab.
+    Rückgabe-`state`:
+      - 'succeeded': finished=True und code==0
+      - 'failed': finished=True und code!=0
+      - 'unknown': Task läuft noch oder Statusabfrage fehlgeschlagen
+    """
+    if not task_id or not is_connect_configured():
+        return {"state": "unknown", "finished": False, "code": None, "error": "Task-ID oder Connect-Config fehlt"}
+
+    base_api = f"{CONNECT_SERVER_URL}/__api__/v1"
+    headers = {
+        "Authorization": f"Key {CONNECT_API_KEY}",
+        "User-Agent": "LUKB-Article-Editor-CMS/1.0",
+    }
+    ctx = _make_ssl_context()
+    poll_url = f"{base_api}/tasks/{task_id}"
+    poll_req = urllib.request.Request(poll_url, headers=headers, method="GET")
+
+    for idx in range(max(1, max_polls)):
+        if idx > 0 and interval_sec > 0:
+            time.sleep(interval_sec)
+        try:
+            with urllib.request.urlopen(poll_req, context=ctx, timeout=10) as resp:
+                task_data = json.loads(resp.read().decode("utf-8"))
+                if task_data.get("finished", False):
+                    code = int(task_data.get("code", 0) or 0)
+                    if code == 0:
+                        return {"state": "succeeded", "finished": True, "code": 0, "error": None}
+                    err_lines = task_data.get("output") or []
+                    err_tail = "\n".join(err_lines[-5:]) if isinstance(err_lines, list) else str(err_lines)
+                    return {
+                        "state": "failed",
+                        "finished": True,
+                        "code": code,
+                        "error": f"Connect Task fehlgeschlagen (Code {code}): {err_tail}".strip(),
+                    }
+        except Exception as exc:
+            logger.warning(f"Statusabfrage für Connect Task {task_id} fehlgeschlagen: {exc}")
+            return {"state": "unknown", "finished": False, "code": None, "error": str(exc)}
+
+    return {
+        "state": "unknown",
+        "finished": False,
+        "code": None,
+        "error": f"Connect Task {task_id} nach {max_polls} Abfragen noch nicht beendet.",
     }

@@ -15,10 +15,12 @@ oder `step` + `area`, sowie über bis zu 5 Zeitreihen hinweg):
 
 from __future__ import annotations
 
+import contextlib
+import contextvars
 import hashlib
 import json
 from datetime import date
-from typing import Any
+from typing import Any, Iterator
 
 from database.repository import query_timeseries_data
 from services.chart_common import (
@@ -71,6 +73,24 @@ def _extract_series_chart_types(item: Any) -> list[str]:
 
 
 _DB_CHART_SVG_CACHE = ThreadSafeSvgCache(max_size=256)
+_TS_PACKAGE_CACHE_VAR: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar(
+    "_TS_PACKAGE_CACHE_VAR", default=None
+)
+
+
+@contextlib.contextmanager
+def publication_timeseries_snapshot() -> Iterator[dict[str, dict[str, Any]]]:
+    """
+    Kontextmanager für Paket-Rendering (PDF + HTML):
+    Hält die frisch geladenen Zeitreihen für beide Ausgabeformate konsistent,
+    sodass PDF und HTML garantiert denselben Marktdatenstand verwenden.
+    """
+    snapshot: dict[str, dict[str, Any]] = {}
+    token = _TS_PACKAGE_CACHE_VAR.set(snapshot)
+    try:
+        yield snapshot
+    finally:
+        _TS_PACKAGE_CACHE_VAR.reset(token)
 
 
 def clear_db_chart_cache() -> None:
@@ -127,10 +147,12 @@ def generate_db_chart_svg(
     Zieht die konfigurierten Zeitreihen (bis zu 5 Ticker) ab `start_date` aus `ts_db`
     und rendert ein publikationsreifes SVG im LUKB Corporate Design.
     """
+    pkg_ts_cache = _TS_PACKAGE_CACHE_VAR.get()
     cache_key = _compute_db_chart_cache_key(block_data, embed_fonts, max_date)
-    cached_svg = _DB_CHART_SVG_CACHE.get(cache_key)
-    if cached_svg is not None:
-        return cached_svg
+    if pkg_ts_cache is None:
+        cached_svg = _DB_CHART_SVG_CACHE.get(cache_key)
+        if cached_svg is not None:
+            return cached_svg
 
     raw_series = block_data.get("series") or []
     start_date_str = str(block_data.get("start_date") or "2022-01-01").strip()
@@ -169,7 +191,22 @@ def generate_db_chart_svg(
 
     requested_tickers = [it["ticker"] for it in configured_items]
     end_date_limit = max_date or block_data.get("end_date")
-    db_data = query_timeseries_data(requested_tickers, start_date=start_date_str, end_date=end_date_limit)
+    if pkg_ts_cache is not None:
+        ts_key = json.dumps(
+            {
+                "tickers": [t.upper() for t in requested_tickers],
+                "start": start_date_str,
+                "end": str(end_date_limit or ""),
+            },
+            sort_keys=True,
+        )
+        if ts_key not in pkg_ts_cache:
+            pkg_ts_cache[ts_key] = query_timeseries_data(
+                requested_tickers, start_date=start_date_str, end_date=end_date_limit
+            )
+        db_data = pkg_ts_cache[ts_key]
+    else:
+        db_data = query_timeseries_data(requested_tickers, start_date=start_date_str, end_date=end_date_limit)
 
     resolved_series: list[dict[str, Any]] = []
     for it in configured_items:

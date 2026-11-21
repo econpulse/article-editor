@@ -10,14 +10,14 @@ import logging
 from shiny import Inputs, Outputs, Session, reactive, ui
 
 from config import can_publish
-from database.repository import (
-    get_published_sync_status,
-    publish_article_to_portal,
-    save_article,
-    unpublish_article_from_portal,
-)
+from database.repository import get_published_sync_status
 from server.collab import broadcast_article_list_to_all, broadcast_article_sync
 from server.state import SessionState
+from services.publication_service import (
+    execute_publish_job,
+    execute_unpublish_job,
+    submit_article_for_review,
+)
 
 logger = logging.getLogger("lukb_cms.workflow_handlers")
 
@@ -61,26 +61,23 @@ def register_workflow_handlers(
         if doc.status == "published":
             ui.notification_show("Publikation ist bereits im Portal veröffentlicht.", type="info", duration=4)
             return
-        doc.status = "review"
-        state.current_doc.set(doc)
-        await asyncio.to_thread(
-            save_article,
-            doc,
-            user=state.current_user,
-            create_revision=True,
-            revision_note="Zur Prüfung / Freigabe eingereicht (Status: review)",
-        )
-        await state.send_article_list(doc.id)
+        sub_res = await asyncio.to_thread(submit_article_for_review, doc.id, state.current_user_id)
+        if not sub_res.get("success"):
+            ui.notification_show(sub_res.get("error", "Fehler bei Einreichung"), type="warning", duration=5)
+            return
+        updated_doc = sub_res["doc"]
+        state.current_doc.set(updated_doc)
+        await state.send_article_list(updated_doc.id)
         await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         await broadcast_article_sync(
-            article_id=doc.id,
-            doc=doc,
+            article_id=updated_doc.id,
+            doc=updated_doc,
             sender_session_id=state.session_id,
             author_name=state.current_user,
             include_sender=True,
         )
         ui.notification_show(
-            "✅ Publikation zur Freigabe eingereicht (Status: In Review). Ein Senior Editor kann den Artikel nun prüfen und publizieren.",
+            f"✅ Revision #{sub_res['revision_id']} zur Freigabe eingereicht (Status: In Review).",
             type="message",
             duration=6,
         )
@@ -106,7 +103,7 @@ def register_workflow_handlers(
             )
             return
         try:
-            res = await asyncio.to_thread(publish_article_to_portal, doc.id, user=user)
+            res = await asyncio.to_thread(execute_publish_job, doc.id, state.current_user_id)
             if res.get("success"):
                 doc.status = "published"
                 state.current_doc.set(doc)
@@ -128,7 +125,7 @@ def register_workflow_handlers(
                     local_msg=f"ℹ️ Lokal publiziert ({count} Artikel). Posit Connect nicht gekoppelt (CONNECT_PORTAL_GUID fehlt in Umgebungsvariablen).",
                 )
             else:
-                ui.notification_show(f"Publikationsfehler: {res.get('error')}", type="warning", duration=5)
+                ui.notification_show(f"Publikationsfehler: {res.get('error')}", type="warning", duration=7)
         except Exception as exc:
             ui.notification_show(f"Fehler beim Publizieren: {exc}", type="error", duration=6)
 
@@ -207,9 +204,9 @@ def register_workflow_handlers(
             return
         try:
             res = await asyncio.to_thread(
-                unpublish_article_from_portal,
+                execute_unpublish_job,
                 doc.id,
-                user=user,
+                state.current_user_id,
                 new_status="draft",
             )
             if res.get("success"):
@@ -233,6 +230,6 @@ def register_workflow_handlers(
                     local_duration=5,
                 )
             else:
-                ui.notification_show(f"Fehler: {res.get('error')}", type="warning", duration=5)
+                ui.notification_show(f"Rückzug fehlgeschlagen: {res.get('error')}", type="warning", duration=7)
         except Exception as exc:
             ui.notification_show(f"Fehler: {exc}", type="error", duration=6)

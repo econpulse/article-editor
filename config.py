@@ -323,6 +323,19 @@ def can_delete(username: str | None) -> bool:
     rights = get_global_rights(username)
     return rights["is_admin"] or rights["can_publish"]
 
+
+FOUR_EYES_TEMPLATES = [
+    t.strip().lower()
+    for t in _clean_env_val(os.getenv("FOUR_EYES_TEMPLATES", "")).split(",")
+    if t.strip()
+]
+
+
+def requires_four_eyes(template_id: str | None) -> bool:
+    """Prüft, ob für das gegebene Publikationsformat die Vier-Augen-Regel gilt."""
+    tid = (template_id or "").strip().lower()
+    return bool(tid and tid in FOUR_EYES_TEMPLATES)
+
 # ============================================================================
 # LUKB Corporate Design & Typografie
 # ============================================================================

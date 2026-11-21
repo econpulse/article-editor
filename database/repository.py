@@ -5,6 +5,7 @@ und Datenbank-Asset-Speicherung (MSSQL / SQLAlchemy).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -298,10 +299,21 @@ def restore_article_revision(
     )
 
 
+def compute_article_content_hash(doc: ArticleDocument) -> str:
+    """Berechnet einen stabilen SHA-256-Hash über den redaktionellen Inhalt (ohne version/status)."""
+    payload = {
+        "template_id": doc.template_id,
+        "metadata": doc.metadata.model_dump(),
+        "blocks": doc.blocks,
+    }
+    raw = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def get_published_sync_status(article_id: str) -> dict[str, Any]:
     """
-    Prüft, ob ein publizierter Artikel im Editor seit dem letzten Portal-Snapshot
-    weiterbearbeitet wurde (unveröffentlichte Änderungen).
+    Prüft, ob ein publizierter Artikel im Editor seit dem letzten Live-Snapshot
+    inhaltlich weiterbearbeitet wurde (anhand content_hash / Fallback version).
     """
     default_res = {
         "is_published": False,
@@ -309,46 +321,65 @@ def get_published_sync_status(article_id: str) -> dict[str, Any]:
         "published_at": "",
         "published_by": "",
         "has_unpublished_changes": False,
+        "approved_revision_id": None,
+        "live_snapshot_id": None,
     }
     if not article_id:
         return default_res
     with get_db_session() as session:
         row = session.get(ArticleModel, article_id)
-        if not row or row.status != "published":
+        if not row:
             return default_res
-        snap = session.scalars(
-            select(PublishedSnapshotModel)
-            .where(
-                PublishedSnapshotModel.article_id == article_id,
-                PublishedSnapshotModel.is_active == True,
-            )
-            .order_by(desc(PublishedSnapshotModel.version))
-        ).first()
+        snap = None
+        if getattr(row, "live_snapshot_id", None):
+            snap = session.get(PublishedSnapshotModel, row.live_snapshot_id)
+        if snap is None:
+            snap = session.scalars(
+                select(PublishedSnapshotModel)
+                .where(
+                    PublishedSnapshotModel.article_id == article_id,
+                    PublishedSnapshotModel.is_active == True,
+                )
+                .order_by(desc(PublishedSnapshotModel.version))
+            ).first()
+
+        is_live = bool(snap is not None and snap.is_active)
+        if not is_live and row.status != "published":
+            return default_res
         if not snap:
             return {
-                "is_published": True,
+                "is_published": row.status == "published",
                 "snapshot_version": None,
                 "published_at": "",
                 "published_by": "",
                 "has_unpublished_changes": True,
+                "approved_revision_id": getattr(row, "approved_revision_id", None),
+                "live_snapshot_id": getattr(row, "live_snapshot_id", None),
             }
 
-        def _as_utc(dt: datetime | None) -> datetime | None:
-            if dt is None:
-                return None
-            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        row_hash = getattr(row, "content_hash", None) or compute_article_content_hash(_row_to_document(row))
+        snap_hash = getattr(snap, "content_hash", None)
+        if snap_hash:
+            has_changes = row_hash != snap_hash
+        else:
+            def _as_utc(dt: datetime | None) -> datetime | None:
+                if dt is None:
+                    return None
+                return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
-        art_upd = _as_utc(row.updated_at)
-        snap_pub = _as_utc(snap.published_at)
-        has_changes = bool(
-            art_upd and snap_pub and (art_upd - snap_pub).total_seconds() > 2.0
-        )
+            art_upd = _as_utc(row.updated_at)
+            snap_pub = _as_utc(snap.published_at)
+            has_changes = bool(
+                art_upd and snap_pub and (art_upd - snap_pub).total_seconds() > 2.0
+            )
         return {
             "is_published": True,
             "snapshot_version": int(snap.version),
             "published_at": snap.published_at.strftime("%d.%m.%Y %H:%M") if snap.published_at else "",
             "published_by": snap.published_by or "",
             "has_unpublished_changes": has_changes,
+            "approved_revision_id": getattr(row, "approved_revision_id", None),
+            "live_snapshot_id": snap.id,
         }
 
 
@@ -568,6 +599,7 @@ def save_article(
                     blocks_serialized = json.dumps(working_doc.blocks, ensure_ascii=False)
 
                     new_version = db_version + 1
+                    doc_content_hash = compute_article_content_hash(working_doc)
                     upd_res = session.execute(
                         update(ArticleModel)
                         .where(
@@ -588,6 +620,7 @@ def save_article(
                             status=working_doc.status,
                             version=new_version,
                             blocks_json=blocks_serialized,
+                            content_hash=doc_content_hash,
                             updated_at=now,
                             updated_by=user,
                         )
@@ -626,6 +659,7 @@ def save_article(
                         status=working_doc.status,
                         version=1,
                         blocks_json=blocks_serialized,
+                        content_hash=compute_article_content_hash(working_doc),
                         created_at=now,
                         updated_at=now,
                         updated_by=user,
@@ -1835,6 +1869,33 @@ def _ensure_schema_columns() -> None:
                             )
                         )
                     conn.commit()
+                extra_article_cols = {
+                    "submitted_revision_id": "INTEGER NULL",
+                    "submitted_by": ("VARCHAR(150) NULL" if engine.dialect.name == "sqlite" else "NVARCHAR(150) NULL"),
+                    "approved_revision_id": "INTEGER NULL",
+                    "approved_by": ("VARCHAR(150) NULL" if engine.dialect.name == "sqlite" else "NVARCHAR(150) NULL"),
+                    "approved_at": ("DATETIME NULL" if engine.dialect.name == "sqlite" else "DATETIMEOFFSET NULL"),
+                    "live_snapshot_id": "INTEGER NULL",
+                    "content_hash": ("VARCHAR(64) NULL" if engine.dialect.name == "sqlite" else "NVARCHAR(64) NULL"),
+                }
+                add_kw = "COLUMN " if engine.dialect.name == "sqlite" else ""
+                for col_name, col_def in extra_article_cols.items():
+                    if col_name not in cols:
+                        conn.execute(text(f"ALTER TABLE io_articles ADD {add_kw}{col_name} {col_def}"))
+                        conn.commit()
+            if "io_published_snapshots" in inspector.get_table_names():
+                snap_cols = {c["name"] for c in inspector.get_columns("io_published_snapshots")}
+                extra_snap_cols = {
+                    "revision_id": "INTEGER NULL",
+                    "content_hash": ("VARCHAR(64) NULL" if engine.dialect.name == "sqlite" else "NVARCHAR(64) NULL"),
+                    "html_sha256": ("VARCHAR(64) NULL" if engine.dialect.name == "sqlite" else "NVARCHAR(64) NULL"),
+                    "pdf_sha256": ("VARCHAR(64) NULL" if engine.dialect.name == "sqlite" else "NVARCHAR(64) NULL"),
+                }
+                add_kw = "COLUMN " if engine.dialect.name == "sqlite" else ""
+                for col_name, col_def in extra_snap_cols.items():
+                    if col_name not in snap_cols:
+                        conn.execute(text(f"ALTER TABLE io_published_snapshots ADD {add_kw}{col_name} {col_def}"))
+                        conn.commit()
     except Exception as exc:
         logger.warning("Schema-Migration io_articles übersprungen: %s", exc)
 

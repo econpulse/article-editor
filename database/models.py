@@ -55,6 +55,15 @@ class ArticleModel(Base):
     )
     updated_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="Investment Office")
 
+    # Etappe 2: Trennung von Entwurf, Einreichung, Freigabe und Live-Fassung
+    submitted_revision_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    submitted_by: Mapped[str | None] = mapped_column(Unicode(150), nullable=True)
+    approved_revision_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(Unicode(150), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    live_snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
+
     revisions: Mapped[list["ArticleRevisionModel"]] = relationship(
         "ArticleRevisionModel",
         back_populates="article",
@@ -115,6 +124,11 @@ class PublishedSnapshotModel(Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)
     published_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="Investment Office")
     change_note: Mapped[str] = mapped_column(Unicode(255), nullable=False, default="")
+
+    revision_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    content_hash: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
+    html_sha256: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
+    pdf_sha256: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
 
     article: Mapped["ArticleModel"] = relationship("ArticleModel", back_populates="published_snapshots")
 
@@ -204,3 +218,36 @@ class AuditLogModel(Base):
     article_id: Mapped[str] = mapped_column(Unicode(64), nullable=True, index=True)
     details_json: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False, index=True)
+
+
+class PublicationJobModel(Base):
+    """
+    Publikations- und Rückzugsaufträge für das Portal (Etappe 2).
+    Pro Zielkanal ('target_channel') darf jeweils nur ein aktiver Auftrag laufen.
+    """
+
+    __tablename__ = "io_publication_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    article_id: Mapped[str] = mapped_column(
+        Unicode(64), ForeignKey("io_articles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    revision_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    snapshot_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    action: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="publish")
+    target_channel: Mapped[str] = mapped_column(
+        Unicode(64), nullable=False, default="intranet_portal", index=True
+    )
+    status: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="pending", index=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    connect_bundle_id: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
+    connect_task_id: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
+    html_sha256: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
+    pdf_sha256: Mapped[str | None] = mapped_column(Unicode(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(UnicodeText, nullable=True)
+    requested_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="Investment Office")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utc_now, onupdate=_utc_now, nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

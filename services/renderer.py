@@ -36,7 +36,7 @@ from docx.shared import Inches, Pt, RGBColor
 from config import DATA_DIR, FONTS_DIR, TEMPLATES_DIR, TYPST_CACHE_DIR, WWW_DIR
 from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
-from services.chart_generator import generate_db_chart_svg
+from services.chart_generator import generate_db_chart_svg, publication_timeseries_snapshot
 from services.custom_chart_generator import generate_custom_chart_svg
 from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html
 from services.kpi_icons import get_kpi_tone_palette, render_kpi_icon_svg
@@ -673,6 +673,21 @@ def render_pdf_bytes(doc: ArticleDocument, interactive_links: bool = False) -> b
     if isinstance(pdf_bytes, list):
         return pdf_bytes[0]
     return pdf_bytes
+
+
+def render_publication_package(doc: ArticleDocument) -> tuple[bytes | None, str]:
+    """
+    Rendert PDF und Web-HTML für einen Publikationsauftrag unter Verwendung
+    desselben Marktdatenstands für beide Ausgabeformate.
+    """
+    with publication_timeseries_snapshot():
+        pdf_bytes: bytes | None = None
+        try:
+            pdf_bytes = render_pdf_bytes(doc)
+        except Exception:
+            pdf_bytes = None
+        web_html = render_web_html(doc)
+    return pdf_bytes, web_html
 
 
 def render_preview_pdf_base64(doc: ArticleDocument) -> str:

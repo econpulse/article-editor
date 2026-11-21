@@ -24,6 +24,12 @@ from database.permissions import (
 )
 from server.collab import broadcast_article_list_to_all, enforce_article_access_revoked
 from server.state import SessionState
+from services.publication_service import (
+    get_admin_publication_overview,
+    list_publication_jobs,
+    poll_publication_job,
+    retry_publication_job,
+)
 
 logger = logging.getLogger("lukb_cms.admin_handlers")
 
@@ -268,6 +274,8 @@ def register_admin_handlers(
         articles = await asyncio.to_thread(list_admin_articles, search_q, only_orphans=only_orphans)
         users = await asyncio.to_thread(list_known_users)
         audit_entries = await asyncio.to_thread(list_audit_log, 60)
+        pub_overview = await asyncio.to_thread(get_admin_publication_overview)
+        pub_jobs = await asyncio.to_thread(list_publication_jobs, 30)
 
         art_rows = []
         for a in articles[:40]:
@@ -318,6 +326,49 @@ def register_admin_handlers(
             )
         if not audit_rows:
             audit_rows.append(ui.tags.tr(ui.tags.td("Noch keine Protokolleinträge.", colspan="5", style="padding:10px;color:#5A687C;")))
+
+        pub_rows = []
+        for po in pub_overview[:30]:
+            draft_badge = f"v{po['draft_version']} ({po['status']})" + (" · ⚠️ neuer Entwurf" if po["has_newer_draft"] else "")
+            rev_badge = f"Rev #{po['approved_revision_id']}" if po["approved_revision_id"] else "—"
+            live_badge = f"Snap #{po['live_snapshot_id']} (v{po['live_version']})" if po["live_snapshot_id"] else "Offline"
+            job_badge = f"#{po['latest_job_id']} {po['latest_job_action']} ({po['latest_job_status']})" if po["latest_job_id"] else "—"
+            pub_rows.append(
+                ui.tags.tr(
+                    ui.tags.td(po["title"], style="font-weight:600;padding:5px 8px;"),
+                    ui.tags.td(draft_badge, style="padding:5px 8px;font-size:12px;"),
+                    ui.tags.td(rev_badge, style="padding:5px 8px;font-size:12px;"),
+                    ui.tags.td(live_badge, style="padding:5px 8px;font-size:12px;"),
+                    ui.tags.td(job_badge, style="padding:5px 8px;font-size:12px;"),
+                )
+            )
+
+        job_rows = []
+        for jb in pub_jobs:
+            action_btn = ui.span("")
+            if jb["status"] in ("unknown", "deploying") and jb["connect_task_id"]:
+                action_btn = ui.tags.button(
+                    "Task prüfen",
+                    type="button",
+                    class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                    onclick=f"Shiny.setInputValue('lukb_admin_poll_job', {jb['id']}, {{priority:'event'}});",
+                )
+            elif jb["status"] == "failed":
+                action_btn = ui.tags.button(
+                    "Wiederholen",
+                    type="button",
+                    class_="btn-lukb btn-lukb-primary btn-lukb-sm",
+                    onclick=f"Shiny.setInputValue('lukb_admin_retry_job', {jb['id']}, {{priority:'event'}});",
+                )
+            job_rows.append(
+                ui.tags.tr(
+                    ui.tags.td(f"#{jb['id']} (Versuch {jb['attempt']})", style="padding:5px 8px;font-size:12px;"),
+                    ui.tags.td(f"{jb['action']} · {jb['target_channel']}", style="padding:5px 8px;font-size:12px;"),
+                    ui.tags.td(jb["status"], style="padding:5px 8px;font-size:12px;font-weight:600;"),
+                    ui.tags.td(jb["error_message"][:100] or "—", style="padding:5px 8px;font-size:11.5px;color:#991B1B;"),
+                    ui.tags.td(action_btn, style="padding:5px 8px;text-align:right;"),
+                )
+            )
 
         ui.modal_show(
             ui.modal(
@@ -392,10 +443,41 @@ def register_admin_handlers(
                     ui.nav_panel(
                         "Publikationen und Protokoll",
                         ui.div(
-                            ui.p(
-                                "Nachvollziehbares Protokoll aller Zuweisungs- und Rollenänderungen (Auslieferungsstatus & Wiederholung folgen in Etappe 2).",
-                                style="font-size:12.5px;color:#5A687C;margin:8px 0;",
+                            ui.h6("Publikationsstand (Entwurf · Freigabe · Live)", style="margin:8px 0 6px 0;color:#002855;font-weight:600;"),
+                            ui.div(
+                                ui.tags.table(
+                                    ui.tags.thead(
+                                        ui.tags.tr(
+                                            ui.tags.th("Artikel", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Entwurf", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Freigabe", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Live-Fassung", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Jüngster Auftrag", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                        )
+                                    ),
+                                    ui.tags.tbody(*pub_rows),
+                                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
+                                ),
+                                style="max-height:170px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
                             ),
+                            ui.h6("Publikationsaufträge & Fehlerdetails", style="margin:0 0 6px 0;color:#002855;font-weight:600;"),
+                            ui.div(
+                                ui.tags.table(
+                                    ui.tags.thead(
+                                        ui.tags.tr(
+                                            ui.tags.th("Auftrag", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Aktion / Ziel", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Status", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Fehler / Hinweis", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("", style="text-align:right;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                        )
+                                    ),
+                                    ui.tags.tbody(*job_rows),
+                                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
+                                ),
+                                style="max-height:160px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
+                            ),
+                            ui.h6("Rollen- & Zuweisungsprotokoll", style="margin:0 0 6px 0;color:#002855;font-weight:600;"),
                             ui.div(
                                 ui.tags.table(
                                     ui.tags.thead(
@@ -410,7 +492,7 @@ def register_admin_handlers(
                                     ui.tags.tbody(*audit_rows),
                                     style="width:100%;border-collapse:collapse;font-size:12.5px;",
                                 ),
-                                style="max-height:380px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;",
+                                style="max-height:170px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;",
                             ),
                         ),
                     ),
@@ -483,3 +565,33 @@ def register_admin_handlers(
             return
         await _show_admin_dashboard("articles")
         ui.notification_show(f"Globale Rolle für {res['user_id']} gespeichert.", type="message", duration=3)
+
+    @reactive.effect
+    @reactive.event(input.lukb_admin_poll_job)
+    async def _on_admin_poll_job() -> None:
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return
+        job_id = input.lukb_admin_poll_job()
+        if not job_id:
+            return
+        res = await asyncio.to_thread(poll_publication_job, int(job_id))
+        await _show_admin_dashboard("audit")
+        if res.get("success"):
+            ui.notification_show(f"Auftrag #{job_id} erfolgreich abgeschlossen.", type="message", duration=4)
+        else:
+            ui.notification_show(res.get("error", f"Auftrag #{job_id}: {res.get('state')}"), type="warning", duration=5)
+
+    @reactive.effect
+    @reactive.event(input.lukb_admin_retry_job)
+    async def _on_admin_retry_job() -> None:
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return
+        job_id = input.lukb_admin_retry_job()
+        if not job_id:
+            return
+        res = await asyncio.to_thread(retry_publication_job, int(job_id), state.current_user_id)
+        await _show_admin_dashboard("audit")
+        if res.get("success"):
+            ui.notification_show(f"Auftrag #{job_id} erfolgreich wiederholt.", type="message", duration=4)
+        else:
+            ui.notification_show(res.get("error", "Wiederholung fehlgeschlagen"), type="warning", duration=5)
