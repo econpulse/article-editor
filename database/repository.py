@@ -182,6 +182,129 @@ def get_article(article_id: str) -> ArticleDocument | None:
         return _row_to_document(row)
 
 
+def list_article_revisions(article_id: str, limit: int = 40) -> list[dict[str, Any]]:
+    """Liefert die gespeicherten Revisions-Snapshots eines Artikels (neueste zuerst)."""
+    if not article_id:
+        return []
+    with get_db_session() as session:
+        stmt = (
+            select(ArticleRevisionModel)
+            .where(ArticleRevisionModel.article_id == article_id)
+            .order_by(desc(ArticleRevisionModel.saved_at), desc(ArticleRevisionModel.id))
+            .limit(limit)
+        )
+        rows = session.scalars(stmt).all()
+        items: list[dict[str, Any]] = []
+        for r in rows:
+            title = ""
+            block_count = 0
+            status = ""
+            try:
+                snap = json.loads(r.snapshot_json or "{}")
+                title = (snap.get("metadata") or {}).get("title") or ""
+                block_count = len(snap.get("blocks") or [])
+                status = snap.get("status") or ""
+            except Exception:
+                pass
+            items.append(
+                {
+                    "id": r.id,
+                    "saved_at": r.saved_at.strftime("%d.%m.%Y %H:%M:%S") if r.saved_at else "",
+                    "saved_by": r.saved_by or "Unbekannt",
+                    "note": r.note or "Snapshot",
+                    "title": title,
+                    "block_count": block_count,
+                    "status": status,
+                }
+            )
+        return items
+
+
+def restore_article_revision(
+    article_id: str,
+    revision_id: int,
+    user: str = "Investment Office",
+) -> dict[str, Any] | None:
+    """Stellt den Inhalt einer gespeicherten Revision wieder her (ohne den DB-Status zu umgehen)."""
+    if not article_id or not revision_id:
+        return None
+    with get_db_session() as session:
+        rev = session.scalars(
+            select(ArticleRevisionModel).where(
+                ArticleRevisionModel.id == int(revision_id),
+                ArticleRevisionModel.article_id == article_id,
+            )
+        ).first()
+        if not rev or not rev.snapshot_json:
+            return None
+        snap_data = json.loads(rev.snapshot_json)
+        restored_doc = ArticleDocument.model_validate(snap_data)
+        restored_doc.id = article_id
+        rev_date = rev.saved_at.strftime("%d.%m.%Y %H:%M") if rev.saved_at else ""
+
+    return save_article(
+        doc=restored_doc,
+        user=user,
+        create_revision=True,
+        revision_note=f"Wiederhergestellt aus Revision #{revision_id} ({rev_date})",
+        preserve_db_status=True,
+    )
+
+
+def get_published_sync_status(article_id: str) -> dict[str, Any]:
+    """
+    Prüft, ob ein publizierter Artikel im Editor seit dem letzten Portal-Snapshot
+    weiterbearbeitet wurde (unveröffentlichte Änderungen).
+    """
+    default_res = {
+        "is_published": False,
+        "snapshot_version": None,
+        "published_at": "",
+        "published_by": "",
+        "has_unpublished_changes": False,
+    }
+    if not article_id:
+        return default_res
+    with get_db_session() as session:
+        row = session.get(ArticleModel, article_id)
+        if not row or row.status != "published":
+            return default_res
+        snap = session.scalars(
+            select(PublishedSnapshotModel)
+            .where(
+                PublishedSnapshotModel.article_id == article_id,
+                PublishedSnapshotModel.is_active == True,
+            )
+            .order_by(desc(PublishedSnapshotModel.version))
+        ).first()
+        if not snap:
+            return {
+                "is_published": True,
+                "snapshot_version": None,
+                "published_at": "",
+                "published_by": "",
+                "has_unpublished_changes": True,
+            }
+
+        def _as_utc(dt: datetime | None) -> datetime | None:
+            if dt is None:
+                return None
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+        art_upd = _as_utc(row.updated_at)
+        snap_pub = _as_utc(snap.published_at)
+        has_changes = bool(
+            art_upd and snap_pub and (art_upd - snap_pub).total_seconds() > 2.0
+        )
+        return {
+            "is_published": True,
+            "snapshot_version": int(snap.version),
+            "published_at": snap.published_at.strftime("%d.%m.%Y %H:%M") if snap.published_at else "",
+            "published_by": snap.published_by or "",
+            "has_unpublished_changes": has_changes,
+        }
+
+
 def _merge_concurrent_documents(
     base_doc: ArticleDocument,
     incoming_doc: ArticleDocument,

@@ -65,23 +65,161 @@
       const peer = peerByTarget[bid];
       const badge = card.querySelector(".block-peer-badge");
       if (peer) {
-        card.classList.add("block-peer-focused");
+        card.classList.add("block-peer-focused", "block-peer-locked");
+        card.dataset.peerLocked = "1";
         card.style.boxShadow = "0 0 0 2px " + (peer.color || "#009FE3");
+
+        // Soft-Lock: Eingabefelder & Editables im gesperrten Block schreibschützen
+        card.querySelectorAll("input, select, textarea, button").forEach(function (ctrl) {
+          if (ctrl.classList.contains("block-lock-takeover-btn")) return;
+          if (!ctrl.disabled) {
+            ctrl.disabled = true;
+            ctrl.dataset.peerDisabled = "1";
+          }
+        });
+        card.querySelectorAll('[contenteditable="true"]').forEach(function (ed) {
+          ed.setAttribute("contenteditable", "false");
+          ed.dataset.peerCe = "1";
+        });
+
         if (badge) {
           badge.style.display = "inline-flex";
           badge.style.backgroundColor = peer.color || "#009FE3";
-          badge.textContent = "✏️ " + (peer.user || "Co-Autor") + " bearbeitet …";
+          badge.innerHTML = "";
+          const txt = document.createElement("span");
+          txt.textContent = "🔒 " + (peer.user || "Co-Autor") + " bearbeitet …";
+          const takeBtn = document.createElement("button");
+          takeBtn.type = "button";
+          takeBtn.className = "block-lock-takeover-btn";
+          takeBtn.textContent = "Übernehmen";
+          takeBtn.title = "Bearbeitung dieses Blocks von " + (peer.user || "Co-Autor") + " übernehmen";
+          takeBtn.addEventListener("click", function (ev) {
+            ev.stopPropagation();
+            if (E.sendShinyEvent) {
+              E.sendShinyEvent("lukb_request_block_lock", { block_id: bid });
+            }
+          });
+          badge.appendChild(txt);
+          badge.appendChild(takeBtn);
         }
       } else {
-        card.classList.remove("block-peer-focused");
+        card.classList.remove("block-peer-focused", "block-peer-locked");
+        if (card.dataset.peerLocked === "1") {
+          delete card.dataset.peerLocked;
+          card.querySelectorAll('[data-peer-disabled="1"]').forEach(function (ctrl) {
+            ctrl.disabled = false;
+            delete ctrl.dataset.peerDisabled;
+          });
+          card.querySelectorAll('[data-peer-ce="1"]').forEach(function (ed) {
+            ed.setAttribute("contenteditable", "true");
+            delete ed.dataset.peerCe;
+          });
+        }
         card.style.boxShadow = "";
         if (badge) {
           badge.style.display = "none";
-          badge.textContent = "";
+          badge.innerHTML = "";
         }
       }
     });
   }
+
+  function renderPublishSyncBanner(publishSync) {
+    state.publishSync = publishSync || null;
+    const banner = document.getElementById("lukb-publish-sync-banner");
+    const textEl = document.getElementById("lukb-publish-sync-text");
+    if (!banner || !textEl) return;
+
+    if (publishSync && publishSync.is_published && publishSync.has_unpublished_changes) {
+      const verLabel = publishSync.snapshot_version ? "v" + publishSync.snapshot_version : "Live-Stand";
+      textEl.textContent =
+        "⚠️ Live-Stand (Portal " +
+        verLabel +
+        ") weicht vom aktuellen Entwurf ab — Änderungen sind noch nicht auf dem Portal publiziert.";
+      banner.style.display = "flex";
+    } else {
+      banner.style.display = "none";
+      textEl.textContent = "";
+    }
+  }
+
+  function closeRevisionsModal() {
+    const backdrop = document.getElementById("lukb-rev-modal-backdrop");
+    if (backdrop) backdrop.style.display = "none";
+  }
+
+  function openRevisionsModal(msg) {
+    const backdrop = document.getElementById("lukb-rev-modal-backdrop");
+    const tbody = document.getElementById("rev-modal-tbody");
+    const titlePill = document.getElementById("rev-modal-article-title");
+    if (!backdrop || !tbody) return;
+
+    if (titlePill) {
+      titlePill.textContent = (msg && msg.title) ? msg.title : "Publikation";
+    }
+    tbody.innerHTML = "";
+
+    const revs = (msg && Array.isArray(msg.revisions)) ? msg.revisions : [];
+    if (revs.length === 0) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.colSpan = 5;
+      td.style.textAlign = "center";
+      td.style.padding = "24px";
+      td.style.color = "#5A687C";
+      td.textContent = "Noch keine gespeicherten Revisionen für diesen Artikel vorhanden.";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    } else {
+      revs.forEach(function (rev, idx) {
+        const tr = document.createElement("tr");
+
+        const tdTime = document.createElement("td");
+        tdTime.textContent = rev.saved_at || "";
+
+        const tdBy = document.createElement("td");
+        tdBy.textContent = rev.saved_by || "";
+
+        const tdNote = document.createElement("td");
+        tdNote.textContent = rev.note || "Snapshot";
+
+        const tdCount = document.createElement("td");
+        tdCount.textContent = String(rev.block_count || 0) + " Blöcke";
+
+        const tdAct = document.createElement("td");
+        tdAct.style.textAlign = "right";
+        if (idx === 0) {
+          const curSpan = document.createElement("span");
+          curSpan.className = "sidebar-count-pill";
+          curSpan.textContent = "Neuester Stand";
+          tdAct.appendChild(curSpan);
+        } else {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+          btn.textContent = "↺ Wiederherstellen";
+          btn.addEventListener("click", function () {
+            if (E.sendShinyEvent) {
+              E.sendShinyEvent("lukb_restore_revision", { revision_id: rev.id });
+            }
+            closeRevisionsModal();
+          });
+          tdAct.appendChild(btn);
+        }
+
+        tr.appendChild(tdTime);
+        tr.appendChild(tdBy);
+        tr.appendChild(tdNote);
+        tr.appendChild(tdCount);
+        tr.appendChild(tdAct);
+        tbody.appendChild(tr);
+      });
+    }
+
+    backdrop.style.display = "flex";
+  }
+
+  window.lukbCloseRevisionsModal = closeRevisionsModal;
 
   function bindFocusTrackingListeners() {
     const pane = document.querySelector(".cms-editor-pane");
@@ -267,12 +405,71 @@
   }
 
 
+  function registerCollabMessageHandlers() {
+    if (!window.Shiny || !window.Shiny.addCustomMessageHandler) return;
+
+    window.Shiny.addCustomMessageHandler("lukb_global_presence", function (msg) {
+      if (msg.self_session_id) state.selfSessionId = msg.self_session_id;
+      if (msg.active_peers_by_article) {
+        state.activePeersByArticle = msg.active_peers_by_article;
+        if (typeof E.renderArticleList === "function") {
+          E.renderArticleList(state.sidebarArticles || [], state.activeArticleId, false);
+        }
+      }
+    });
+
+    window.Shiny.addCustomMessageHandler("lukb_global_article_list", function (msg) {
+      if (msg.self_session_id) state.selfSessionId = msg.self_session_id;
+      if (msg.active_peers_by_article) state.activePeersByArticle = msg.active_peers_by_article;
+      if (Array.isArray(msg.all_articles)) {
+        state.allArticles = msg.all_articles;
+        const searchInp = document.getElementById("sidebar-search-input");
+        const activeFilterBtn = document.querySelector(".sidebar-filter-btn.active");
+        const hasFilter = (searchInp && searchInp.value.trim()) || (activeFilterBtn && activeFilterBtn.dataset.status !== "all");
+        if (!hasFilter) {
+          state.sidebarArticles = msg.all_articles;
+        }
+        if (typeof E.renderArticleList === "function") {
+          E.renderArticleList(state.sidebarArticles || [], state.activeArticleId, !!hasFilter);
+        }
+        if (state.modalOpen) {
+          if (typeof E.populateModalCategoryDropdown === "function") E.populateModalCategoryDropdown();
+          if (typeof E.renderPubModalTable === "function") E.renderPubModalTable();
+        }
+      }
+    });
+
+    window.Shiny.addCustomMessageHandler("lukb_revisions_list", function (msg) {
+      openRevisionsModal(msg);
+    });
+
+    window.Shiny.addCustomMessageHandler("lukb_collab_notice", function (msg) {
+      if (msg && msg.message && typeof E.setAutosaveIndicator === "function") {
+        E.setAutosaveIndicator("saved", msg.message);
+      }
+    });
+
+    document.addEventListener("keydown", function (ev) {
+      if (ev.key === "Escape") {
+        const backdrop = document.getElementById("lukb-rev-modal-backdrop");
+        if (backdrop && backdrop.style.display !== "none") {
+          closeRevisionsModal();
+        }
+      }
+    });
+  }
+
+
   Object.assign(E, {
     applyPeerFocusDecorations: applyPeerFocusDecorations,
     bindDropdownListeners: bindDropdownListeners,
     bindFocusTrackingListeners: bindFocusTrackingListeners,
+    closeRevisionsModal: closeRevisionsModal,
     mergeRemoteBlocks: mergeRemoteBlocks,
+    openRevisionsModal: openRevisionsModal,
+    registerCollabMessageHandlers: registerCollabMessageHandlers,
     renderPresenceBar: renderPresenceBar,
+    renderPublishSyncBanner: renderPublishSyncBanner,
     syncRemoteBlocksToCanvas: syncRemoteBlocksToCanvas,
   });
 })();

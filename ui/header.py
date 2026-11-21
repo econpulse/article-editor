@@ -56,6 +56,14 @@ def header_ui() -> ui.Tag:
                 class_="btn-lukb btn-lukb-outline-light btn-lukb-sm",
                 title="Speichert sofort und legt einen Revisions-Snapshot in der Datenbank an (Ctrl+S)",
             ),
+            ui.tags.button(
+                "🕒 Historie",
+                id="btn-open-revisions",
+                type="button",
+                class_="btn-lukb btn-lukb-outline-light btn-lukb-sm",
+                title="Gespeicherte Revisionen dieses Artikels anzeigen & wiederherstellen",
+                onclick="if(window.Shiny&&window.Shiny.setInputValue){window.Shiny.setInputValue('lukb_open_revisions',{ts:Date.now()},{priority:'event'});}",
+            ),
             class_="cms-topbar-center",
         ),
         ui.div(

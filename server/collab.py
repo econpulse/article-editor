@@ -126,6 +126,109 @@ async def cleanup_peer(session_id: str) -> None:
             await broadcast_presence(old_info["article_id"])
         except Exception:
             pass
+    try:
+        await broadcast_global_presence()
+    except Exception:
+        pass
+
+
+def get_active_articles_presence() -> dict[str, list[dict[str, str]]]:
+    """Liefert eine Übersicht, welche aktiven Benutzer welchen Artikel geöffnet haben."""
+    by_article: dict[str, list[dict[str, str]]] = {}
+    for sid, info in list(ACTIVE_PEERS.items()):
+        aid = info.get("article_id") or ""
+        if not aid:
+            continue
+        by_article.setdefault(aid, []).append(
+            {
+                "session_id": sid,
+                "user": info.get("user", "Analyst"),
+                "color": info.get("color", "#009FE3"),
+            }
+        )
+    return by_article
+
+
+async def broadcast_global_presence() -> None:
+    """Sendet die globale Artikel-Belegung an alle verbundenen Sessions (für die Sidebar)."""
+    by_article = get_active_articles_presence()
+    for sid, info in list(ACTIVE_PEERS.items()):
+        sess: Session | None = info.get("session")
+        if sess is not None:
+            try:
+                await sess.send_custom_message(
+                    "lukb_global_presence",
+                    {
+                        "self_session_id": sid,
+                        "active_peers_by_article": by_article,
+                    },
+                )
+            except Exception:
+                pass
+
+
+async def broadcast_article_list_to_all(exclude_session_id: str | None = None) -> None:
+    """Aktualisiert die Artikelliste bei allen anderen aktiven Sessions (z. B. nach Neu/Löschen/Statuswechsel)."""
+    targets = [
+        (sid, info)
+        for sid, info in list(ACTIVE_PEERS.items())
+        if sid != exclude_session_id and info.get("session") is not None
+    ]
+    if not targets:
+        return
+    from database.repository import list_articles
+
+    all_items = await asyncio.to_thread(list_articles, search_query="", status_filter="all")
+    by_article = get_active_articles_presence()
+    for sid, info in targets:
+        sess: Session | None = info.get("session")
+        if sess is not None:
+            try:
+                await sess.send_custom_message(
+                    "lukb_global_article_list",
+                    {
+                        "all_articles": all_items,
+                        "active_id": info.get("article_id", ""),
+                        "self_session_id": sid,
+                        "active_peers_by_article": by_article,
+                    },
+                )
+            except Exception:
+                pass
+
+
+async def transfer_block_lock(requester_session_id: str, block_id: str) -> None:
+    """Überträgt den aktiven Bearbeitungs-Fokus (Soft-Lock) eines Blocks an den anfragenden Co-Autor."""
+    req_info = ACTIVE_PEERS.get(requester_session_id)
+    if not req_info or not block_id:
+        return
+    article_id = req_info.get("article_id", "")
+    req_user = req_info.get("user", "Co-Autor")
+    if not article_id:
+        return
+
+    for sid, info in list(ACTIVE_PEERS.items()):
+        if (
+            sid != requester_session_id
+            and info.get("article_id") == article_id
+            and info.get("focused_target") == block_id
+        ):
+            info["focused_target"] = ""
+            sess: Session | None = info.get("session")
+            if sess is not None:
+                try:
+                    await sess.send_custom_message(
+                        "lukb_collab_notice",
+                        {
+                            "message": f"✏️ {req_user} hat die Bearbeitung des Blocks übernommen.",
+                            "block_id": block_id,
+                        },
+                    )
+                except Exception:
+                    pass
+
+    req_info["focused_target"] = block_id
+    await broadcast_presence(article_id)
 
 
 def get_article_peers(article_id: str) -> list[dict[str, Any]]:
@@ -175,6 +278,7 @@ async def broadcast_article_sync(
     author_name: str,
     include_sender: bool = False,
     assets_map: dict[str, dict[str, Any]] | None = None,
+    publish_sync: dict[str, Any] | None = None,
 ) -> None:
     """Synchronisiert den Dokumenteninhalt mit anderen aktiven Co-Autoren im selben Artikel."""
     targets = [
@@ -204,6 +308,7 @@ async def broadcast_article_sync(
                         "assets": resolved_assets,
                         "updated_by": author_name,
                         "sender_session_id": sender_session_id,
+                        "publish_sync": publish_sync,
                     },
                 )
             except Exception:

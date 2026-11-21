@@ -11,11 +11,12 @@ from shiny import Inputs, Outputs, Session, reactive, ui
 
 from config import can_publish
 from database.repository import (
+    get_published_sync_status,
     publish_article_to_portal,
     save_article,
     unpublish_article_from_portal,
 )
-from server.collab import broadcast_article_sync
+from server.collab import broadcast_article_list_to_all, broadcast_article_sync
 from server.state import SessionState
 
 logger = logging.getLogger("lukb_cms.workflow_handlers")
@@ -67,12 +68,13 @@ def register_workflow_handlers(
             revision_note="Zur Prüfung / Freigabe eingereicht (Status: review)",
         )
         await state.send_article_list(doc.id)
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         await broadcast_article_sync(
             article_id=doc.id,
             doc=doc,
             sender_session_id=state.session_id,
             author_name=state.current_user,
-            include_sender=False,
+            include_sender=True,
         )
         ui.notification_show(
             "✅ Publikation zur Freigabe eingereicht (Status: In Review). Ein Senior Editor kann den Artikel nun prüfen und publizieren.",
@@ -100,13 +102,16 @@ def register_workflow_handlers(
             if res.get("success"):
                 doc.status = "published"
                 state.current_doc.set(doc)
+                pub_sync = await asyncio.to_thread(get_published_sync_status, doc.id)
                 await state.send_article_list(doc.id)
+                await broadcast_article_list_to_all(exclude_session_id=state.session_id)
                 await broadcast_article_sync(
                     article_id=doc.id,
                     doc=doc,
                     sender_session_id=state.session_id,
                     author_name=user,
-                    include_sender=False,
+                    include_sender=True,
+                    publish_sync=pub_sync,
                 )
                 count = res.get("total_published", 1)
                 _notify_connect_deploy_result(
@@ -192,13 +197,16 @@ def register_workflow_handlers(
             if res.get("success"):
                 doc.status = "draft"
                 state.current_doc.set(doc)
+                pub_sync = await asyncio.to_thread(get_published_sync_status, doc.id)
                 await state.send_article_list(doc.id)
+                await broadcast_article_list_to_all(exclude_session_id=state.session_id)
                 await broadcast_article_sync(
                     article_id=doc.id,
                     doc=doc,
                     sender_session_id=state.session_id,
-                    author_name=state.current_user,
-                    include_sender=False,
+                    author_name=user,
+                    include_sender=True,
+                    publish_sync=pub_sync,
                 )
                 _notify_connect_deploy_result(
                     res.get("connect_deploy"),

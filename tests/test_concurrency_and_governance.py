@@ -21,10 +21,22 @@ from database.repository import (
     create_new_article,
     delete_article,
     get_article,
+    get_published_sync_status,
     init_db_and_seed,
+    list_article_revisions,
+    publish_article_to_portal,
+    restore_article_revision,
     save_article,
 )
 from schemas.article import ArticleDocument, ArticleMetadata
+from server.collab import (
+    ACTIVE_PEERS,
+    get_active_articles_presence,
+    register_peer,
+    set_peer_article,
+    set_peer_focus,
+    transfer_block_lock,
+)
 from services.portal_publisher import publish_article
 
 
@@ -141,3 +153,86 @@ def test_concurrent_portal_publish_is_thread_safe(tmp_path: Path):
     assert d1.id in manifest["articles"]
     assert d2.id in manifest["articles"]
     assert not list(tmp_path.rglob("*.tmp"))
+
+
+def test_revisions_list_and_restore_preserves_status():
+    init_db_and_seed()
+    doc = create_new_article(template_id="investment_focus", user="Autor A")
+    doc.metadata.title = "Stand Eins"
+    save_article(doc, user="Autor A", create_revision=True, revision_note="Meilenstein 1")
+
+    doc_v2 = get_article(doc.id)
+    assert doc_v2 is not None
+    doc_v2.metadata.title = "Stand Zwei (versehentlich geändert)"
+    save_article(doc_v2, user="Autor B", create_revision=True, revision_note="Meilenstein 2")
+
+    revs = list_article_revisions(doc.id)
+    assert len(revs) >= 3
+    m1 = next(r for r in revs if r["note"] == "Meilenstein 1")
+
+    restored_res = restore_article_revision(doc.id, m1["id"], user="Editor C")
+    assert restored_res is not None
+    assert restored_res["article"]["metadata"]["title"] == "Stand Eins"
+    assert restored_res["article"]["status"] == "draft"
+
+    reloaded = get_article(doc.id)
+    assert reloaded is not None
+    assert reloaded.metadata.title == "Stand Eins"
+    assert delete_article(doc.id, force=True) is True
+
+
+def test_published_sync_status_detects_unpublished_edits(tmp_path: Path, monkeypatch):
+    import services.portal_publisher as pp
+
+    monkeypatch.setattr(pp, "STATIC_PORTAL_DIR", tmp_path)
+    init_db_and_seed()
+    doc = create_new_article(template_id="investment_focus", user="Editor")
+    pub_res = publish_article_to_portal(doc.id, user="Editor")
+    assert pub_res["success"] is True
+
+    sync_clean = get_published_sync_status(doc.id)
+    assert sync_clean["is_published"] is True
+    assert sync_clean["snapshot_version"] == 1
+    assert sync_clean["has_unpublished_changes"] is False
+
+    # Simuliere spätere Bearbeitung im Editor (> 2s nach Snapshot)
+    import time
+    from datetime import datetime, timedelta, timezone
+    from database.connection import get_db_session
+    from database.models import PublishedSnapshotModel
+
+    with get_db_session() as s:
+        snap = s.query(PublishedSnapshotModel).filter_by(article_id=doc.id, is_active=True).first()
+        assert snap is not None
+        snap.published_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+
+    loaded = get_article(doc.id)
+    assert loaded is not None
+    loaded.metadata.title = "Nachträglich editiert"
+    save_article(loaded, user="Autor", preserve_db_status=True)
+
+    sync_dirty = get_published_sync_status(doc.id)
+    assert sync_dirty["is_published"] is True
+    assert sync_dirty["has_unpublished_changes"] is True
+
+    assert delete_article(doc.id, force=True) is True
+
+
+def test_global_presence_and_block_lock_transfer():
+    import asyncio
+
+    ACTIVE_PEERS.clear()
+    register_peer("s1", None, "Anna", "#009FE3", lambda d: None)
+    register_peer("s2", None, "Ben", "#0D9488", lambda d: None)
+    set_peer_article("s1", "art_1")
+    set_peer_article("s2", "art_1")
+    set_peer_focus("s1", "blk_42")
+
+    by_art = get_active_articles_presence()
+    assert "art_1" in by_art
+    assert len(by_art["art_1"]) == 2
+
+    asyncio.run(transfer_block_lock("s2", "blk_42"))
+    assert ACTIVE_PEERS["s1"]["focused_target"] == ""
+    assert ACTIVE_PEERS["s2"]["focused_target"] == "blk_42"
+    ACTIVE_PEERS.clear()

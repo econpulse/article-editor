@@ -19,6 +19,7 @@ from database.repository import (
     get_first_article_id,
     restore_article,
 )
+from server.collab import broadcast_article_list_to_all
 from server.state import SessionState
 
 logger = logging.getLogger("lukb_cms.article_handlers")
@@ -60,6 +61,7 @@ def register_article_handlers(
     async def _on_new_article() -> None:
         new_doc = await asyncio.to_thread(create_new_article, user=state.current_user)
         await state.load_and_broadcast_article(new_doc.id)
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         ui.notification_show("Neue Publikation wurde angelegt.", type="message", duration=3)
 
     # Artikel duplizieren
@@ -72,6 +74,7 @@ def register_article_handlers(
         dup_doc = await asyncio.to_thread(duplicate_article, aid, user=state.current_user)
         if dup_doc:
             await state.load_and_broadcast_article(dup_doc.id)
+            await broadcast_article_list_to_all(exclude_session_id=state.session_id)
             ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
 
     # Artikel löschen (mit Rollenprüfung, Publiziert-Schutz & Sicherheits-Modal)
@@ -183,6 +186,7 @@ def register_article_handlers(
             await state.load_and_broadcast_article(next_id)
         else:
             await state.send_article_list("")
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         ui.notification_show("Publikation wurde in das Archiv verschoben (Soft-Delete).", type="message", duration=4)
 
     # Artikel aus dem Archiv wiederherstellen (Restore)
@@ -203,6 +207,7 @@ def register_article_handlers(
         ok = await asyncio.to_thread(restore_article, aid, user=user)
         if ok:
             await state.load_and_broadcast_article(aid)
+            await broadcast_article_list_to_all(exclude_session_id=state.session_id)
             ui.notification_show("Publikation wurde aus dem Archiv wiederhergestellt (Status: Entwurf).", type="message", duration=4)
         else:
             ui.notification_show("Dieser Artikel ist nicht archiviert.", type="info", duration=3)
@@ -219,11 +224,13 @@ def register_article_handlers(
         if action == "create":
             new_doc = await asyncio.to_thread(create_new_article, user=state.current_user)
             await state.load_and_broadcast_article(new_doc.id)
+            await broadcast_article_list_to_all(exclude_session_id=state.session_id)
             ui.notification_show("Neue Publikation wurde angelegt.", type="message", duration=3)
         elif action == "duplicate" and target_id:
             dup_doc = await asyncio.to_thread(duplicate_article, target_id, user=state.current_user)
             if dup_doc:
                 await state.load_and_broadcast_article(dup_doc.id)
+                await broadcast_article_list_to_all(exclude_session_id=state.session_id)
                 ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
         elif action == "delete" and target_id:
             user = state.current_user
@@ -247,4 +254,5 @@ def register_article_handlers(
                 await state.load_and_broadcast_article(next_id or "")
             else:
                 await state.send_article_list(state.current_article_id.get())
+            await broadcast_article_list_to_all(exclude_session_id=state.session_id)
             ui.notification_show("Publikation wurde in das Archiv verschoben (Soft-Delete).", type="message", duration=3)

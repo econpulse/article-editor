@@ -6,6 +6,74 @@
      - Überschriften: "Yoga Sans for LUKB Medium"
    ============================================================================ */
 
+/* ============================================================================
+   Punkt 2: Block-Soft-Locking, Publish-Sync-Banner & Sidebar-Peer-Indikatoren
+   ============================================================================ */
+.publish-sync-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: #FFFBEB;
+  border: 1px solid #F59E0B;
+  border-left: 4px solid #D97706;
+  border-radius: var(--radius-md);
+  color: #92400E;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cms-block-card.block-peer-locked {
+  background: #F8FAFC;
+}
+
+.cms-block-card.block-peer-locked .block-card-body {
+  opacity: 0.78;
+}
+
+.block-lock-takeover-btn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #FFFFFF;
+  background: rgba(0, 40, 85, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.block-lock-takeover-btn:hover {
+  background: rgba(0, 40, 85, 0.65);
+}
+
+.sidebar-peer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.sidebar-peer-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #002855;
+  background: #EEF6FC;
+  border: 1px solid #CBE3F5;
+  border-radius: 999px;
+}
+
+.sidebar-peer-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
 :root {
   --lukb-navy: #002855;
   --lukb-navy-dark: #001B3A;

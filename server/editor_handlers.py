@@ -10,9 +10,16 @@ import base64
 import logging
 from shiny import Inputs, Outputs, Session, reactive, ui
 
-from database.repository import save_article, save_asset
+from database.repository import (
+    get_published_sync_status,
+    list_article_revisions,
+    restore_article_revision,
+    save_article,
+    save_asset,
+)
 from schemas.article import ArticleDocument
 from server.collab import (
+    broadcast_article_list_to_all,
     broadcast_article_sync,
     broadcast_presence,
     broadcast_preview_to_coauthors,
@@ -22,6 +29,7 @@ from server.collab import (
     set_peer_auto_preview,
     set_peer_focus,
     set_peer_preview_mode,
+    transfer_block_lock,
 )
 from server.state import SessionState
 
@@ -69,6 +77,84 @@ def register_editor_handlers(
         if aid:
             await broadcast_presence(aid)
 
+    # Soft-Lock für einen Block aktiv übernehmen
+    @reactive.effect
+    @reactive.event(input.lukb_request_block_lock)
+    async def _on_request_block_lock() -> None:
+        payload = input.lukb_request_block_lock()
+        if not isinstance(payload, dict):
+            return
+        block_id = str(payload.get("block_id", "")).strip()
+        if block_id:
+            await transfer_block_lock(state.session_id, block_id)
+
+    # Revisions-Historie für aktuellen Artikel laden
+    @reactive.effect
+    @reactive.event(input.lukb_open_revisions)
+    async def _on_open_revisions() -> None:
+        aid = state.current_article_id.get()
+        if not aid:
+            return
+        revs = await asyncio.to_thread(list_article_revisions, aid, 40)
+        doc = state.current_doc.get()
+        await session.send_custom_message(
+            "lukb_revisions_list",
+            {
+                "article_id": aid,
+                "title": doc.metadata.title if doc else "",
+                "revisions": revs,
+            },
+        )
+
+    # Gespeicherte Revision wiederherstellen
+    @reactive.effect
+    @reactive.event(input.lukb_restore_revision)
+    async def _on_restore_revision() -> None:
+        payload = input.lukb_restore_revision()
+        if not isinstance(payload, dict):
+            return
+        aid = state.current_article_id.get()
+        rev_id = payload.get("revision_id")
+        if not aid or not rev_id:
+            return
+        try:
+            save_info = await asyncio.to_thread(
+                restore_article_revision,
+                aid,
+                int(rev_id),
+                user=state.current_user,
+            )
+            if not save_info:
+                ui.notification_show("Revision konnte nicht wiederhergestellt werden.", type="warning", duration=4)
+                return
+            restored_doc = save_info.pop("doc_obj", None) or ArticleDocument.model_validate(save_info["article"])
+            state.current_doc.set(restored_doc)
+            assets_map = await asyncio.to_thread(collect_article_assets_map, restored_doc)
+            pub_sync = await asyncio.to_thread(get_published_sync_status, restored_doc.id)
+
+            await broadcast_article_sync(
+                article_id=restored_doc.id,
+                doc=restored_doc,
+                sender_session_id=state.session_id,
+                author_name=state.current_user,
+                include_sender=True,
+                assets_map=assets_map,
+                publish_sync=pub_sync,
+            )
+            await state.send_article_list(restored_doc.id)
+            await broadcast_article_list_to_all(exclude_session_id=state.session_id)
+            pdf_b64, web_html = await state.send_active_preview(restored_doc, respect_auto_preview=False)
+            await broadcast_preview_to_coauthors(
+                state.session_id,
+                restored_doc,
+                pre_rendered_pdf_base64=pdf_b64,
+                pre_rendered_html=web_html,
+            )
+            ui.notification_show(f"Revision #{rev_id} wurde wiederhergestellt.", type="message", duration=4)
+        except Exception as exc:
+            logger.exception("Fehler bei Revisions-Wiederherstellung")
+            ui.notification_show(f"Wiederherstellung fehlgeschlagen: {exc}", type="error")
+
     # Debounced Autosave & Manuelles Speichern (inkl. 3-Wege-Block-Merge & Live-Broadcast)
     @reactive.effect
     @reactive.event(input.lukb_autosave_payload)
@@ -106,6 +192,12 @@ def register_editor_handlers(
                 known_asset_ids=known_asset_ids,
             )
             save_info["assets"] = assets_map
+            pub_sync = (
+                await asyncio.to_thread(get_published_sync_status, merged_doc.id)
+                if merged_doc.status == "published"
+                else None
+            )
+            save_info["publish_sync"] = pub_sync
             await session.send_custom_message("lukb_autosave_ack", save_info)
 
             # Sidebar-Refresh nur ausführen, wenn Titel, Status, Kategorie oder Revisions-Snapshot geändert wurden
@@ -121,6 +213,8 @@ def register_editor_handlers(
 
             if meta_changed or payload.get("create_revision"):
                 await state.send_article_list(merged_doc.id)
+                if meta_changed:
+                    await broadcast_article_list_to_all(exclude_session_id=state.session_id)
 
             auto_preview = bool(payload.get("auto_preview", is_peer_auto_preview(state.session_id, default=True)))
             set_peer_auto_preview(state.session_id, auto_preview)
@@ -148,6 +242,7 @@ def register_editor_handlers(
                 author_name=user_label,
                 include_sender=bool(save_info.get("merged", False)),
                 assets_map=assets_map,
+                publish_sync=pub_sync,
             )
             # Aktualisiere auch die Live-Vorschau bei allen Co-Autoren im selben Artikel
             await broadcast_preview_to_coauthors(

@@ -138,6 +138,29 @@
     metaRow.appendChild(dateSpan);
     card.appendChild(metaRow);
 
+    const activePeers = (state.activePeersByArticle && state.activePeersByArticle[item.id]) || [];
+    const otherPeers = activePeers.filter(function (p) {
+      return p.session_id !== state.selfSessionId;
+    });
+    if (otherPeers.length > 0) {
+      const peerRow = document.createElement("div");
+      peerRow.className = "sidebar-peer-chips";
+      otherPeers.forEach(function (p) {
+        const chip = document.createElement("span");
+        chip.className = "sidebar-peer-chip";
+        chip.title = (p.user || "Co-Autor") + " bearbeitet diesen Artikel";
+        const dot = document.createElement("span");
+        dot.className = "sidebar-peer-dot";
+        dot.style.backgroundColor = p.color || "#009FE3";
+        const nm = document.createElement("span");
+        nm.textContent = p.user || "Co-Autor";
+        chip.appendChild(dot);
+        chip.appendChild(nm);
+        peerRow.appendChild(chip);
+      });
+      card.appendChild(peerRow);
+    }
+
     card.addEventListener("click", function () {
       selectArticleById(item.id);
     });

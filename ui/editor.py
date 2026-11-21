@@ -306,6 +306,12 @@ def editor_ui(templates_list: list[dict[str, Any]] | None = None) -> ui.Tag:
         templates_list = list_available_templates()
 
     return ui.tags.main(
+        ui.div(
+            ui.span("", id="lukb-publish-sync-text"),
+            id="lukb-publish-sync-banner",
+            class_="publish-sync-banner",
+            style="display:none;",
+        ),
         document_metadata_card_ui(templates_list),
         block_toolbar_ui(),
         blocks_canvas_ui(),

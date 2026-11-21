@@ -41,6 +41,8 @@
     lastKnownPageCount: 0,
     selfSessionId: "",
     peers: [], // Aktive Co-Autoren im selben Artikel
+    activePeersByArticle: {}, // article_id -> [{session_id, user, color}]
+    publishSync: null,
     currentFocusedTarget: "",
     sidebarArticles: [],
     allArticles: [],

@@ -150,3 +150,54 @@ def search_modal_ui() -> ui.Tag:
         class_="pub-modal-backdrop",
         style="display:none;",
     )
+
+
+def revisions_modal_ui() -> ui.Tag:
+    """Rendert den Dialog für die Revisions-Historie & Wiederherstellung."""
+    return ui.div(
+        ui.div(
+            ui.div(
+                ui.div(
+                    ui.h2("Versionshistorie & Wiederherstellung", class_="pub-modal-title"),
+                    ui.span("", id="rev-modal-article-title", class_="sidebar-count-pill"),
+                    style="display:flex;align-items:center;gap:10px;min-width:0;",
+                ),
+                ui.tags.button(
+                    "✕ Schliessen (Esc)",
+                    id="btn-close-rev-modal",
+                    type="button",
+                    class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                    onclick="if(window.lukbCloseRevisionsModal){window.lukbCloseRevisionsModal();}",
+                ),
+                class_="pub-modal-header",
+            ),
+            ui.div(
+                ui.tags.table(
+                    ui.tags.thead(
+                        ui.tags.tr(
+                            ui.tags.th("Zeitpunkt", style="width:155px;"),
+                            ui.tags.th("Autor", style="width:160px;"),
+                            ui.tags.th("Notiz / Meilenstein"),
+                            ui.tags.th("Umfang", style="width:105px;"),
+                            ui.tags.th("Aktion", style="width:140px;text-align:right;"),
+                        )
+                    ),
+                    ui.tags.tbody(id="rev-modal-tbody"),
+                    class_="pub-modal-table",
+                ),
+                class_="pub-modal-table-wrap",
+            ),
+            ui.div(
+                ui.span(
+                    "Hinweis: Bei der Wiederherstellung bleibt der aktuelle Workflow-Status erhalten; zuvor wird automatisch ein Sicherungs-Snapshot angelegt.",
+                    class_="pub-modal-hint",
+                ),
+                class_="pub-modal-footer",
+            ),
+            class_="pub-modal-dialog",
+            style="max-width:860px;",
+        ),
+        id="lukb-rev-modal-backdrop",
+        class_="pub-modal-backdrop",
+        style="display:none;",
+    )

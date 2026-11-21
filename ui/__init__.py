@@ -13,7 +13,7 @@ from services.kpi_icons import get_kpi_icons_catalog
 from services.renderer import list_available_templates
 from ui.editor import editor_ui
 from ui.header import header_ui
-from ui.modals import search_modal_ui
+from ui.modals import revisions_modal_ui, search_modal_ui
 from ui.preview import preview_ui
 from ui.sidebar import sidebar_ui
 
@@ -78,6 +78,7 @@ def build_app_ui() -> ui.Tag:
             class_="cms-workspace",
         ),
         search_modal_ui(),
+        revisions_modal_ui(),
     )
 
 

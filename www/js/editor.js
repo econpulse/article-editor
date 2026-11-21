@@ -2461,11 +2461,20 @@
       renderMetadataForm();
       renderBlocksCanvas();
       applyPeerFocusDecorations();
+      if (E.renderPublishSyncBanner) {
+        E.renderPublishSyncBanner(msg.publish_sync || null);
+      }
       setAutosaveIndicator("saved", "Geladen & synchronisiert");
     });
 
     // 2. Aktualisiert die Artikel-Liste in der linken Sidebar sowie den Modal-Katalog
     window.Shiny.addCustomMessageHandler("lukb_update_article_list", function (msg) {
+      if (msg.self_session_id) {
+        state.selfSessionId = msg.self_session_id;
+      }
+      if (msg.active_peers_by_article) {
+        state.activePeersByArticle = msg.active_peers_by_article;
+      }
       state.sidebarArticles = msg.articles || [];
       state.allArticles = Array.isArray(msg.all_articles)
         ? msg.all_articles
@@ -2513,6 +2522,9 @@
       if (!state.isDirty) {
         const suffix = msg.merged ? " (mit Co-Autor zusammengeführt)" : "";
         setAutosaveIndicator("saved", "Gespeichert um " + (msg.saved_at || "") + suffix);
+      }
+      if (msg.publish_sync !== undefined && E.renderPublishSyncBanner) {
+        E.renderPublishSyncBanner(msg.publish_sync);
       }
     });
 
@@ -2622,6 +2634,9 @@
         focusedBlockId
       );
       applyPeerFocusDecorations();
+      if (msg.publish_sync !== undefined && E.renderPublishSyncBanner) {
+        E.renderPublishSyncBanner(msg.publish_sync);
+      }
       if (!state.isDirty && msg.updated_by) {
         setAutosaveIndicator("saved", "Live aktualisiert von " + msg.updated_by);
       }
@@ -2636,6 +2651,11 @@
       renderPresenceBar();
       applyPeerFocusDecorations();
     });
+
+    // 3d-3f. Globale Präsenz, Artikellisten-Broadcast, Revisions-Modal & Soft-Lock-Hinweise
+    if (E.registerCollabMessageHandlers) {
+      E.registerCollabMessageHandlers();
+    }
 
     // 4. PDF.js Live-Preview & Web HTML
     if (typeof window !== "undefined" && window.pdfjsLib) {

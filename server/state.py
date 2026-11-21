@@ -14,14 +14,17 @@ from database.repository import (
     create_new_article,
     get_article,
     get_first_article_id,
+    get_published_sync_status,
     list_articles,
     list_available_tickers,
 )
 from schemas.article import ArticleDocument
 from server.collab import (
+    broadcast_global_presence,
     broadcast_presence,
     cleanup_peer,
     collect_article_assets_map,
+    get_active_articles_presence,
     get_peer_color,
     get_peer_preview_mode,
     is_peer_auto_preview,
@@ -103,6 +106,8 @@ class SessionState:
                 "articles": items,
                 "all_articles": all_items,
                 "active_id": active_id,
+                "self_session_id": self.session_id,
+                "active_peers_by_article": get_active_articles_presence(),
                 "sidebar_search_active": bool(search_q.strip()),
                 "sidebar_status_filter": status_f,
             },
@@ -177,12 +182,13 @@ class SessionState:
                 else:
                     loaded_doc = create_new_article(user=self.current_user)
             if loaded_doc is None:
-                return None, {}, []
+                return None, {}, [], None
             a_map = collect_article_assets_map(loaded_doc)
             tickers = list_available_tickers(limit=25)
-            return loaded_doc, a_map, tickers
+            pub_sync = get_published_sync_status(loaded_doc.id)
+            return loaded_doc, a_map, tickers, pub_sync
 
-        doc, assets_map, available_tickers = await asyncio.to_thread(_load_doc_and_assets)
+        doc, assets_map, available_tickers, publish_sync = await asyncio.to_thread(_load_doc_and_assets)
         if doc is None:
             return
 
@@ -197,6 +203,7 @@ class SessionState:
                 "assets": assets_map,
                 "available_tickers": available_tickers,
                 "self_session_id": self.session_id,
+                "publish_sync": publish_sync,
             },
         )
         await self.send_article_list(doc.id)
@@ -204,3 +211,4 @@ class SessionState:
         if prev_article_id and prev_article_id != doc.id:
             await broadcast_presence(prev_article_id)
         await broadcast_presence(doc.id)
+        await broadcast_global_presence()
