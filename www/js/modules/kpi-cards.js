@@ -86,6 +86,10 @@
 
     const pop = document.createElement("div");
     pop.className = "kpi-icon-picker-popover";
+    const ownerBlockCard = anchorBtn && anchorBtn.closest ? anchorBtn.closest(".cms-block-card") : null;
+    if (ownerBlockCard && ownerBlockCard.dataset && ownerBlockCard.dataset.blockId) {
+      pop.dataset.ownerBlockId = ownerBlockCard.dataset.blockId;
+    }
 
     const searchRow = document.createElement("div");
     searchRow.className = "kpi-icon-picker-search-row";
@@ -95,6 +99,15 @@
     searchInp.placeholder = "Icon suchen (z. B. Zins, Aktie, Gold, ESG) …";
     searchInp.style.fontSize = "12px";
     searchInp.style.padding = "5px 8px";
+
+    function focusNoScroll(el) {
+      if (!el || typeof el.focus !== "function") return;
+      try {
+        el.focus({ preventScroll: true });
+      } catch (_) {
+        el.focus();
+      }
+    }
 
     const noneBtn = document.createElement("button");
     noneBtn.type = "button";
@@ -106,6 +119,7 @@
       card.icon = "";
       closeIconPickerPopover();
       onPicked();
+      focusNoScroll(anchorBtn);
       markDirty();
     });
 
@@ -170,6 +184,7 @@
             card.icon = ic.id;
             closeIconPickerPopover();
             onPicked();
+            focusNoScroll(anchorBtn);
             markDirty();
           });
           grid.appendChild(btn);
@@ -198,9 +213,11 @@
     if (rect.bottom + popH > window.innerHeight - 12 && rect.top > popH + 16) {
       top = rect.top + window.scrollY - popH - 6;
     }
+    const maxTop = Math.max(12, window.scrollY + window.innerHeight - popH - 12);
+    top = Math.min(Math.max(12, top), maxTop);
     pop.style.left = left + "px";
     pop.style.top = top + "px";
-    setTimeout(function () { searchInp.focus(); }, 10);
+    setTimeout(function () { focusNoScroll(searchInp); }, 10);
   }
 
   function createDefaultKpiCard() {
@@ -462,17 +479,20 @@
         const iconBtn = document.createElement("button");
         iconBtn.type = "button";
         iconBtn.className = "kpi-icon-picker-btn";
-        const iconInfo = findIcon(card.icon);
-        iconBtn.innerHTML =
-          '<span class="kpi-icon-picker-badge" style="background:' + tone.badge + ';">' +
-          renderIconSvgHtml(card.icon, tone.accent, 17) +
-          "</span>" +
-          '<span class="kpi-icon-picker-name"></span>' +
-          '<span style="font-size:10px;color:#64748B;">▾</span>';
-        iconBtn.querySelector(".kpi-icon-picker-name").textContent = iconInfo ? iconInfo.label : "Ohne Icon";
+        function updateIconBtnVisual() {
+          const iconInfo = findIcon(card.icon);
+          iconBtn.innerHTML =
+            '<span class="kpi-icon-picker-badge" style="background:' + tone.badge + ';">' +
+            renderIconSvgHtml(card.icon, tone.accent, 17) +
+            "</span>" +
+            '<span class="kpi-icon-picker-name"></span>' +
+            '<span style="font-size:10px;color:#64748B;">▾</span>';
+          iconBtn.querySelector(".kpi-icon-picker-name").textContent = iconInfo ? iconInfo.label : "Ohne Icon";
+        }
+        updateIconBtnVisual();
         iconBtn.addEventListener("click", function (e) {
           e.stopPropagation();
-          openIconPickerPopover(iconBtn, card, renderCardsEditor);
+          openIconPickerPopover(iconBtn, card, updateIconBtnVisual);
         });
         iconCol.appendChild(iconLbl);
         iconCol.appendChild(iconBtn);

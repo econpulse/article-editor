@@ -242,6 +242,11 @@
     pane.addEventListener("focusout", function () {
       setTimeout(function () {
         const active = document.activeElement;
+        const kpiPop = active && active.closest ? active.closest(".kpi-icon-picker-popover[data-owner-block-id]") : null;
+        if (kpiPop && kpiPop.dataset && kpiPop.dataset.ownerBlockId) {
+          notifyFocusTarget(kpiPop.dataset.ownerBlockId);
+          return;
+        }
         if (!active || !pane.contains(active)) {
           notifyFocusTarget("");
         }

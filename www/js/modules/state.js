@@ -588,6 +588,10 @@
   function getActiveFocusedBlockId() {
     const active = document.activeElement;
     if (!active) return "";
+    const kpiPop = active.closest ? active.closest(".kpi-icon-picker-popover[data-owner-block-id]") : null;
+    if (kpiPop && kpiPop.dataset && kpiPop.dataset.ownerBlockId) {
+      return kpiPop.dataset.ownerBlockId;
+    }
     const card = active.closest(".cms-block-card");
     return card && card.dataset && card.dataset.blockId ? card.dataset.blockId : "";
   }
