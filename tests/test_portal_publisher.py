@@ -298,6 +298,47 @@ def test_published_snapshots_and_recovery() -> None:
         print("Published snapshots and recovery tests passed successfully!")
 
 
+def test_connect_bundle_no_duplicate_entries() -> None:
+    from collections import Counter
+
+    with tempfile.TemporaryDirectory() as tmp_dir_str:
+        tmp_dist = Path(tmp_dir_str) / "portal_dist"
+        tmp_dist.mkdir()
+
+        doc1 = _build_test_doc(f"bundle-1-{uuid.uuid4().hex[:6]}", "Erster Bundle-Artikel")
+        doc2 = _build_test_doc(f"bundle-2-{uuid.uuid4().hex[:6]}", "Zweiter Bundle-Artikel")
+        res1 = publish_article(doc1, output_dir=tmp_dist, sync_with_db=False)
+        res2 = publish_article(doc2, output_dir=tmp_dist, sync_with_db=False)
+        assert res1["success"] and res2["success"]
+
+        bundle_path = Path(tmp_dir_str) / "test_bundle.tar.gz"
+        out = create_connect_bundle(output_dir=tmp_dist, bundle_path=bundle_path)
+        assert out.exists()
+
+        with tarfile.open(out, "r:gz") as tar:
+            names = [m.name.replace("\\", "/") for m in tar.getmembers()]
+
+        counts = Counter(names)
+        duplicates = {name: cnt for name, cnt in counts.items() if cnt > 1}
+        assert not duplicates, f"Doppelte Einträge im Connect-Bundle gefunden: {duplicates}"
+
+        slug1 = res1["slug"]
+        slug2 = res2["slug"]
+        expected_paths = [
+            "index.html",
+            "manifest.json",
+            "assets/portal.css",
+            "assets/portal.js",
+            f"articles/{slug1}/index.html",
+            f"articles/{slug1}/{slug1}.pdf",
+            f"articles/{slug2}/index.html",
+            f"articles/{slug2}/{slug2}.pdf",
+        ]
+        for ep in expected_paths:
+            assert counts[ep] == 1, f"Erwarteter Pfad {ep} hat Anzahl {counts[ep]} statt 1"
+
+
 if __name__ == "__main__":
     test_portal_publisher_flow()
     test_published_snapshots_and_recovery()
+    test_connect_bundle_no_duplicate_entries()

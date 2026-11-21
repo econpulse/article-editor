@@ -2444,6 +2444,7 @@
       state.article = msg.article;
       state.baseArticle = deepClone(msg.article);
       state.editSeq = 0;
+      state.lastSavedSeq = 0;
       state.lastPreviewedSeq = 0;
       if (Array.isArray(msg.available_tickers)) {
         state.availableTickers = msg.available_tickers;
@@ -2493,38 +2494,8 @@
 
     // 3. Bestätigt erfolgreichen Autosave
     window.Shiny.addCustomMessageHandler("lukb_autosave_ack", function (msg) {
-      if (msg.assets) {
-        Object.keys(msg.assets).forEach(function (k) {
-          state.assetCache[k] = msg.assets[k];
-          const chartImg = document.querySelector(
-            '.db-chart-preview-img[data-block-id="' + k + '"]'
-          );
-          if (chartImg) {
-            chartImg.src = msg.assets[k];
-          }
-        });
-      }
-      if (msg.article) {
-        if (state.article && msg.article.id === state.article.id) {
-          if (msg.article.version !== undefined) {
-            state.article.version = msg.article.version;
-          }
-          if (msg.article.status && state.article.status !== msg.article.status) {
-            state.article.status = msg.article.status;
-            const statusEl = document.getElementById("meta-status");
-            if (statusEl) statusEl.value = msg.article.status;
-          }
-        }
-        if (!state.isDirty) {
-          state.baseArticle = deepClone(msg.article);
-        }
-      }
-      if (!state.isDirty) {
-        const suffix = msg.merged ? " (mit Co-Autor zusammengeführt)" : "";
-        setAutosaveIndicator("saved", "Gespeichert um " + (msg.saved_at || "") + suffix);
-      }
-      if (msg.publish_sync !== undefined && E.renderPublishSyncBanner) {
-        E.renderPublishSyncBanner(msg.publish_sync);
+      if (typeof E.handleAutosaveAck === "function") {
+        E.handleAutosaveAck(msg);
       }
     });
 
@@ -2637,7 +2608,12 @@
       if (msg.publish_sync !== undefined && E.renderPublishSyncBanner) {
         E.renderPublishSyncBanner(msg.publish_sync);
       }
-      if (!state.isDirty && msg.updated_by) {
+      if (syncMerge.conflicts && syncMerge.conflicts.length > 0) {
+        setAutosaveIndicator(
+          "dirty",
+          "⚠️ Paralleländerung erkannt — lokale Eingabe beibehalten (" + syncMerge.conflicts.length + " Block)"
+        );
+      } else if (!state.isDirty && msg.updated_by) {
         setAutosaveIndicator("saved", "Live aktualisiert von " + msg.updated_by);
       }
     });

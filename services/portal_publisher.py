@@ -692,7 +692,7 @@ def create_connect_bundle(
             with tarfile.open(tmp_archive, "w:gz") as tar:
                 for item in dist_dir.rglob("*"):
                     arcname = item.relative_to(dist_dir)
-                    tar.add(item, arcname=str(arcname))
+                    tar.add(item, arcname=str(arcname), recursive=False)
             os.replace(tmp_archive, target_archive)
         finally:
             if tmp_archive.exists():

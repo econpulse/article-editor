@@ -30,6 +30,7 @@
     isDirty: false,
     autosaveTimer: null,
     editSeq: 0,
+    lastSavedSeq: 0,
     lastPreviewedSeq: -1,
     sortableInstance: null,
     selectedBlockIds: new Set(),
@@ -741,6 +742,21 @@
     counterEl.textContent = `📊 ${totalWords} Wörter · ~${readingTimeMin} Min. · ca. ${pagesFormatted} A4-Seiten`;
   }
 
+  function getBlockById(blockId) {
+    if (!blockId || !state.article || !Array.isArray(state.article.blocks)) return null;
+    for (let i = 0; i < state.article.blocks.length; i++) {
+      const b = state.article.blocks[i];
+      if (b && b.id === blockId) return b;
+    }
+    return null;
+  }
+
+  function resolveCurrentBlock(blkOrId) {
+    if (!blkOrId) return null;
+    const bid = typeof blkOrId === "string" ? blkOrId : blkOrId.id;
+    return getBlockById(bid) || (typeof blkOrId === "object" ? blkOrId : null);
+  }
+
   function flushAutosave(createRevision, revisionNote) {
     if (!state.article) return;
     if (state.autosaveTimer) {
@@ -751,14 +767,16 @@
       clearTimeout(previewDebounceTimer);
       previewDebounceTimer = null;
     }
-    state.isDirty = false;
     setAutosaveIndicator("saving", "Speichert in Datenbank …");
 
     const knownAssets = Object.keys(state.assetCache || {});
     const currentMode = state.previewMode || "pdf";
-    const previewAlreadyCurrent = state.lastPreviewedSeq === state.editSeq;
+    const saveSeq = state.editSeq;
+    const previewAlreadyCurrent = state.lastPreviewedSeq === saveSeq;
 
     sendShinyEvent("lukb_autosave_payload", {
+      article_id: state.article.id,
+      client_edit_seq: saveSeq,
       article: state.article,
       base_article: state.baseArticle,
       create_revision: !!createRevision,
@@ -768,6 +786,64 @@
       preview_already_current: previewAlreadyCurrent,
       known_asset_ids: knownAssets,
     });
+  }
+
+  function handleAutosaveAck(msg) {
+    if (!msg) return false;
+    const ackArticleId = msg.id || (msg.article && msg.article.id) || "";
+    if (!state.article || (ackArticleId && ackArticleId !== state.article.id)) {
+      return false;
+    }
+
+    if (msg.assets) {
+      Object.keys(msg.assets).forEach(function (k) {
+        state.assetCache[k] = msg.assets[k];
+        if (typeof document !== "undefined") {
+          const chartImg = document.querySelector(
+            '.db-chart-preview-img[data-block-id="' + k + '"]'
+          );
+          if (chartImg) {
+            chartImg.src = msg.assets[k];
+          }
+        }
+      });
+    }
+
+    const ackSeq = msg.client_edit_seq;
+    const hasNewerEdits =
+      ackSeq !== undefined && ackSeq !== null && Number(ackSeq) !== Number(state.editSeq);
+
+    if (msg.article) {
+      if (msg.article.version !== undefined) {
+        state.article.version = msg.article.version;
+      }
+      if (msg.article.status && state.article.status !== msg.article.status) {
+        state.article.status = msg.article.status;
+        if (typeof document !== "undefined") {
+          const statusEl = document.getElementById("meta-status");
+          if (statusEl) statusEl.value = msg.article.status;
+        }
+      }
+      state.baseArticle = deepClone(msg.article);
+    }
+
+    if (hasNewerEdits) {
+      state.isDirty = true;
+      if (Number(ackSeq) > (state.lastSavedSeq || 0)) {
+        state.lastSavedSeq = Number(ackSeq);
+      }
+      setAutosaveIndicator("dirty", "Ungespeicherte Änderungen …");
+    } else {
+      state.isDirty = false;
+      state.lastSavedSeq = state.editSeq;
+      const suffix = msg.merged ? " (mit Co-Autor zusammengeführt)" : "";
+      setAutosaveIndicator("saved", "Gespeichert um " + (msg.saved_at || "") + suffix);
+    }
+
+    if (msg.publish_sync !== undefined && E.renderPublishSyncBanner) {
+      E.renderPublishSyncBanner(msg.publish_sync);
+    }
+    return !hasNewerEdits;
   }
 
   // ==========================================================================
@@ -1304,8 +1380,10 @@
     escapeHtml: escapeHtml,
     flushAutosave: flushAutosave,
     getActiveFocusedBlockId: getActiveFocusedBlockId,
+    getBlockById: getBlockById,
     getBlockTypeLabel: getBlockTypeLabel,
     getLatestPublishedItemsForBlock: getLatestPublishedItemsForBlock,
+    handleAutosaveAck: handleAutosaveAck,
     hideUndoToast: hideUndoToast,
     markDirty: markDirty,
     notifyFocusTarget: notifyFocusTarget,
@@ -1313,6 +1391,7 @@
     performUndo: performUndo,
     pushUndo: pushUndo,
     requestLivePreview: requestLivePreview,
+    resolveCurrentBlock: resolveCurrentBlock,
     sanitizeRichTextHtml: sanitizeRichTextHtml,
     sendShinyEvent: sendShinyEvent,
     setAutosaveIndicator: setAutosaveIndicator,

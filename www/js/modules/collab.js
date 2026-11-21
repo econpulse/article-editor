@@ -294,6 +294,7 @@
 
     const mergedBlocks = [];
     const mergedIdSet = {};
+    const conflicts = [];
     (incomingBlocks || []).forEach(function (incBlk) {
       const locBlk = localBlocksById[incBlk.id];
       const baseBlk = prevBaseById[incBlk.id];
@@ -303,10 +304,50 @@
         return;
       }
 
+      // Unveränderter Block: bestehende Objektreferenz (locBlk) beibehalten, damit DOM-Event-Handler gültig bleiben
+      if (locBlk && JSON.stringify(locBlk) === JSON.stringify(incBlk)) {
+        mergedBlocks.push(locBlk);
+        mergedIdSet[incBlk.id] = true;
+        return;
+      }
+
       const isLocallyModified =
         locBlk && (!baseBlk || JSON.stringify(locBlk) !== JSON.stringify(baseBlk));
+      const isRemotelyModified =
+        !baseBlk || JSON.stringify(incBlk) !== JSON.stringify(baseBlk);
 
       if (locBlk && (incBlk.id === focusedBlockId || (isDirty && isLocallyModified))) {
+        // Konfliktprüfung bei paralleler Bearbeitung desselben Blocks
+        if (baseBlk && isRemotelyModified) {
+          const conflictFields = [];
+          Object.keys(incBlk).forEach(function (fk) {
+            if (fk === "id") return;
+            const incSer = JSON.stringify(incBlk[fk]);
+            const baseSer = JSON.stringify(baseBlk[fk]);
+            const locSer = JSON.stringify(locBlk[fk]);
+            if (incSer !== baseSer) {
+              if (locSer === baseSer) {
+                // Nicht-konfligierendes Feld von Co-Autor übernehmen
+                locBlk[fk] = JSON.parse(incSer);
+              } else if (locSer !== incSer) {
+                // Konflikt am selben Feld: lokale Eingabe unter dem Cursor gewinnt
+                conflictFields.push(fk);
+              }
+            }
+          });
+          if (conflictFields.length > 0) {
+            conflicts.push({ blockId: incBlk.id, fields: conflictFields });
+          }
+        }
+        mergedBlocks.push(locBlk);
+      } else if (locBlk && (incBlk.type === "richtext" || incBlk.type === "callout") && locBlk.type === incBlk.type) {
+        // In-Place-DOM-Update behält die DOM-Karte bei -> Objektreferenz ebenfalls in-place aktualisieren
+        Object.keys(locBlk).forEach(function (k) {
+          if (!(k in incBlk)) delete locBlk[k];
+        });
+        Object.keys(incBlk).forEach(function (k) {
+          locBlk[k] = incBlk[k];
+        });
         mergedBlocks.push(locBlk);
       } else {
         mergedBlocks.push(incBlk);
@@ -343,6 +384,7 @@
       mergedBlocks: mergedBlocks,
       mergedIdSet: mergedIdSet,
       localBlocksById: localBlocksById,
+      conflicts: conflicts,
     };
   }
 

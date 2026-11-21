@@ -198,6 +198,8 @@ def register_editor_handlers(
                 else None
             )
             save_info["publish_sync"] = pub_sync
+            if payload.get("client_edit_seq") is not None:
+                save_info["client_edit_seq"] = payload.get("client_edit_seq")
             await session.send_custom_message("lukb_autosave_ack", save_info)
 
             # Sidebar-Refresh nur ausführen, wenn Titel, Status, Kategorie oder Revisions-Snapshot geändert wurden

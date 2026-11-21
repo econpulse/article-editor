@@ -896,14 +896,17 @@
   }
 
   function buildRichTextBlockBody(container, blk) {
+    const blockId = blk.id;
     const rt = createRichTextWidget(blk.html, function (newHtml) {
-      blk.html = newHtml;
+      const target = (typeof E.resolveCurrentBlock === "function" ? E.resolveCurrentBlock(blockId) : null) || blk;
+      target.html = newHtml;
       markDirty();
     });
     container.appendChild(rt.wrapper);
   }
 
   function buildCalloutBlockBody(container, blk) {
+    const blockId = blk.id;
     const titleGroup = document.createElement("div");
     titleGroup.className = "field-group";
     const lbl = document.createElement("label");
@@ -914,7 +917,8 @@
     inp.className = "cms-input font-medium";
     inp.value = blk.title || "";
     inp.addEventListener("input", function () {
-      blk.title = inp.value;
+      const target = (typeof E.resolveCurrentBlock === "function" ? E.resolveCurrentBlock(blockId) : null) || blk;
+      target.title = inp.value;
       markDirty();
     });
     titleGroup.appendChild(lbl);
@@ -922,7 +926,8 @@
     container.appendChild(titleGroup);
 
     const rt = createRichTextWidget(blk.html, function (newHtml) {
-      blk.html = newHtml;
+      const target = (typeof E.resolveCurrentBlock === "function" ? E.resolveCurrentBlock(blockId) : null) || blk;
+      target.html = newHtml;
       markDirty();
     });
     container.appendChild(rt.wrapper);
