@@ -19,6 +19,7 @@ import contextlib
 import contextvars
 import hashlib
 import json
+import time
 from datetime import date
 from typing import Any, Iterator
 
@@ -73,9 +74,19 @@ def _extract_series_chart_types(item: Any) -> list[str]:
 
 
 _DB_CHART_SVG_CACHE = ThreadSafeSvgCache(max_size=256)
+_PREVIEW_CACHE_TTL_SEC = 60
+_DB_CHART_DATA_REVISION = 0
 _TS_PACKAGE_CACHE_VAR: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar(
     "_TS_PACKAGE_CACHE_VAR", default=None
 )
+
+
+def invalidate_db_chart_cache() -> int:
+    """Erhöht die Datenrevision und leert den DB-Chart-Vorschau-Cache."""
+    global _DB_CHART_DATA_REVISION
+    _DB_CHART_DATA_REVISION += 1
+    _DB_CHART_SVG_CACHE.clear()
+    return _DB_CHART_DATA_REVISION
 
 
 @contextlib.contextmanager
@@ -133,6 +144,8 @@ def _compute_db_chart_cache_key(
         "show_legend": resolve_show_legend(block_data),
         "embed_fonts": bool(embed_fonts),
         "max_date": str(max_date or "").strip(),
+        "data_revision": _DB_CHART_DATA_REVISION,
+        "ttl_bucket": int(time.monotonic() // _PREVIEW_CACHE_TTL_SEC),
     }
     raw_json = json.dumps(key_payload, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(raw_json.encode("utf-8")).hexdigest()

@@ -1416,7 +1416,37 @@
       publications: buildPublicationsBlockBody,
     };
     const bodyBuilder = BLOCK_BODY_BUILDERS[blk.type];
-    if (bodyBuilder) bodyBuilder(body, blk);
+    const LAZY_HEAVY_TYPES = { table: true, db_chart: true, custom_chart: true };
+    if (bodyBuilder && LAZY_HEAVY_TYPES[blk.type]) {
+      let expanded = false;
+      const summaryRow = document.createElement("div");
+      summaryRow.className = "lazy-block-summary";
+      summaryRow.style.cssText =
+        "display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F4F7FA;border:1px dashed #D6DEE8;border-radius:6px;font-size:12.5px;color:#002855;";
+      const summaryText = document.createElement("span");
+      const titleHint = blk.title ? " — " + blk.title : "";
+      summaryText.textContent = getBlockTypeLabel(blk.type) + titleHint;
+      const expandBtn = document.createElement("button");
+      expandBtn.type = "button";
+      expandBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+      expandBtn.textContent = "Editor öffnen ▾";
+      function expandLazyEditor() {
+        if (expanded) return;
+        expanded = true;
+        body.innerHTML = "";
+        bodyBuilder(body, blk);
+      }
+      expandBtn.addEventListener("click", function (ev) {
+        ev.stopPropagation();
+        expandLazyEditor();
+      });
+      summaryRow.appendChild(summaryText);
+      summaryRow.appendChild(expandBtn);
+      body.appendChild(summaryRow);
+      card.lukbExpandLazyEditor = expandLazyEditor;
+    } else if (bodyBuilder) {
+      bodyBuilder(body, blk);
+    }
 
     card.appendChild(body);
     card.appendChild(createInlineInserterElement(index + 1, false));
@@ -2446,6 +2476,7 @@
       state.editSeq = 0;
       state.lastSavedSeq = 0;
       state.lastPreviewedSeq = 0;
+      state.lastAppliedPreviewSeq = -1;
       if (Array.isArray(msg.available_tickers)) {
         state.availableTickers = msg.available_tickers;
         indexTickerItems(msg.available_tickers);
@@ -2640,6 +2671,21 @@
 
     // 4. Aktualisiert die Live-Preview (Typst PDF via PDF.js + Web HTML)
     window.Shiny.addCustomMessageHandler("lukb_update_preview", function (msg) {
+      if (!msg) return;
+      if (msg.article_id && (!state.article || msg.article_id !== state.article.id)) {
+        return; // Überholtes Ergebnis eines anderen Artikels verwerfen
+      }
+      if (msg.preview_mode && state.previewMode && msg.preview_mode !== state.previewMode) {
+        return; // Ergebnis eines überholten Moduswechsels verwerfen
+      }
+      if (msg.client_edit_seq !== undefined && msg.client_edit_seq !== null) {
+        const msgSeq = Number(msg.client_edit_seq);
+        if (msgSeq < Number(state.lastAppliedPreviewSeq || -1)) {
+          return; // Älterer Bearbeitungsstand -> verwerfen
+        }
+        state.lastAppliedPreviewSeq = msgSeq;
+      }
+
       const pdfContainer = document.getElementById("preview-container-pdf");
       const webIframe = document.getElementById("preview-iframe-web");
       const pageBadge = document.getElementById("preview-page-count");

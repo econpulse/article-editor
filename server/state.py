@@ -38,6 +38,9 @@ from services.renderer import render_preview_pdf_base64, render_web_html
 
 logger = logging.getLogger("lukb_cms.state")
 
+# Prozessweite Begrenzung gleichzeitiger Renderaufträge (zusätzlich zum Typst-Lock)
+_PROCESS_RENDER_SEMAPHORE = asyncio.Semaphore(2)
+
 
 class SessionState:
     """Repräsentiert den reaktiven Zustand einer einzelnen Benutzer-Sitzung."""
@@ -49,6 +52,11 @@ class SessionState:
         self.peer_color = get_peer_color(self.session_id)
         self.current_article_id: reactive.Value[str] = reactive.Value("")
         self.current_doc: reactive.Value[ArticleDocument | None] = reactive.Value(None)
+        self._active_article_id_plain: str = ""
+        self._preview_running: bool = False
+        self._preview_pending_job: dict[str, Any] | None = None
+        self._preview_job_seq: int = 0
+        self._preview_worker_task: asyncio.Task | None = None
 
         # Peer in Registry anmelden
         register_peer(
@@ -96,7 +104,8 @@ class SessionState:
         )
 
     def _revoke_article_from_session(self, revoked_article_id: str) -> None:
-        if self.current_article_id.get() == revoked_article_id:
+        if self._active_article_id_plain == revoked_article_id:
+            self._active_article_id_plain = ""
             self.current_article_id.set("")
             self.current_doc.set(None)
 
@@ -156,33 +165,49 @@ class SessionState:
         doc: ArticleDocument | None = None,
         include_typst: bool = True,
         include_web: bool = False,
+        *,
+        client_edit_seq: int | None = None,
+        preview_mode: str | None = None,
     ) -> tuple[str | None, str | None]:
-        """Rendert die PDF- (PDF.js) und/oder HTML-Vorschau asynchron im Worker-Thread, sendet sie an den Client und gibt (pdf_base64, web_html) zurück."""
+        """Rendert die PDF- (PDF.js) und/oder HTML-Vorschau unter Prozess-Semaphore, verwirft überholte Ergebnisse."""
         if doc is None:
             doc = self.current_doc.get()
         if doc is None:
             return None, None
 
+        target_article_id = doc.id
+        resolved_mode = (preview_mode or ("pdf" if include_typst else "web")).strip().lower()
+
         pdf_base64: str | None = None
         preview_error: str | None = None
-        if include_typst:
-            try:
-                pdf_base64 = await asyncio.to_thread(render_preview_pdf_base64, doc)
-            except Exception as exc:
-                logger.exception("Typst Preview-Fehler")
-                preview_error = f"Typst Vorschau-Hinweis: {str(exc)[:180]}"
-
         web_html: str | None = None
-        if include_web:
-            try:
-                web_html = await asyncio.to_thread(render_web_html, doc)
-            except Exception as exc:
-                logger.exception("Web HTML Preview-Fehler")
-                web_html = f"<pre>Fehler beim HTML-Rendering: {exc}</pre>"
+
+        async with _PROCESS_RENDER_SEMAPHORE:
+            if include_typst:
+                try:
+                    pdf_base64 = await asyncio.to_thread(render_preview_pdf_base64, doc)
+                except Exception as exc:
+                    logger.exception("Typst Preview-Fehler")
+                    preview_error = f"Typst Vorschau-Hinweis: {str(exc)[:180]}"
+
+            if include_web:
+                try:
+                    web_html = await asyncio.to_thread(render_web_html, doc)
+                except Exception as exc:
+                    logger.exception("Web HTML Preview-Fehler")
+                    web_html = f"<pre>Fehler beim HTML-Rendering: {exc}</pre>"
+
+        # Überholte Ergebnisse verwerfen, falls Benutzer inzwischen Artikel gewechselt hat
+        active_aid = self._active_article_id_plain
+        if active_aid and active_aid != target_article_id:
+            return None, None
 
         await self.session.send_custom_message(
             "lukb_update_preview",
             {
+                "article_id": target_article_id,
+                "preview_mode": resolved_mode,
+                "client_edit_seq": client_edit_seq,
                 "pdf_base64": pdf_base64,
                 "web_html": web_html,
                 "typst_skipped": not include_typst,
@@ -192,21 +217,98 @@ class SessionState:
         )
         return pdf_base64, web_html
 
+    async def _run_preview_worker(self) -> None:
+        """Arbeitet pro Session höchstens 1 laufenden und 1 wartenden ('latest wins') Vorschauauftrag ab."""
+        try:
+            while self._preview_pending_job is not None:
+                job = self._preview_pending_job
+                self._preview_pending_job = None
+                job_seq = job["job_seq"]
+                doc = job["doc"]
+                mode = job["mode"]
+                client_edit_seq = job.get("client_edit_seq")
+
+                # Überholten Auftrag überspringen, bevor Typst gestartet wird
+                active_aid = self._active_article_id_plain
+                if active_aid and active_aid != doc.id:
+                    continue
+
+                await self.send_preview(
+                    doc,
+                    include_typst=(mode == "pdf"),
+                    include_web=(mode == "web"),
+                    client_edit_seq=client_edit_seq,
+                    preview_mode=mode,
+                )
+        finally:
+            self._preview_running = False
+
+    def enqueue_preview(
+        self,
+        doc: ArticleDocument | None = None,
+        *,
+        preview_mode: str | None = None,
+        client_edit_seq: int | None = None,
+    ) -> int:
+        """
+        Reiht einen Vorschauauftrag ein (Max 1 laufend + Max 1 wartend, jeweils jüngste Fassung).
+        Gibt die zugewiesene Job-Sequenznummer zurück.
+        """
+        target_doc = doc or self.current_doc.get()
+        if target_doc is None:
+            return 0
+        mode = (preview_mode or get_peer_preview_mode(self.session_id, default="pdf")).strip().lower()
+        self._preview_job_seq += 1
+        seq = self._preview_job_seq
+        self._preview_pending_job = {
+            "job_seq": seq,
+            "doc": target_doc,
+            "mode": mode,
+            "client_edit_seq": client_edit_seq,
+        }
+        if not self._preview_running:
+            self._preview_running = True
+            try:
+                loop = asyncio.get_running_loop()
+                self._preview_worker_task = loop.create_task(self._run_preview_worker())
+            except RuntimeError:
+                self._preview_running = False
+        return seq
+
     async def send_active_preview(
         self,
         doc: ArticleDocument | None = None,
         *,
         respect_auto_preview: bool = True,
         preview_mode: str | None = None,
+        client_edit_seq: int | None = None,
     ) -> tuple[str | None, str | None]:
         """Sendet die Vorschau entsprechend dem aktiven Preview-Modus und Auto-Preview-Status der Session."""
-        if respect_auto_preview and not is_peer_auto_preview(self.session_id, default=True):
+        target_doc = doc or self.current_doc.get()
+        if target_doc is None:
             return None, None
         mode = (preview_mode or get_peer_preview_mode(self.session_id, default="pdf")).strip().lower()
+        if respect_auto_preview and not is_peer_auto_preview(self.session_id, default=True):
+            if mode == "pdf":
+                await self.session.send_custom_message(
+                    "lukb_update_preview",
+                    {
+                        "article_id": target_doc.id,
+                        "preview_mode": mode,
+                        "client_edit_seq": client_edit_seq,
+                        "pdf_base64": None,
+                        "web_html": None,
+                        "typst_skipped": True,
+                        "web_skipped": True,
+                    },
+                )
+                return None, None
         return await self.send_preview(
-            doc,
+            target_doc,
             include_typst=(mode == "pdf"),
             include_web=(mode == "web"),
+            client_edit_seq=client_edit_seq,
+            preview_mode=mode,
         )
 
     async def load_and_broadcast_article(self, article_id: str) -> None:
@@ -239,6 +341,7 @@ class SessionState:
         doc, assets_map, available_tickers, publish_sync = await asyncio.to_thread(_load_doc_and_assets)
         if doc is None:
             set_peer_article(self.session_id, "")
+            self._active_article_id_plain = ""
             self.current_article_id.set("")
             self.current_doc.set(None)
             await self.send_article_list("")
@@ -252,6 +355,7 @@ class SessionState:
             return
 
         prev_article_id = set_peer_article(self.session_id, doc.id)
+        self._active_article_id_plain = doc.id
         self.current_article_id.set(doc.id)
         self.current_doc.set(doc)
 
@@ -266,7 +370,7 @@ class SessionState:
             },
         )
         await self.send_article_list(doc.id)
-        await self.send_preview(doc, include_typst=True, include_web=False)
+        await self.send_active_preview(doc, respect_auto_preview=True)
         if prev_article_id and prev_article_id != doc.id:
             await broadcast_presence(prev_article_id)
         await broadcast_presence(doc.id)

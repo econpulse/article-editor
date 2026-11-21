@@ -32,6 +32,7 @@
     editSeq: 0,
     lastSavedSeq: 0,
     lastPreviewedSeq: -1,
+    lastAppliedPreviewSeq: -1,
     sortableInstance: null,
     selectedBlockIds: new Set(),
     lastSelectedBlockId: null,
@@ -670,6 +671,8 @@
     state.lastPreviewedSeq = state.editSeq;
     const currentMode = state.previewMode || "pdf";
     sendShinyEvent("lukb_request_live_preview", {
+      article_id: state.article.id,
+      client_edit_seq: state.editSeq,
       article: state.article,
       preview_mode: currentMode,
     });
@@ -786,6 +789,14 @@
       preview_already_current: previewAlreadyCurrent,
       known_asset_ids: knownAssets,
     });
+  }
+
+  function flushAutosaveIfDirty(createRevision, revisionNote) {
+    if (state.article && state.isDirty) {
+      flushAutosave(!!createRevision, revisionNote || "");
+      return true;
+    }
+    return false;
   }
 
   function handleAutosaveAck(msg) {
@@ -1379,6 +1390,7 @@
     ensureUndoToastContainer: ensureUndoToastContainer,
     escapeHtml: escapeHtml,
     flushAutosave: flushAutosave,
+    flushAutosaveIfDirty: flushAutosaveIfDirty,
     getActiveFocusedBlockId: getActiveFocusedBlockId,
     getBlockById: getBlockById,
     getBlockTypeLabel: getBlockTypeLabel,

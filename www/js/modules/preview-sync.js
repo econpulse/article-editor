@@ -197,8 +197,124 @@
   let _currentPdfRenderSeq = 0;
   let _activeRenderTasks = [];
   let _activeLoadingTask = null;
+  let _activePdfDoc = null;
   let _sharedPdfWorker = null;
   let _lastRenderedPdfBase64 = "";
+  let _pdfScrollTimer = null;
+  let _activeRenderState = null;
+
+  function cancelActivePdfRendering() {
+    _currentPdfRenderSeq += 1;
+    for (let i = 0; i < _activeRenderTasks.length; i++) {
+      try {
+        if (_activeRenderTasks[i] && typeof _activeRenderTasks[i].cancel === "function") {
+          _activeRenderTasks[i].cancel();
+        }
+      } catch (_) {}
+    }
+    _activeRenderTasks = [];
+    if (_activeLoadingTask) {
+      try {
+        _activeLoadingTask.destroy();
+      } catch (_) {}
+      _activeLoadingTask = null;
+    }
+  }
+
+  function computeVisiblePageIndices(container, pageWraps) {
+    const cRect = container.getBoundingClientRect ? container.getBoundingClientRect() : { top: 0, bottom: 900 };
+    const visible = [];
+    for (let i = 0; i < pageWraps.length; i++) {
+      const r = pageWraps[i].getBoundingClientRect ? pageWraps[i].getBoundingClientRect() : { top: i * 900, bottom: (i + 1) * 900 };
+      if (r.bottom >= cRect.top - 120 && r.top <= cRect.bottom + 120) {
+        visible.push(i + 1);
+      }
+    }
+    if (visible.length === 0 && pageWraps.length > 0) {
+      visible.push(1);
+    }
+    const minP = Math.max(1, Math.min.apply(null, visible) - 1);
+    const maxP = Math.min(pageWraps.length, Math.max.apply(null, visible) + 1);
+    const priority = [];
+    for (let p = minP; p <= maxP; p++) {
+      priority.push(p);
+    }
+    return { priority: priority, minP: minP, maxP: maxP };
+  }
+
+  async function renderVisiblePdfPages(renderSeq) {
+    const rs = _activeRenderState;
+    if (!rs || renderSeq !== _currentPdfRenderSeq || !rs.pdfDoc) return;
+    const { pdfDoc, existingPages, targetWidth, dpr, pdfContainer } = rs;
+    const { priority, minP, maxP } = computeVisiblePageIndices(pdfContainer, existingPages);
+
+    // Canvas-Speicher für weit entfernte Seiten (> 3 Seiten Abstand) freigeben
+    const keepMargin = 3;
+    for (let p = 1; p <= existingPages.length; p++) {
+      if (p < minP - keepMargin || p > maxP + keepMargin) {
+        const wrap = existingPages[p - 1];
+        if (wrap && wrap.dataset.rendered === "1") {
+          const oldCanvas = wrap.querySelector("canvas");
+          if (oldCanvas) {
+            oldCanvas.width = 0;
+            oldCanvas.height = 0;
+            oldCanvas.remove();
+          }
+          wrap.dataset.rendered = "0";
+        }
+      }
+    }
+
+    for (let idx = 0; idx < priority.length; idx++) {
+      const pageNum = priority[idx];
+      if (renderSeq !== _currentPdfRenderSeq) return;
+      const pageWrap = existingPages[pageNum - 1];
+      if (!pageWrap || pageWrap.dataset.rendered === "1") continue;
+
+      const page = await pdfDoc.getPage(pageNum);
+      if (renderSeq !== _currentPdfRenderSeq) return;
+
+      const unscaled = page.getViewport({ scale: 1.0 });
+      pageWrap.style.aspectRatio = unscaled.width + " / " + unscaled.height;
+
+      const cssScale = (targetWidth > 0 ? targetWidth : 760) / unscaled.width;
+      const renderScale = cssScale * dpr;
+      const viewport = page.getViewport({ scale: renderScale });
+
+      let canvas = pageWrap.querySelector("canvas");
+      if (!canvas) {
+        canvas = document.createElement("canvas");
+        pageWrap.innerHTML = "";
+        pageWrap.appendChild(canvas);
+      }
+
+      canvas.width = Math.floor(viewport.width);
+      canvas.height = Math.floor(viewport.height);
+      canvas.style.width = "100%";
+      canvas.style.height = "auto";
+      canvas.style.display = "block";
+
+      const ctx = canvas.getContext("2d", { alpha: false });
+      const renderTask = page.render({
+        canvasContext: ctx,
+        viewport: viewport,
+      });
+      _activeRenderTasks.push(renderTask);
+
+      try {
+        await renderTask.promise;
+      } catch (err) {
+        if (err && err.name === "RenderingCancelledException") {
+          return;
+        }
+        throw err;
+      }
+
+      if (renderSeq !== _currentPdfRenderSeq) return;
+      pageWrap.dataset.rendered = "1";
+      await extractPageCmsTargets(page, pageWrap, unscaled, function () { return renderSeq !== _currentPdfRenderSeq; });
+    }
+  }
 
   function getSharedPdfWorker() {
     if (!window.pdfjsLib || typeof window.pdfjsLib.PDFWorker !== "function") {
@@ -235,22 +351,11 @@
       return;
     }
 
-    const renderSeq = ++_currentPdfRenderSeq;
-
-    // Laufende Render-Tasks und noch ladende Tasks aus vorherigen Updates abbrechen
-    for (let i = 0; i < _activeRenderTasks.length; i++) {
-      try {
-        if (_activeRenderTasks[i] && typeof _activeRenderTasks[i].cancel === "function") {
-          _activeRenderTasks[i].cancel();
-        }
-      } catch (_) {}
-    }
-    _activeRenderTasks = [];
-    if (_activeLoadingTask) {
-      try {
-        _activeLoadingTask.destroy();
-      } catch (_) {}
-      _activeLoadingTask = null;
+    cancelActivePdfRendering();
+    const renderSeq = _currentPdfRenderSeq;
+    if (_activePdfDoc && typeof _activePdfDoc.destroy === "function") {
+      _activePdfDoc.destroy().catch(function () {});
+      _activePdfDoc = null;
     }
 
     if (!window.pdfjsLib) {
@@ -310,54 +415,39 @@
       );
       const dpr = Math.max(window.devicePixelRatio || 1, 1.5);
 
-      for (let pageNum = 1; pageNum <= numPages; pageNum++) {
-        if (renderSeq !== _currentPdfRenderSeq) return;
-
-        const page = await pdfDoc.getPage(pageNum);
-        if (renderSeq !== _currentPdfRenderSeq) return;
-
-        const pageWrap = existingPages[pageNum - 1];
-        if (!pageWrap) continue;
-
-        const unscaled = page.getViewport({ scale: 1.0 });
-        pageWrap.style.aspectRatio = unscaled.width + " / " + unscaled.height;
-
-        const cssScale = (targetWidth > 0 ? targetWidth : 760) / unscaled.width;
-        const renderScale = cssScale * dpr;
-        const viewport = page.getViewport({ scale: renderScale });
-
-        let canvas = pageWrap.querySelector("canvas");
-        if (!canvas) {
-          canvas = document.createElement("canvas");
-          pageWrap.innerHTML = "";
-          pageWrap.appendChild(canvas);
+      // Seitenverhältnis-Platzhalter aus erster Seite vorbelegen
+      const firstPage = await pdfDoc.getPage(1);
+      if (renderSeq !== _currentPdfRenderSeq) return;
+      const firstUnscaled = firstPage.getViewport({ scale: 1.0 });
+      const defaultAspect = firstUnscaled.width + " / " + firstUnscaled.height;
+      for (let i = 0; i < existingPages.length; i++) {
+        existingPages[i].dataset.rendered = "0";
+        if (!existingPages[i].style.aspectRatio) {
+          existingPages[i].style.aspectRatio = defaultAspect;
         }
-
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        canvas.style.width = "100%";
-        canvas.style.height = "auto";
-        canvas.style.display = "block";
-
-        const ctx = canvas.getContext("2d", { alpha: false });
-        const renderTask = page.render({
-          canvasContext: ctx,
-          viewport: viewport,
-        });
-        _activeRenderTasks.push(renderTask);
-
-        try {
-          await renderTask.promise;
-        } catch (err) {
-          if (err && err.name === "RenderingCancelledException") {
-            return;
-          }
-          throw err;
-        }
-
-        if (renderSeq !== _currentPdfRenderSeq) return;
-        await extractPageCmsTargets(page, pageWrap, unscaled, function () { return renderSeq !== _currentPdfRenderSeq; });
       }
+
+      _activePdfDoc = pdfDoc;
+      _activeRenderState = {
+        pdfDoc: pdfDoc,
+        existingPages: existingPages,
+        targetWidth: targetWidth,
+        dpr: dpr,
+        pdfContainer: pdfContainer,
+      };
+
+      if (!pdfContainer._hasViewportScrollListener) {
+        pdfContainer._hasViewportScrollListener = true;
+        pdfContainer.addEventListener("scroll", function () {
+          if (_pdfScrollTimer) clearTimeout(_pdfScrollTimer);
+          _pdfScrollTimer = setTimeout(function () {
+            renderVisiblePdfPages(_currentPdfRenderSeq).catch(function () {});
+          }, 80);
+        });
+      }
+
+      await renderVisiblePdfPages(renderSeq);
+      if (renderSeq !== _currentPdfRenderSeq) return;
 
       _lastRenderedPdfBase64 = pdfBase64;
       if (seqAtRenderStart > state.lastPreviewedSeq) {
@@ -381,16 +471,16 @@
       if (_activeLoadingTask === loadingTask) {
         _activeLoadingTask = null;
       }
-      if (pdfDoc && typeof pdfDoc.destroy === "function") {
-        pdfDoc.destroy().catch(function () {});
-      }
     }
   }
 
   Object.assign(E, {
+    cancelActivePdfRendering: cancelActivePdfRendering,
+    computeVisiblePageIndices: computeVisiblePageIndices,
     parseCmsTargetsFromAnnotations: parseCmsTargetsFromAnnotations,
     extractPageCmsTargets: extractPageCmsTargets,
     ensurePdfClickNavigation: ensurePdfClickNavigation,
     renderPdfPreview: renderPdfPreview,
+    renderVisiblePdfPages: renderVisiblePdfPages,
   });
 })();

@@ -106,8 +106,15 @@ def register_preview_handlers(
 
         try:
             doc = ArticleDocument.model_validate(article_data)
-            state.current_doc.set(doc)
-            await state.send_active_preview(doc, respect_auto_preview=False, preview_mode=preview_mode)
+            active_aid = state.current_article_id.get()
+            if active_aid and doc.id != active_aid:
+                return
+            client_edit_seq = payload.get("client_edit_seq")
+            state.enqueue_preview(
+                doc,
+                preview_mode=preview_mode,
+                client_edit_seq=int(client_edit_seq) if client_edit_seq is not None else None,
+            )
         except Exception as exc:
             logger.warning(f"Fehler bei entkoppelter Live-Vorschau: {exc}")
 
