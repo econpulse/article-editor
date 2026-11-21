@@ -139,8 +139,11 @@ def document_metadata_card_ui(templates_list: list[dict[str, Any]]) -> ui.Tag:
                     ui.tags.option("Entwurf", value="draft"),
                     ui.tags.option("In Review", value="review"),
                     ui.tags.option("Publiziert", value="published"),
+                    ui.tags.option("Archiviert", value="archived"),
                     id="meta-status",
                     class_="cms-select",
+                    disabled="disabled",
+                    title="Statuswechsel erfolgen über das Portal-Workflow-Menü (Zur Prüfung einreichen / Publizieren / Zurückziehen)",
                 ),
             ),
             ui.div(

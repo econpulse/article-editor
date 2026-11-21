@@ -45,6 +45,7 @@ class ArticleModel(Base):
     disclaimer: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="")
     template_id: Mapped[str] = mapped_column(Unicode(100), nullable=False, default="investment_focus")
     status: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="draft")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     blocks_json: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="[]")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)

@@ -911,6 +911,7 @@ def parse_block(raw: dict[str, Any]) -> ContentBlock:
 
 class ArticleDocument(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    version: int = Field(default=1, ge=1)
     template_id: str = Field(default="investment_focus")
     status: Literal["draft", "review", "published", "archived"] = Field(default="draft")
     metadata: ArticleMetadata = Field(default_factory=ArticleMetadata)

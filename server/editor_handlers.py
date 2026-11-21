@@ -18,7 +18,6 @@ from server.collab import (
     broadcast_preview_to_coauthors,
     collect_article_assets_map,
     get_peer_preview_mode,
-    get_peer_user,
     is_peer_auto_preview,
     set_peer_auto_preview,
     set_peer_focus,
@@ -66,8 +65,7 @@ def register_editor_handlers(
         if not isinstance(payload, dict):
             return
         target = str(payload.get("target", ""))
-        custom_name = str(payload.get("user_name", "")).strip()
-        aid = set_peer_focus(state.session_id, target, user=custom_name or None)
+        aid = set_peer_focus(state.session_id, target)
         if aid:
             await broadcast_presence(aid)
 
@@ -87,7 +85,7 @@ def register_editor_handlers(
                 except Exception:
                     base_doc = None
 
-            user_label = get_peer_user(state.session_id, fallback=state.current_user)
+            user_label = state.current_user
             save_info = await asyncio.to_thread(
                 save_article,
                 doc=doc,
@@ -95,6 +93,7 @@ def register_editor_handlers(
                 create_revision=bool(payload.get("create_revision", False)),
                 revision_note=str(payload.get("revision_note", "")),
                 base_doc=base_doc,
+                preserve_db_status=True,
             )
             merged_doc = save_info.pop("doc_obj", None) or ArticleDocument.model_validate(save_info["article"])
             state.current_article_id.set(merged_doc.id)

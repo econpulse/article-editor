@@ -39,6 +39,10 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class ConcurrentModificationError(RuntimeError):
+    """Wird ausgelöst, wenn ein Artikel während des Speicherns wiederholt parallel verändert wurde."""
+
+
 def _row_to_document(row: ArticleModel) -> ArticleDocument:
     try:
         authors_raw = json.loads(row.authors_json or "[]")
@@ -76,6 +80,7 @@ def _row_to_document(row: ArticleModel) -> ArticleDocument:
     )
     return ArticleDocument(
         id=row.id,
+        version=int(getattr(row, "version", 1) or 1),
         template_id=row.template_id or "investment_focus",
         status=row.status if row.status in ("draft", "review", "published", "archived") else "draft",
         metadata=metadata,
@@ -296,6 +301,7 @@ def _merge_concurrent_documents(
     return ArticleDocument.model_validate(
         {
             "id": incoming_doc.id,
+            "version": db_d.get("version", 1),
             "template_id": merged_template,
             "status": merged_status,
             "metadata": merged_meta,
@@ -304,124 +310,191 @@ def _merge_concurrent_documents(
     )
 
 
+def _docs_content_equal(a: ArticleDocument, b: ArticleDocument) -> bool:
+    """Vergleicht zwei Dokumente inhaltlich ohne Berücksichtigung der DB-Version."""
+    da = a.model_dump()
+    db = b.model_dump()
+    da.pop("version", None)
+    db.pop("version", None)
+    return da == db
+
+
 def save_article(
     doc: ArticleDocument,
     user: str = "Investment Office",
     create_revision: bool = False,
     revision_note: str = "",
     base_doc: ArticleDocument | None = None,
+    preserve_db_status: bool = False,
 ) -> dict[str, Any]:
     """
     Speichert oder aktualisiert einen Artikel (UPSERT) in der MSSQL-Datenbank.
-    Falls `base_doc` übergeben wird und der Datenbankstand zwischenzeitlich durch
-    einen anderen Autor verändert wurde, führt `save_article` automatisch einen
-    3-Wege-Merge auf Block- und Metadaten-Ebene durch.
+    Nutzt Optimistic Concurrency Control (`version`-Spalte + atomares `WHERE version = ...`)
+    und führt bei parallelen Änderungen automatisch einen 3-Wege-Merge auf Block- und
+    Metadaten-Ebene durch, sodass keine Änderungen verloren gehen.
     """
-    now = _utc_now()
-    merged_from_other = False
-    with get_db_session() as session:
-        row = session.get(ArticleModel, doc.id)
+    from sqlalchemy.exc import IntegrityError
 
-        if row is not None and base_doc is not None:
-            # Schneller Rohfeld-Vergleich: überspringt teure JSON-/Pydantic-Revalidierung,
-            # falls die DB-Zeile seit base_doc unverändert ist.
-            base_authors_ser = json.dumps(
-                [a.model_dump() for a in base_doc.metadata.authors], ensure_ascii=False
-            )
-            base_tags_ser = json.dumps(
-                [str(t).strip() for t in (base_doc.metadata.tags or []) if str(t).strip()],
-                ensure_ascii=False,
-            )
-            base_blocks_ser = json.dumps(base_doc.blocks, ensure_ascii=False)
-            raw_matches_base = (
-                row.id == base_doc.id
-                and (row.template_id or "investment_focus") == base_doc.template_id
-                and (
-                    row.status
-                    if row.status in ("draft", "review", "published", "archived")
-                    else "draft"
-                ) == base_doc.status
-                and (row.title or "Unbenannte Publikation") == base_doc.metadata.title
-                and (row.subtitle or "") == base_doc.metadata.subtitle
-                and (row.lead or "") == base_doc.metadata.lead
-                and (row.publication_date or "") == base_doc.metadata.publication_date
-                and (row.category or "") == base_doc.metadata.category
-                and (getattr(row, "header_series", None) or "Investment Office News") == base_doc.metadata.header_series
-                and (row.disclaimer or "") == base_doc.metadata.disclaimer
-                and (row.authors_json or "[]") == base_authors_ser
-                and (getattr(row, "tags_json", "[]") or "[]") == base_tags_ser
-                and (row.blocks_json or "[]") == base_blocks_ser
-            )
-            if not raw_matches_base:
-                current_db_doc = _row_to_document(row)
-                if current_db_doc.model_dump() != base_doc.model_dump():
-                    doc = _merge_concurrent_documents(base_doc, doc, current_db_doc)
-                    merged_from_other = True
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        now = _utc_now()
+        merged_from_other = False
+        working_doc = doc.model_copy(deep=True)
+        retry_needed = False
 
-        authors_serialized = json.dumps(
-            [a.model_dump() for a in doc.metadata.authors], ensure_ascii=False
-        )
-        tags_serialized = json.dumps(
-            [str(t).strip() for t in (doc.metadata.tags or []) if str(t).strip()],
-            ensure_ascii=False,
-        )
-        blocks_serialized = json.dumps(doc.blocks, ensure_ascii=False)
+        try:
+            with get_db_session() as session:
+                row = session.get(ArticleModel, working_doc.id)
 
-        if row is None:
-            row = ArticleModel(
-                id=doc.id,
-                title=doc.metadata.title,
-                subtitle=doc.metadata.subtitle,
-                lead=doc.metadata.lead,
-                category=doc.metadata.category,
-                header_series=doc.metadata.header_series or "Investment Office News",
-                publication_date=doc.metadata.publication_date,
-                authors_json=authors_serialized,
-                tags_json=tags_serialized,
-                disclaimer=doc.metadata.disclaimer,
-                template_id=doc.template_id,
-                status=doc.status,
-                blocks_json=blocks_serialized,
-                created_at=now,
-                updated_at=now,
-                updated_by=user,
+                if row is not None:
+                    db_version = int(getattr(row, "version", 1) or 1)
+                    db_status = (
+                        row.status
+                        if row.status in ("draft", "review", "published", "archived")
+                        else "draft"
+                    )
+
+                    if base_doc is not None:
+                        base_authors_ser = json.dumps(
+                            [a.model_dump() for a in base_doc.metadata.authors], ensure_ascii=False
+                        )
+                        base_tags_ser = json.dumps(
+                            [str(t).strip() for t in (base_doc.metadata.tags or []) if str(t).strip()],
+                            ensure_ascii=False,
+                        )
+                        base_blocks_ser = json.dumps(base_doc.blocks, ensure_ascii=False)
+                        raw_matches_base = (
+                            row.id == base_doc.id
+                            and db_version == int(getattr(base_doc, "version", 1) or 1)
+                            and (row.template_id or "investment_focus") == base_doc.template_id
+                            and db_status == base_doc.status
+                            and (row.title or "Unbenannte Publikation") == base_doc.metadata.title
+                            and (row.subtitle or "") == base_doc.metadata.subtitle
+                            and (row.lead or "") == base_doc.metadata.lead
+                            and (row.publication_date or "") == base_doc.metadata.publication_date
+                            and (row.category or "") == base_doc.metadata.category
+                            and (getattr(row, "header_series", None) or "Investment Office News") == base_doc.metadata.header_series
+                            and (row.disclaimer or "") == base_doc.metadata.disclaimer
+                            and (row.authors_json or "[]") == base_authors_ser
+                            and (getattr(row, "tags_json", "[]") or "[]") == base_tags_ser
+                            and (row.blocks_json or "[]") == base_blocks_ser
+                        )
+                        if not raw_matches_base:
+                            current_db_doc = _row_to_document(row)
+                            if not _docs_content_equal(current_db_doc, base_doc):
+                                working_doc = _merge_concurrent_documents(base_doc, working_doc, current_db_doc)
+                                merged_from_other = True
+
+                    if preserve_db_status:
+                        working_doc.status = db_status
+
+                    authors_serialized = json.dumps(
+                        [a.model_dump() for a in working_doc.metadata.authors], ensure_ascii=False
+                    )
+                    tags_serialized = json.dumps(
+                        [str(t).strip() for t in (working_doc.metadata.tags or []) if str(t).strip()],
+                        ensure_ascii=False,
+                    )
+                    blocks_serialized = json.dumps(working_doc.blocks, ensure_ascii=False)
+
+                    new_version = db_version + 1
+                    upd_res = session.execute(
+                        update(ArticleModel)
+                        .where(
+                            ArticleModel.id == working_doc.id,
+                            ArticleModel.version == db_version,
+                        )
+                        .values(
+                            title=working_doc.metadata.title,
+                            subtitle=working_doc.metadata.subtitle,
+                            lead=working_doc.metadata.lead,
+                            category=working_doc.metadata.category,
+                            header_series=working_doc.metadata.header_series or "Investment Office News",
+                            publication_date=working_doc.metadata.publication_date,
+                            authors_json=authors_serialized,
+                            tags_json=tags_serialized,
+                            disclaimer=working_doc.metadata.disclaimer,
+                            template_id=working_doc.template_id,
+                            status=working_doc.status,
+                            version=new_version,
+                            blocks_json=blocks_serialized,
+                            updated_at=now,
+                            updated_by=user,
+                        )
+                    )
+                    if upd_res.rowcount == 0:
+                        session.rollback()
+                        retry_needed = True
+                    else:
+                        working_doc.version = new_version
+                else:
+                    if preserve_db_status:
+                        working_doc.status = "draft"
+                    working_doc.version = 1
+
+                    authors_serialized = json.dumps(
+                        [a.model_dump() for a in working_doc.metadata.authors], ensure_ascii=False
+                    )
+                    tags_serialized = json.dumps(
+                        [str(t).strip() for t in (working_doc.metadata.tags or []) if str(t).strip()],
+                        ensure_ascii=False,
+                    )
+                    blocks_serialized = json.dumps(working_doc.blocks, ensure_ascii=False)
+
+                    row = ArticleModel(
+                        id=working_doc.id,
+                        title=working_doc.metadata.title,
+                        subtitle=working_doc.metadata.subtitle,
+                        lead=working_doc.metadata.lead,
+                        category=working_doc.metadata.category,
+                        header_series=working_doc.metadata.header_series or "Investment Office News",
+                        publication_date=working_doc.metadata.publication_date,
+                        authors_json=authors_serialized,
+                        tags_json=tags_serialized,
+                        disclaimer=working_doc.metadata.disclaimer,
+                        template_id=working_doc.template_id,
+                        status=working_doc.status,
+                        version=1,
+                        blocks_json=blocks_serialized,
+                        created_at=now,
+                        updated_at=now,
+                        updated_by=user,
+                    )
+                    session.add(row)
+
+                if not retry_needed:
+                    doc_dict = working_doc.model_dump()
+                    if create_revision:
+                        rev = ArticleRevisionModel(
+                            article_id=working_doc.id,
+                            snapshot_json=json.dumps(doc_dict, ensure_ascii=False),
+                            saved_at=now,
+                            saved_by=user,
+                            note=revision_note or "Manueller Snapshot",
+                        )
+                        session.add(rev)
+        except IntegrityError:
+            retry_needed = True
+
+        if retry_needed:
+            if attempt < max_attempts:
+                time.sleep(0.02 * attempt)
+                continue
+            raise ConcurrentModificationError(
+                f"Artikel {doc.id} wurde wiederholt parallel geändert. Bitte erneut versuchen."
             )
-            session.add(row)
-        else:
-            row.title = doc.metadata.title
-            row.subtitle = doc.metadata.subtitle
-            row.lead = doc.metadata.lead
-            row.category = doc.metadata.category
-            row.header_series = doc.metadata.header_series or "Investment Office News"
-            row.publication_date = doc.metadata.publication_date
-            row.authors_json = authors_serialized
-            row.tags_json = tags_serialized
-            row.disclaimer = doc.metadata.disclaimer
-            row.template_id = doc.template_id
-            row.status = doc.status
-            row.blocks_json = blocks_serialized
-            row.updated_at = now
-            row.updated_by = user
 
-        doc_dict = doc.model_dump()
-        if create_revision:
-            rev = ArticleRevisionModel(
-                article_id=doc.id,
-                snapshot_json=json.dumps(doc_dict, ensure_ascii=False),
-                saved_at=now,
-                saved_by=user,
-                note=revision_note or "Manueller Snapshot",
-            )
-            session.add(rev)
+        return {
+            "id": working_doc.id,
+            "version": working_doc.version,
+            "saved_at": now.strftime("%H:%M:%S"),
+            "saved_date": now.strftime("%d.%m.%Y %H:%M:%S"),
+            "merged": merged_from_other,
+            "article": doc_dict,
+            "doc_obj": working_doc,
+        }
 
-    return {
-        "id": doc.id,
-        "saved_at": now.strftime("%H:%M:%S"),
-        "saved_date": now.strftime("%d.%m.%Y %H:%M:%S"),
-        "merged": merged_from_other,
-        "article": doc_dict,
-        "doc_obj": doc,
-    }
+    raise ConcurrentModificationError(f"Artikel {doc.id} konnte nach {max_attempts} Versuchen nicht gespeichert werden.")
 
 
 def create_new_article(
@@ -525,6 +598,7 @@ def _transition_article_status(
         if expected_status is not None and row.status != expected_status:
             return None
         row.status = new_status
+        row.version = int(getattr(row, "version", 1) or 1) + 1
         row.updated_at = now
         row.updated_by = user
         doc = _row_to_document(row)
@@ -568,6 +642,7 @@ def delete_article(
                 logger.warning(f"unpublish_article bei force-delete fehlgeschlagen: {exc}")
 
         row.status = "archived"
+        row.version = int(getattr(row, "version", 1) or 1) + 1
         row.updated_at = now
         row.updated_by = user
         doc = _row_to_document(row)
@@ -1552,6 +1627,20 @@ def _ensure_schema_columns() -> None:
                         conn.execute(
                             text(
                                 "ALTER TABLE io_articles ADD tags_json NVARCHAR(MAX) NOT NULL DEFAULT '[]'"
+                            )
+                        )
+                    conn.commit()
+                if "version" not in cols:
+                    if engine.dialect.name == "sqlite":
+                        conn.execute(
+                            text(
+                                "ALTER TABLE io_articles ADD COLUMN version INTEGER NOT NULL DEFAULT 1"
+                            )
+                        )
+                    else:
+                        conn.execute(
+                            text(
+                                "ALTER TABLE io_articles ADD version INT NOT NULL DEFAULT 1"
                             )
                         )
                     conn.commit()

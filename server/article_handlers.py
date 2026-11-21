@@ -166,10 +166,18 @@ def register_article_handlers(
     @reactive.event(input.btn_confirm_delete_article)
     async def _on_confirm_delete_article() -> None:
         ui.modal_remove()
+        user = state.current_user
+        if not can_delete(user):
+            ui.notification_show(
+                f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen löschen / archivieren.",
+                type="warning",
+                duration=5,
+            )
+            return
         aid = state.current_article_id.get()
         if not aid:
             return
-        await asyncio.to_thread(delete_article, aid, user=state.current_user, force=True)
+        await asyncio.to_thread(delete_article, aid, user=user, force=True)
         next_id = await asyncio.to_thread(get_first_article_id)
         if next_id:
             await state.load_and_broadcast_article(next_id)

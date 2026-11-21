@@ -21,6 +21,8 @@ import os
 import re
 import shutil
 import tarfile
+import threading
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,10 @@ from schemas.article import ArticleDocument
 from services.renderer import format_publication_date, render_pdf_bytes, render_web_html
 
 logger = logging.getLogger(__name__)
+
+# Schützt Manifest-, HTML-/PDF- und Connect-Bundle-Schreibvorgänge vor Race Conditions
+# bei gleichzeitigen Publikationen durch mehrere Editoren.
+_PORTAL_PUBLISH_LOCK = threading.RLock()
 
 PORTAL_TEMPLATES_DIR = BASE_DIR / "templates" / "portal"
 LUKB_LOGO_SRC = WWW_DIR / "img" / "LUKB-Logo.svg"
@@ -64,26 +70,38 @@ def _get_portal_jinja_env() -> Environment:
 
 
 def _write_text_if_changed(path: Path, text: str, encoding: str = "utf-8") -> bool:
-    """Schreibt den Text nur, wenn die Zieldatei noch nicht existiert oder ihr Inhalt abweicht."""
+    """Schreibt den Text atomar, wenn die Zieldatei noch nicht existiert oder ihr Inhalt abweicht."""
     if path.exists():
         try:
             if path.read_text(encoding=encoding) == text:
                 return False
         except Exception:
             pass
-    path.write_text(text, encoding=encoding)
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp_path.write_text(text, encoding=encoding)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
     return True
 
 
 def _write_bytes_if_changed(path: Path, data: bytes) -> bool:
-    """Schreibt die Bytes nur, wenn die Zieldatei noch nicht existiert oder ihr Inhalt abweicht."""
+    """Schreibt die Bytes atomar, wenn die Zieldatei noch nicht existiert oder ihr Inhalt abweicht."""
     if path.exists():
         try:
             if path.read_bytes() == data:
                 return False
         except Exception:
             pass
-    path.write_bytes(data)
+    tmp_path = path.with_name(f".{path.name}.{uuid.uuid4().hex[:8]}.tmp")
+    try:
+        tmp_path.write_bytes(data)
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
     return True
 
 
@@ -263,6 +281,23 @@ def publish_article(
     - Schreibt Dateien in `dist/articles/<slug>/`
     - Aktualisiert `manifest.json`, `index.html` und `search-index.json`.
     """
+    with _PORTAL_PUBLISH_LOCK:
+        return _publish_article_locked(
+            doc=doc,
+            output_dir=output_dir,
+            user=user,
+            change_note=change_note,
+            sync_with_db=sync_with_db,
+        )
+
+
+def _publish_article_locked(
+    doc: ArticleDocument,
+    output_dir: Path | None = None,
+    user: str = "Investment Office",
+    change_note: str = "",
+    sync_with_db: bool | None = None,
+) -> dict[str, Any]:
     dist_dir = output_dir or STATIC_PORTAL_DIR
     dist_dir.mkdir(parents=True, exist_ok=True)
     _ensure_portal_assets(dist_dir)
@@ -443,6 +478,11 @@ def unpublish_article(article_id: str, output_dir: Path | None = None) -> dict[s
     Entfernt einen publizierten Artikel vollständig vom statischen Portal.
     Löscht den Artikel-Ordner und aktualisiert die Übersichtsseite und den Suchindex.
     """
+    with _PORTAL_PUBLISH_LOCK:
+        return _unpublish_article_locked(article_id=article_id, output_dir=output_dir)
+
+
+def _unpublish_article_locked(article_id: str, output_dir: Path | None = None) -> dict[str, Any]:
     dist_dir = output_dir or STATIC_PORTAL_DIR
     if not dist_dir.exists():
         return {"success": True, "action": "unpublish_noop", "message": "Portalverzeichnis existiert nicht."}
@@ -506,6 +546,11 @@ def restore_portal_from_snapshots(output_dir: Path | None = None) -> dict[str, A
     Es findet KEIN dynamisches Re-Rendering von Typst oder Charts statt!
     Konserviert exakt die historischen HTML- und PDF-Dateien zum Veröffentlichungszeitpunkt.
     """
+    with _PORTAL_PUBLISH_LOCK:
+        return _restore_portal_from_snapshots_locked(output_dir=output_dir)
+
+
+def _restore_portal_from_snapshots_locked(output_dir: Path | None = None) -> dict[str, Any]:
     dist_dir = output_dir or STATIC_PORTAL_DIR
     dist_dir.mkdir(parents=True, exist_ok=True)
     _ensure_portal_assets(dist_dir)
@@ -580,25 +625,26 @@ def rebuild_full_portal(
     """
     Baut das gesamte Portal von Grund auf neu auf (z. B. nach Template-Änderungen).
     """
-    dist_dir = output_dir or STATIC_PORTAL_DIR
-    dist_dir.mkdir(parents=True, exist_ok=True)
-    _ensure_portal_assets(dist_dir)
+    with _PORTAL_PUBLISH_LOCK:
+        dist_dir = output_dir or STATIC_PORTAL_DIR
+        dist_dir.mkdir(parents=True, exist_ok=True)
+        _ensure_portal_assets(dist_dir)
 
-    manifest: dict[str, Any] = {"articles": {}}
+        manifest: dict[str, Any] = {"articles": {}}
 
-    docs_to_publish = articles or []
-    for doc in docs_to_publish:
-        res = publish_article(doc, output_dir=dist_dir)
-        logger.info(f"Rebuild: {doc.id} -> {res.get('slug')}")
+        docs_to_publish = articles or []
+        for doc in docs_to_publish:
+            res = publish_article(doc, output_dir=dist_dir)
+            logger.info(f"Rebuild: {doc.id} -> {res.get('slug')}")
 
-    manifest = _read_manifest(dist_dir)
-    _render_portal_index(dist_dir, manifest)
+        manifest = _read_manifest(dist_dir)
+        _render_portal_index(dist_dir, manifest)
 
-    return {
-        "success": True,
-        "total_published": len(manifest.get("articles", {})),
-        "dist_dir": str(dist_dir),
-    }
+        return {
+            "success": True,
+            "total_published": len(manifest.get("articles", {})),
+            "dist_dir": str(dist_dir),
+        }
 
 
 def create_connect_bundle(
@@ -611,39 +657,46 @@ def create_connect_bundle(
     """
     import tempfile
 
-    dist_dir = output_dir or STATIC_PORTAL_DIR
-    dist_dir.mkdir(parents=True, exist_ok=True)
+    with _PORTAL_PUBLISH_LOCK:
+        dist_dir = output_dir or STATIC_PORTAL_DIR
+        dist_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Sicherstellen, dass das Portal aus den aktiven MSSQL-Snapshots vollständig befüllt ist
-    if not (dist_dir / "index.html").exists():
+        # 1. Sicherstellen, dass das Portal aus den aktiven MSSQL-Snapshots vollständig befüllt ist
+        if not (dist_dir / "index.html").exists():
+            try:
+                restore_portal_from_snapshots(output_dir=dist_dir)
+            except Exception as exc:
+                logger.warning(f"Wiederherstellung aus MSSQL-Snapshots fehlgeschlagen ({exc}), erstelle leere Grundstruktur.")
+                _ensure_portal_assets(dist_dir)
+                manifest = _read_manifest(dist_dir)
+                _render_portal_index(dist_dir, manifest)
+                _write_manifest(dist_dir, manifest)
+
+        # Posit Connect manifest.json sicherstellen
+        _write_connect_manifest(dist_dir)
+
+        # 2. Zielpfad bestimmen (mit Fallback auf tempfile bei schreibgeschützten Deployment-Systemen)
+        if bundle_path:
+            target_archive = bundle_path
+        else:
+            try:
+                target_archive = dist_dir.parent / "connect_static_portal_bundle.tar.gz"
+                # Prüfen ob im Ordner geschrieben werden darf
+                target_archive.touch(exist_ok=True)
+            except (PermissionError, OSError):
+                target_archive = Path(tempfile.gettempdir()) / "connect_static_portal_bundle.tar.gz"
+
+        # 3. Archiv atomar über temporäre Datei packen
+        tmp_archive = target_archive.with_name(f".{target_archive.name}.{uuid.uuid4().hex[:8]}.tmp")
         try:
-            restore_portal_from_snapshots(output_dir=dist_dir)
-        except Exception as exc:
-            logger.warning(f"Wiederherstellung aus MSSQL-Snapshots fehlgeschlagen ({exc}), erstelle leere Grundstruktur.")
-            _ensure_portal_assets(dist_dir)
-            manifest = _read_manifest(dist_dir)
-            _render_portal_index(dist_dir, manifest)
-            _write_manifest(dist_dir, manifest)
+            with tarfile.open(tmp_archive, "w:gz") as tar:
+                for item in dist_dir.rglob("*"):
+                    arcname = item.relative_to(dist_dir)
+                    tar.add(item, arcname=str(arcname))
+            os.replace(tmp_archive, target_archive)
+        finally:
+            if tmp_archive.exists():
+                tmp_archive.unlink(missing_ok=True)
 
-    # Posit Connect manifest.json sicherstellen
-    _write_connect_manifest(dist_dir)
-
-    # 2. Zielpfad bestimmen (mit Fallback auf tempfile bei schreibgeschützten Deployment-Systemen)
-    if bundle_path:
-        target_archive = bundle_path
-    else:
-        try:
-            target_archive = dist_dir.parent / "connect_static_portal_bundle.tar.gz"
-            # Prüfen ob im Ordner geschrieben werden darf
-            target_archive.touch(exist_ok=True)
-        except (PermissionError, OSError):
-            target_archive = Path(tempfile.gettempdir()) / "connect_static_portal_bundle.tar.gz"
-
-    # 3. Archiv packen
-    with tarfile.open(target_archive, "w:gz") as tar:
-        for item in dist_dir.rglob("*"):
-            arcname = item.relative_to(dist_dir)
-            tar.add(item, arcname=str(arcname))
-
-    logger.info(f"Posit Connect Bundle erstellt: {target_archive} ({target_archive.stat().st_size} Bytes)")
-    return target_archive
+        logger.info(f"Posit Connect Bundle erstellt: {target_archive} ({target_archive.stat().st_size} Bytes)")
+        return target_archive

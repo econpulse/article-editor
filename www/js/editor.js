@@ -2495,8 +2495,20 @@
           }
         });
       }
-      if (msg.article && !state.isDirty) {
-        state.baseArticle = deepClone(msg.article);
+      if (msg.article) {
+        if (state.article && msg.article.id === state.article.id) {
+          if (msg.article.version !== undefined) {
+            state.article.version = msg.article.version;
+          }
+          if (msg.article.status && state.article.status !== msg.article.status) {
+            state.article.status = msg.article.status;
+            const statusEl = document.getElementById("meta-status");
+            if (statusEl) statusEl.value = msg.article.status;
+          }
+        }
+        if (!state.isDirty) {
+          state.baseArticle = deepClone(msg.article);
+        }
       }
       if (!state.isDirty) {
         const suffix = msg.merged ? " (mit Co-Autor zusammengeführt)" : "";
@@ -2562,6 +2574,9 @@
       const prevBase = state.baseArticle || state.article;
 
       // Metadaten-Felder nur aktualisieren, wenn der lokale Nutzer nicht gerade darin tippt
+      if (incoming.version !== undefined) {
+        state.article.version = incoming.version;
+      }
       state.article.template_id = incoming.template_id;
       state.article.status = incoming.status;
       const metaFields = [
@@ -2587,78 +2602,25 @@
       }
       renderMetadataForm();
 
-      // Inhaltsblöcke selektiv synchronisieren:
-      // Falls der Nutzer gerade aktiv in einem Block tippt, bleibt dessen lokaler DOM-Knoten
-      // und Block-Inhalt völlig unberührt!
-      const localBlocksById = {};
-      (state.article.blocks || []).forEach(function (b) {
-        localBlocksById[b.id] = b;
-      });
-      const prevBaseById = {};
-      (prevBase.blocks || []).forEach(function (b) {
-        prevBaseById[b.id] = b;
-      });
-
-      const mergedBlocks = [];
-      (incoming.blocks || []).forEach(function (incBlk) {
-        const locBlk = localBlocksById[incBlk.id];
-        const baseBlk = prevBaseById[incBlk.id];
-        const isLocallyModified =
-          locBlk && baseBlk && JSON.stringify(locBlk) !== JSON.stringify(baseBlk);
-
-        if (incBlk.id === focusedBlockId || (state.isDirty && isLocallyModified)) {
-          mergedBlocks.push(locBlk);
-        } else {
-          mergedBlocks.push(incBlk);
-        }
-      });
-
-      // Aktualisiere DOM-Karten nur für Blöcke, die nicht gerade lokal fokussiert sind
-      const oldOrder = (state.article.blocks || []).map((b) => b.id).join(",");
-      const newOrder = mergedBlocks.map((b) => b.id).join(",");
-      state.article.blocks = mergedBlocks;
+      // Inhaltsblöcke selektiv synchronisieren (inkl. Erhalt lokal neu angelegter Blöcke)
+      const localBlocks = state.article.blocks || [];
+      const syncMerge = E.mergeRemoteBlocks(
+        localBlocks,
+        prevBase.blocks || [],
+        incoming.blocks || [],
+        focusedBlockId,
+        state.isDirty
+      );
+      state.article.blocks = syncMerge.mergedBlocks;
       state.baseArticle = deepClone(incoming);
 
-      if (oldOrder !== newOrder && !focusedBlockId) {
-        renderBlocksCanvas();
-      } else {
-        const canvas = document.getElementById("lukb-blocks-canvas");
-        if (canvas) {
-          let insideBox = false;
-          mergedBlocks.forEach(function (blk, idx) {
-            if (blk.type === "box_start") insideBox = true;
-            if (blk.id !== focusedBlockId) {
-              const locBlk = localBlocksById[blk.id];
-              // Prüfe, ob sich der Block tatsächlich geändert hat
-              const isUnchanged = locBlk && JSON.stringify(locBlk) === JSON.stringify(blk);
-              if (!isUnchanged) {
-                const existingCard = canvas.querySelector('[data-block-id="' + blk.id + '"]');
-                // Optimierter In-Place Update für Richtext & Callout (vermeidet DOM-Zerstörung)
-                if (existingCard && (blk.type === "richtext" || blk.type === "callout") && locBlk && locBlk.type === blk.type) {
-                  const editable = existingCard.querySelector(".richtext-editable");
-                  if (editable && editable !== document.activeElement && editable.innerHTML !== blk.html) {
-                    editable.innerHTML = blk.html || "<p></p>";
-                    if (blk.type === "callout") {
-                      const titleInp = existingCard.querySelector(".cms-input");
-                      if (titleInp && titleInp !== document.activeElement) titleInp.value = blk.title || "";
-                    }
-                    if (blk.type === "box_end") insideBox = false;
-                    return;
-                  }
-                }
-                const newCard = buildBlockCardElement(blk, idx, insideBox);
-                if (existingCard) {
-                  canvas.replaceChild(newCard, existingCard);
-                } else {
-                  canvas.appendChild(newCard);
-                }
-              }
-            }
-            if (blk.type === "box_end") insideBox = false;
-          });
-          reindexCanvasCards(canvas);
-        }
-      }
+      E.syncRemoteBlocksToCanvas(
+        localBlocks,
+        syncMerge.mergedBlocks,
+        syncMerge.mergedIdSet,
+        syncMerge.localBlocksById,
+        focusedBlockId
+      );
       applyPeerFocusDecorations();
       if (!state.isDirty && msg.updated_by) {
         setAutosaveIndicator("saved", "Live aktualisiert von " + msg.updated_by);

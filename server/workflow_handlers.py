@@ -171,6 +171,14 @@ def register_workflow_handlers(
     @reactive.event(input.btn_confirm_unpublish)
     async def _on_confirm_unpublish() -> None:
         ui.modal_remove()
+        user = state.current_user
+        if not can_publish(user):
+            ui.notification_show(
+                f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen vom Portal zurückziehen.",
+                type="warning",
+                duration=6,
+            )
+            return
         doc = state.current_doc.get()
         if not doc:
             return
@@ -178,7 +186,7 @@ def register_workflow_handlers(
             res = await asyncio.to_thread(
                 unpublish_article_from_portal,
                 doc.id,
-                user=state.current_user,
+                user=user,
                 new_status="draft",
             )
             if res.get("success"):

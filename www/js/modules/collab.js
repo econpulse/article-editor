@@ -138,10 +138,141 @@
   }
 
 
+  function mergeRemoteBlocks(localBlocks, prevBaseBlocks, incomingBlocks, focusedBlockId, isDirty) {
+    const locList = localBlocks || [];
+    const localBlocksById = {};
+    locList.forEach(function (b) {
+      localBlocksById[b.id] = b;
+    });
+    const prevBaseById = {};
+    (prevBaseBlocks || []).forEach(function (b) {
+      prevBaseById[b.id] = b;
+    });
+
+    const mergedBlocks = [];
+    const mergedIdSet = {};
+    (incomingBlocks || []).forEach(function (incBlk) {
+      const locBlk = localBlocksById[incBlk.id];
+      const baseBlk = prevBaseById[incBlk.id];
+
+      // Lokal gelöschten Block respektieren, solange er nicht parallel remote editiert wurde
+      if (isDirty && baseBlk && !locBlk && JSON.stringify(incBlk) === JSON.stringify(baseBlk)) {
+        return;
+      }
+
+      const isLocallyModified =
+        locBlk && (!baseBlk || JSON.stringify(locBlk) !== JSON.stringify(baseBlk));
+
+      if (locBlk && (incBlk.id === focusedBlockId || (isDirty && isLocallyModified))) {
+        mergedBlocks.push(locBlk);
+      } else {
+        mergedBlocks.push(incBlk);
+      }
+      mergedIdSet[incBlk.id] = true;
+    });
+
+    // Lokal neu angelegte Blöcke (noch nicht in incomingBlocks) an relativer Position erhalten
+    locList.forEach(function (locBlk, locIdx) {
+      if (mergedIdSet[locBlk.id]) return;
+      const baseBlk = prevBaseById[locBlk.id];
+      const isLocalNew = !baseBlk && (isDirty || locBlk.id === focusedBlockId);
+      if (!isLocalNew) return;
+
+      let insertPos = mergedBlocks.length;
+      if (locIdx === 0) {
+        insertPos = 0;
+      } else {
+        for (let j = locIdx - 1; j >= 0; j--) {
+          const prevId = locList[j].id;
+          const foundIdx = mergedBlocks.findIndex(function (b) { return b.id === prevId; });
+          if (foundIdx !== -1) {
+            insertPos = foundIdx + 1;
+            break;
+          }
+          if (j === 0) insertPos = 0;
+        }
+      }
+      mergedBlocks.splice(insertPos, 0, locBlk);
+      mergedIdSet[locBlk.id] = true;
+    });
+
+    return {
+      mergedBlocks: mergedBlocks,
+      mergedIdSet: mergedIdSet,
+      localBlocksById: localBlocksById,
+    };
+  }
+
+
+  function syncRemoteBlocksToCanvas(localBlocks, mergedBlocks, mergedIdSet, localBlocksById, focusedBlockId) {
+    const oldOrder = (localBlocks || []).map(function (b) { return b.id; }).join(",");
+    const newOrder = mergedBlocks.map(function (b) { return b.id; }).join(",");
+
+    if (oldOrder !== newOrder && !focusedBlockId) {
+      if (typeof E.renderBlocksCanvas === "function") E.renderBlocksCanvas();
+      return;
+    }
+
+    const canvas = document.getElementById("lukb-blocks-canvas");
+    if (!canvas) return;
+
+    // Entferne Karten, die remote gelöscht wurden (außer lokal fokussierte)
+    Array.from(canvas.querySelectorAll(":scope > .cms-block-card")).forEach(function (card) {
+      const cid = card.dataset.blockId || "";
+      if (cid && !mergedIdSet[cid] && cid !== focusedBlockId) {
+        card.remove();
+      }
+    });
+
+    let insideBox = false;
+    mergedBlocks.forEach(function (blk, idx) {
+      if (blk.type === "box_start") insideBox = true;
+      const existingCard = canvas.querySelector('[data-block-id="' + blk.id + '"]');
+      if (blk.id !== focusedBlockId) {
+        const locBlk = localBlocksById[blk.id];
+        const isUnchanged = locBlk && JSON.stringify(locBlk) === JSON.stringify(blk);
+        let targetCard = existingCard;
+        if (!isUnchanged || !existingCard) {
+          // Optimierter In-Place Update für Richtext & Callout (vermeidet DOM-Zerstörung)
+          if (existingCard && (blk.type === "richtext" || blk.type === "callout") && locBlk && locBlk.type === blk.type) {
+            const editable = existingCard.querySelector(".richtext-editable");
+            if (editable && editable !== document.activeElement && editable.innerHTML !== blk.html) {
+              editable.innerHTML = blk.html || "<p></p>";
+              if (blk.type === "callout") {
+                const titleInp = existingCard.querySelector(".cms-input");
+                if (titleInp && titleInp !== document.activeElement) titleInp.value = blk.title || "";
+              }
+            }
+          } else if (typeof E.buildBlockCardElement === "function") {
+            const newCard = E.buildBlockCardElement(blk, idx, insideBox);
+            if (existingCard) {
+              canvas.replaceChild(newCard, existingCard);
+            } else {
+              const refNode = canvas.children[idx] || null;
+              canvas.insertBefore(newCard, refNode);
+            }
+            targetCard = newCard;
+          }
+        }
+        if (targetCard && canvas.children[idx] !== targetCard) {
+          const refNode = canvas.children[idx] || null;
+          if (refNode !== targetCard) {
+            canvas.insertBefore(targetCard, refNode);
+          }
+        }
+      }
+      if (blk.type === "box_end") insideBox = false;
+    });
+    if (typeof E.reindexCanvasCards === "function") E.reindexCanvasCards(canvas);
+  }
+
+
   Object.assign(E, {
     applyPeerFocusDecorations: applyPeerFocusDecorations,
     bindDropdownListeners: bindDropdownListeners,
     bindFocusTrackingListeners: bindFocusTrackingListeners,
+    mergeRemoteBlocks: mergeRemoteBlocks,
     renderPresenceBar: renderPresenceBar,
+    syncRemoteBlocksToCanvas: syncRemoteBlocksToCanvas,
   });
 })();
