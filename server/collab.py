@@ -11,7 +11,9 @@ import logging
 from typing import Any
 from shiny import Session
 
-from database.repository import get_assets_by_ids
+from config import normalize_user_id
+from database.permissions import check_article_permission, get_accessible_article_ids
+from database.repository import get_assets_by_ids, list_articles
 from schemas.article import ArticleDocument
 from services.renderer import render_block_chart_svg, render_preview_pdf_base64, render_web_html
 
@@ -104,6 +106,7 @@ def register_peer(
     user: str,
     color: str,
     sync_doc_cb: Any,
+    revoke_cb: Any = None,
 ) -> None:
     """Registriert eine neue Autoren-Session in der Kollaborations-Registry."""
     ACTIVE_PEERS[session_id] = {
@@ -115,6 +118,7 @@ def register_peer(
         "auto_preview": True,
         "preview_mode": "pdf",
         "sync_doc_cb": sync_doc_cb,
+        "revoke_cb": revoke_cb,
     }
 
 
@@ -149,26 +153,42 @@ def get_active_articles_presence() -> dict[str, list[dict[str, str]]]:
     return by_article
 
 
+def filter_presence_by_allowed_articles(
+    by_article: dict[str, list[dict[str, str]]],
+    allowed_article_ids: set[str],
+) -> dict[str, list[dict[str, str]]]:
+    """Filtert die globale Präsenz-Map auf Artikel, auf die der Empfänger Leserecht hat."""
+    if not allowed_article_ids:
+        return {}
+    return {aid: peers for aid, peers in by_article.items() if aid in allowed_article_ids}
+
+
 async def broadcast_global_presence() -> None:
-    """Sendet die globale Artikel-Belegung an alle verbundenen Sessions (für die Sidebar)."""
+    """Sendet die globale Artikel-Belegung empfängerbezogen gefiltert an alle Sessions."""
     by_article = get_active_articles_presence()
+    allowed_cache: dict[str, set[str]] = {}
     for sid, info in list(ACTIVE_PEERS.items()):
         sess: Session | None = info.get("session")
-        if sess is not None:
-            try:
-                await sess.send_custom_message(
-                    "lukb_global_presence",
-                    {
-                        "self_session_id": sid,
-                        "active_peers_by_article": by_article,
-                    },
-                )
-            except Exception:
-                pass
+        if sess is None:
+            continue
+        uid = normalize_user_id(info.get("user"))
+        if uid not in allowed_cache:
+            allowed_cache[uid] = await asyncio.to_thread(get_accessible_article_ids, uid)
+        filtered_presence = filter_presence_by_allowed_articles(by_article, allowed_cache[uid])
+        try:
+            await sess.send_custom_message(
+                "lukb_global_presence",
+                {
+                    "self_session_id": sid,
+                    "active_peers_by_article": filtered_presence,
+                },
+            )
+        except Exception:
+            pass
 
 
 async def broadcast_article_list_to_all(exclude_session_id: str | None = None) -> None:
-    """Aktualisiert die Artikelliste bei allen anderen aktiven Sessions (z. B. nach Neu/Löschen/Statuswechsel)."""
+    """Aktualisiert die Artikelliste bei allen anderen aktiven Sessions (streng gefiltert pro Empfänger)."""
     targets = [
         (sid, info)
         for sid, info in list(ACTIVE_PEERS.items())
@@ -176,25 +196,91 @@ async def broadcast_article_list_to_all(exclude_session_id: str | None = None) -
     ]
     if not targets:
         return
-    from database.repository import list_articles
 
-    all_items = await asyncio.to_thread(list_articles, search_query="", status_filter="all")
     by_article = get_active_articles_presence()
+    items_by_user: dict[str, list[dict[str, Any]]] = {}
+    allowed_by_user: dict[str, set[str]] = {}
+
     for sid, info in targets:
+        sess: Session | None = info.get("session")
+        if sess is None:
+            continue
+        uid = normalize_user_id(info.get("user"))
+        if uid not in items_by_user:
+            user_items = await asyncio.to_thread(
+                list_articles,
+                search_query="",
+                status_filter="all",
+                user_id=uid,
+            )
+            items_by_user[uid] = user_items
+            allowed_by_user[uid] = {it["id"] for it in user_items if it.get("id")}
+        filtered_presence = filter_presence_by_allowed_articles(by_article, allowed_by_user[uid])
+        try:
+            await sess.send_custom_message(
+                "lukb_global_article_list",
+                {
+                    "all_articles": items_by_user[uid],
+                    "active_id": info.get("article_id", ""),
+                    "self_session_id": sid,
+                    "active_peers_by_article": filtered_presence,
+                },
+            )
+        except Exception:
+            pass
+
+
+async def enforce_article_access_revoked(article_id: str, target_user: str) -> int:
+    """
+    Entfernt alle offenen Sessions von `target_user` sofort aus `article_id`,
+    leert den serverseitigen Session-Zustand und informiert das Frontend.
+    """
+    target_uid = normalize_user_id(target_user)
+    if not article_id or not target_uid:
+        return 0
+
+    affected_sessions: list[tuple[str, dict[str, Any]]] = []
+    for sid, info in list(ACTIVE_PEERS.items()):
+        if info.get("article_id") == article_id and normalize_user_id(info.get("user")) == target_uid:
+            info["article_id"] = ""
+            info["focused_target"] = ""
+            revoke_cb = info.get("revoke_cb")
+            if callable(revoke_cb):
+                try:
+                    revoke_cb(article_id)
+                except Exception:
+                    pass
+            affected_sessions.append((sid, info))
+
+    for sid, info in affected_sessions:
         sess: Session | None = info.get("session")
         if sess is not None:
             try:
+                user_items = await asyncio.to_thread(
+                    list_articles, search_query="", status_filter="all", user_id=target_uid
+                )
+                allowed_ids = {it["id"] for it in user_items if it.get("id")}
+                filtered_presence = filter_presence_by_allowed_articles(
+                    get_active_articles_presence(), allowed_ids
+                )
                 await sess.send_custom_message(
-                    "lukb_global_article_list",
+                    "lukb_access_revoked",
                     {
-                        "all_articles": all_items,
-                        "active_id": info.get("article_id", ""),
-                        "self_session_id": sid,
-                        "active_peers_by_article": by_article,
+                        "article_id": article_id,
+                        "message": "Ihr Zugriff auf diesen Artikel wurde entzogen.",
+                        "next_article_id": user_items[0]["id"] if user_items else "",
+                        "articles": user_items,
+                        "active_peers_by_article": filtered_presence,
                     },
                 )
             except Exception:
                 pass
+
+    if affected_sessions:
+        await broadcast_presence(article_id)
+        await broadcast_global_presence()
+
+    return len(affected_sessions)
 
 
 async def transfer_block_lock(requester_session_id: str, block_id: str) -> None:
@@ -250,12 +336,14 @@ def get_article_peers(article_id: str) -> list[dict[str, Any]]:
 
 
 async def broadcast_presence(article_id: str) -> None:
-    """Überträgt die Liste anwesender Co-Autoren an alle Sessions im selben Artikel."""
+    """Überträgt die Liste anwesender Co-Autoren an alle berechtigten Sessions im selben Artikel."""
     if not article_id:
         return
     peers = get_article_peers(article_id)
     for sid, info in list(ACTIVE_PEERS.items()):
         if info.get("article_id") == article_id:
+            if not await asyncio.to_thread(check_article_permission, article_id, info.get("user"), "read"):
+                continue
             sess: Session | None = info.get("session")
             if sess is not None:
                 try:
@@ -280,12 +368,16 @@ async def broadcast_article_sync(
     assets_map: dict[str, dict[str, Any]] | None = None,
     publish_sync: dict[str, Any] | None = None,
 ) -> None:
-    """Synchronisiert den Dokumenteninhalt mit anderen aktiven Co-Autoren im selben Artikel."""
-    targets = [
+    """Synchronisiert den Dokumenteninhalt mit anderen berechtigten Co-Autoren im selben Artikel."""
+    candidates = [
         (sid, info)
         for sid, info in list(ACTIVE_PEERS.items())
         if info.get("article_id") == article_id and (sid != sender_session_id or include_sender)
     ]
+    targets = []
+    for sid, info in candidates:
+        if await asyncio.to_thread(check_article_permission, article_id, info.get("user"), "read"):
+            targets.append((sid, info))
     if not targets:
         return
 
@@ -328,13 +420,17 @@ async def broadcast_preview_to_coauthors(
     bzw. berechnet sie asynchron im Worker-Thread höchstens einmal pro Speichervorgang.
     Rendert HTML nur, falls mindestens ein Co-Autor die Web-Vorschau aktiv betrachtet.
     """
-    coauthor_targets = [
+    coauthor_candidates = [
         (sid, info)
         for sid, info in list(ACTIVE_PEERS.items())
         if sid != sender_session_id
         and info.get("article_id") == doc.id
         and info.get("session") is not None
     ]
+    coauthor_targets = []
+    for sid, info in coauthor_candidates:
+        if await asyncio.to_thread(check_article_permission, doc.id, info.get("user"), "read"):
+            coauthor_targets.append((sid, info))
     if not coauthor_targets:
         return
 

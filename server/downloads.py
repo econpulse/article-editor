@@ -10,6 +10,8 @@ import re
 from typing import Callable
 from shiny import Outputs, render
 
+from config import can_publish, is_global_admin
+from database.permissions import check_article_permission
 from schemas.article import ArticleDocument
 from services.portal_publisher import create_connect_bundle
 from services.renderer import (
@@ -29,8 +31,16 @@ def slugify_filename(title: str) -> str:
 def register_download_handlers(
     output: Outputs,
     get_current_doc: Callable[[], ArticleDocument | None],
+    get_current_user: Callable[[], str] | None = None,
 ) -> None:
     """Registriert alle Export-Download-Buttons an der Shiny-Session."""
+
+    def _has_article_read(doc: ArticleDocument | None) -> bool:
+        if doc is None:
+            return False
+        if get_current_user is None:
+            return True
+        return check_article_permission(doc.id, get_current_user(), "read")
 
     # Posit Connect Static Bundle Download (.tar.gz)
     @render.download_button(
@@ -38,6 +48,10 @@ def register_download_handlers(
         media_type="application/gzip",
     )
     def download_portal_bundle():
+        if get_current_user is not None:
+            uid = get_current_user()
+            if not (can_publish(uid) or is_global_admin(uid)):
+                return
         bundle_path = create_connect_bundle()
         return str(bundle_path)
 
@@ -48,7 +62,7 @@ def register_download_handlers(
     )
     def download_docx():
         doc = get_current_doc()
-        if doc is None:
+        if not _has_article_read(doc):
             return
         yield render_docx_bytes(doc)
 
@@ -59,7 +73,7 @@ def register_download_handlers(
     )
     def download_pdf():
         doc = get_current_doc()
-        if doc is None:
+        if not _has_article_read(doc):
             return
         yield render_pdf_bytes(doc)
 
@@ -70,6 +84,6 @@ def register_download_handlers(
     )
     def download_html():
         doc = get_current_doc()
-        if doc is None:
+        if not _has_article_read(doc):
             return
         yield render_web_html(doc).encode("utf-8")

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from shiny import Inputs, Outputs, Session
 
+from server.admin_handlers import register_admin_handlers
 from server.article_handlers import register_article_handlers
 from server.collab import (
     ACTIVE_PEERS,
@@ -43,7 +44,8 @@ def register_all_handlers(
     register_editor_handlers(input, output, session, state)
     register_preview_handlers(input, output, session, state)
     register_workflow_handlers(input, output, session, state)
-    register_download_handlers(output, state.current_doc.get)
+    register_admin_handlers(input, output, session, state)
+    register_download_handlers(output, state.current_doc.get, lambda: state.current_user_id)
     return state
 
 

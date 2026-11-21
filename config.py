@@ -217,31 +217,111 @@ PORTAL_ADMINS = [
     if u.strip()
 ]
 
+_TECHNICAL_USER_PREFIXES = ("analyst (", "sess_", "anonymous", "guest")
+
+
+def normalize_user_id(username: str | None) -> str:
+    """Normalisiert eine Benutzerkennung für konsistente Vergleiche und DB-Lookups."""
+    return (username or "").strip().lower()
+
+
+def is_technical_session_user(username: str | None) -> bool:
+    """
+    Erkennt technische Sitzungsnamen oder leere Identitäten.
+    Solche Namen erhalten auf Connect (und bei Rechtedurchsetzung) keinerlei Rechte.
+    """
+    u = normalize_user_id(username)
+    if not u:
+        return True
+    return any(u.startswith(prefix) for prefix in _TECHNICAL_USER_PREFIXES)
+
+
+def validate_startup_admin_config(*, raise_on_missing: bool = True) -> list[str]:
+    """
+    Stellt sicher, dass in der Produktiv-/Connect-Startkonfiguration mindestens ein
+    ausdrücklich benanntes Admin-Konto (PORTAL_ADMINS) vorhanden ist.
+    """
+    admins = [u for u in PORTAL_ADMINS if not is_technical_session_user(u)]
+    if not admins and is_connect_environment():
+        msg = (
+            "Sicherheitsfehler in Startkonfiguration: Auf Posit Connect / MSSQL muss "
+            "mindestens ein ausdrücklich benanntes Admin-Konto in PORTAL_ADMINS gesetzt sein."
+        )
+        if raise_on_missing:
+            raise RuntimeError(msg)
+    return admins
+
+
+def _lookup_db_global_rights(user_id: str) -> tuple[bool, bool] | None:
+    """Liest explizite globale Rechte (is_admin, can_publish) aus io_user_roles, falls vorhanden."""
+    if not user_id or is_technical_session_user(user_id):
+        return None
+    try:
+        from database.repository import get_db_user_global_rights
+
+        return get_db_user_global_rights(user_id)
+    except Exception:
+        return None
+
+
+def get_global_rights(username: str | None) -> dict[str, bool]:
+    """
+    Ermittelt die globalen Rechte {'is_admin': bool, 'can_publish': bool} getrennt.
+    Wer beide Funktionen benötigt, erhält beide Rechte ausdrücklich (Env oder DB).
+    Technische Sitzungsnamen erhalten niemals Rechte.
+    """
+    u = normalize_user_id(username)
+    if is_technical_session_user(u):
+        return {"is_admin": False, "can_publish": False}
+
+    env_admin = u in PORTAL_ADMINS
+    env_pub = u in PORTAL_PUBLISHERS
+    db_rights = _lookup_db_global_rights(u)
+
+    if env_admin or env_pub or db_rights is not None:
+        db_admin = bool(db_rights[0]) if db_rights is not None else False
+        db_pub = bool(db_rights[1]) if db_rights is not None else False
+        return {
+            "is_admin": env_admin or db_admin,
+            "can_publish": env_pub or db_pub,
+        }
+
+    # Wenn Env-Listen oder Connect-Umgebung aktiv sind, gibt es keinen impliziten Admin-Fallback
+    if PORTAL_ADMINS or PORTAL_PUBLISHERS or is_connect_environment():
+        return {"is_admin": False, "can_publish": False}
+
+    # Lokale Entwicklung ohne konfigurierte Rollenlisten (und ohne Connect/MSSQL)
+    return {"is_admin": True, "can_publish": True}
+
 
 def get_user_role(username: str) -> str:
     """
-    Ermittelt die Rolle des Benutzers: 'admin', 'publisher' oder 'author'.
-    Falls weder PORTAL_ADMINS noch PORTAL_PUBLISHERS gesetzt sind (z.B. lokale Entwicklung),
-    haben alle Benutzer volle Rechte ('admin').
+    Ermittelt die primäre Anzeige-Rolle des Benutzers: 'admin', 'publisher', 'author' oder 'guest'.
     """
-    u = (username or "").strip().lower()
-    if not PORTAL_ADMINS and not PORTAL_PUBLISHERS:
+    if is_technical_session_user(username):
+        return "guest"
+    rights = get_global_rights(username)
+    if rights["is_admin"]:
         return "admin"
-    if u in PORTAL_ADMINS:
-        return "admin"
-    if u in PORTAL_PUBLISHERS:
+    if rights["can_publish"]:
         return "publisher"
     return "author"
 
 
-def can_publish(username: str) -> bool:
+def is_global_admin(username: str | None) -> bool:
+    """Prüft, ob der Benutzer globale Admin-Rechte besitzt."""
+    return get_global_rights(username)["is_admin"]
+
+
+def can_publish(username: str | None) -> bool:
     """Prüft, ob der Benutzer Publikationen freigeben oder vom Portal zurückziehen darf."""
-    return get_user_role(username) in ("admin", "publisher")
+    return get_global_rights(username)["can_publish"]
 
 
-def can_delete(username: str) -> bool:
+def can_delete(username: str | None) -> bool:
     """Prüft, ob der Benutzer Publikationen löschen / archivieren darf."""
-    return get_user_role(username) in ("admin", "publisher")
+    rights = get_global_rights(username)
+    return rights["is_admin"] or rights["can_publish"]
 
 # ============================================================================
 # LUKB Corporate Design & Typografie

@@ -59,6 +59,9 @@ def register_article_handlers(
     @reactive.effect
     @reactive.event(input.btn_new_article)
     async def _on_new_article() -> None:
+        if not state.is_authenticated:
+            ui.notification_show("Nicht authentifiziert: Bitte melden Sie sich an.", type="warning", duration=5)
+            return
         new_doc = await asyncio.to_thread(create_new_article, user=state.current_user)
         await state.load_and_broadcast_article(new_doc.id)
         await broadcast_article_list_to_all(exclude_session_id=state.session_id)
@@ -69,7 +72,10 @@ def register_article_handlers(
     @reactive.event(input.btn_duplicate_article)
     async def _on_duplicate_article() -> None:
         aid = state.current_article_id.get()
-        if not aid:
+        if not aid or not state.is_authenticated:
+            return
+        if not await asyncio.to_thread(state.can_access_article, aid, "read"):
+            ui.notification_show("Keine Berechtigung zum Duplizieren dieses Artikels.", type="warning", duration=5)
             return
         dup_doc = await asyncio.to_thread(duplicate_article, aid, user=state.current_user)
         if dup_doc:
@@ -180,12 +186,15 @@ def register_article_handlers(
         aid = state.current_article_id.get()
         if not aid:
             return
+        if not await asyncio.to_thread(state.can_access_article, aid, "read", allow_admin_override=True):
+            ui.notification_show("Keine Berechtigung für diesen Artikel.", type="warning", duration=5)
+            return
         await asyncio.to_thread(delete_article, aid, user=user, force=True)
-        next_id = await asyncio.to_thread(get_first_article_id)
+        next_id = await asyncio.to_thread(get_first_article_id, user_id=state.current_user_id)
         if next_id:
             await state.load_and_broadcast_article(next_id)
         else:
-            await state.send_article_list("")
+            await state.load_and_broadcast_article("")
         await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         ui.notification_show("Publikation wurde in das Archiv verschoben (Soft-Delete).", type="message", duration=4)
 
@@ -197,7 +206,9 @@ def register_article_handlers(
         if not aid:
             return
         user = state.current_user
-        if not can_delete(user):
+        if not can_delete(user) or not await asyncio.to_thread(
+            state.can_access_article, aid, "read", allow_admin_override=True
+        ):
             ui.notification_show(
                 f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen wiederherstellen.",
                 type="warning",
@@ -222,11 +233,17 @@ def register_article_handlers(
         action = payload.get("action", "")
         target_id = payload.get("id", "")
         if action == "create":
+            if not state.is_authenticated:
+                ui.notification_show("Nicht authentifiziert: Bitte melden Sie sich an.", type="warning", duration=5)
+                return
             new_doc = await asyncio.to_thread(create_new_article, user=state.current_user)
             await state.load_and_broadcast_article(new_doc.id)
             await broadcast_article_list_to_all(exclude_session_id=state.session_id)
             ui.notification_show("Neue Publikation wurde angelegt.", type="message", duration=3)
         elif action == "duplicate" and target_id:
+            if not state.is_authenticated or not await asyncio.to_thread(state.can_access_article, target_id, "read"):
+                ui.notification_show("Keine Berechtigung zum Duplizieren dieses Artikels.", type="warning", duration=5)
+                return
             dup_doc = await asyncio.to_thread(duplicate_article, target_id, user=state.current_user)
             if dup_doc:
                 await state.load_and_broadcast_article(dup_doc.id)
@@ -234,7 +251,9 @@ def register_article_handlers(
                 ui.notification_show("Publikation wurde dupliziert.", type="message", duration=3)
         elif action == "delete" and target_id:
             user = state.current_user
-            if not can_delete(user):
+            if not can_delete(user) or not await asyncio.to_thread(
+                state.can_access_article, target_id, "read", allow_admin_override=True
+            ):
                 ui.notification_show("Nur Administratoren oder Senior Editoren dürfen Publikationen löschen.", type="warning", duration=5)
                 return
             target_doc = await asyncio.to_thread(get_article, target_id)
@@ -250,7 +269,7 @@ def register_article_handlers(
                 return
             await asyncio.to_thread(delete_article, target_id, user=user, force=True)
             if state.current_article_id.get() == target_id:
-                next_id = await asyncio.to_thread(get_first_article_id)
+                next_id = await asyncio.to_thread(get_first_article_id, user_id=state.current_user_id)
                 await state.load_and_broadcast_article(next_id or "")
             else:
                 await state.send_article_list(state.current_article_id.get())

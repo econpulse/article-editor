@@ -18,6 +18,7 @@ from sqlalchemy import (
     LargeBinary,
     Unicode,
     UnicodeText,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -147,3 +148,59 @@ class TimeSeriesModel(Base):
     date: Mapped[date] = mapped_column(Date, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(Unicode(255), nullable=False, default="")
     value: Mapped[float] = mapped_column(Float, nullable=True)
+
+
+class ArticlePermissionModel(Base):
+    """
+    Artikelspezifische Berechtigungen (Etappe 1).
+    Bindet eine authentifizierte Connect-Benutzerkennung an einen Artikel mit einer
+    expliziten Artikelrolle ('owner', 'editor', 'reviewer', 'viewer').
+    """
+
+    __tablename__ = "io_article_permissions"
+    __table_args__ = (
+        UniqueConstraint("article_id", "user_id", name="uq_io_article_perm_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    article_id: Mapped[str] = mapped_column(
+        Unicode(64), ForeignKey("io_articles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[str] = mapped_column(Unicode(150), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="editor")
+    granted_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="")
+    granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)
+
+
+class UserRoleModel(Base):
+    """
+    Globale Benutzerrollen in der Datenbank (Etappe 1).
+    Steuert Admin-Zugriff und Publikationsrecht unabhängig voneinander.
+    """
+
+    __tablename__ = "io_user_roles"
+
+    user_id: Mapped[str] = mapped_column(Unicode(150), primary_key=True)
+    display_name: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="")
+    is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    can_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="System")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utc_now, onupdate=_utc_now, nullable=False
+    )
+
+
+class AuditLogModel(Base):
+    """
+    Revisionssicheres Protokoll für Zuweisungs- und Rollenänderungen (Etappe 1+).
+    """
+
+    __tablename__ = "io_audit_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    actor_user: Mapped[str] = mapped_column(Unicode(150), nullable=False, index=True)
+    action: Mapped[str] = mapped_column(Unicode(64), nullable=False, index=True)
+    target_user: Mapped[str] = mapped_column(Unicode(150), nullable=True, index=True)
+    article_id: Mapped[str] = mapped_column(Unicode(64), nullable=True, index=True)
+    details_json: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False, index=True)

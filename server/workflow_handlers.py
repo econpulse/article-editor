@@ -55,6 +55,9 @@ def register_workflow_handlers(
         doc = state.current_doc.get()
         if not doc:
             return
+        if not await asyncio.to_thread(state.can_access_article, doc.id, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=5)
+            return
         if doc.status == "published":
             ui.notification_show("Publikation ist bereits im Portal veröffentlicht.", type="info", duration=4)
             return
@@ -89,8 +92,13 @@ def register_workflow_handlers(
         doc = state.current_doc.get()
         if not doc:
             return
+        if not await asyncio.to_thread(state.can_access_article, doc.id, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=5)
+            return
         user = state.current_user
-        if not can_publish(user):
+        if not can_publish(user) or not await asyncio.to_thread(
+            state.can_access_article, doc.id, "read", allow_admin_override=True
+        ):
             ui.notification_show(
                 f"Keine Berechtigung: Benutzer '{user}' darf nicht publizieren. Bitte reichen Sie den Artikel 'Zur Prüfung' ein.",
                 type="warning",
@@ -131,8 +139,13 @@ def register_workflow_handlers(
         doc = state.current_doc.get()
         if not doc:
             return
+        if not await asyncio.to_thread(state.can_access_article, doc.id, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=5)
+            return
         user = state.current_user
-        if not can_publish(user):
+        if not can_publish(user) or not await asyncio.to_thread(
+            state.can_access_article, doc.id, "read", allow_admin_override=True
+        ):
             ui.notification_show(
                 f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen vom Portal zurückziehen.",
                 type="warning",
@@ -177,7 +190,9 @@ def register_workflow_handlers(
     async def _on_confirm_unpublish() -> None:
         ui.modal_remove()
         user = state.current_user
-        if not can_publish(user):
+        if not can_publish(user) or not await asyncio.to_thread(
+            state.can_access_article, doc.id, "read", allow_admin_override=True
+        ):
             ui.notification_show(
                 f"Keine Berechtigung: Benutzer '{user}' darf keine Publikationen vom Portal zurückziehen.",
                 type="warning",
@@ -186,6 +201,9 @@ def register_workflow_handlers(
             return
         doc = state.current_doc.get()
         if not doc:
+            return
+        if not await asyncio.to_thread(state.can_access_article, doc.id, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=5)
             return
         try:
             res = await asyncio.to_thread(

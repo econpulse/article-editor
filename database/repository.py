@@ -17,14 +17,30 @@ from sqlalchemy import case, desc, func, or_, select, update
 
 logger = logging.getLogger(__name__)
 
-from config import TEMPLATES_DIR
+from config import TEMPLATES_DIR, is_technical_session_user, normalize_user_id
 from database.connection import Base, engine, get_db_session
 from database.models import (
     ArticleModel,
+    ArticlePermissionModel,
     ArticleRevisionModel,
     AssetModel,
     PublishedSnapshotModel,
     TimeSeriesModel,
+)
+from database.permissions import (
+    check_article_permission,
+    get_accessible_article_ids,
+    get_db_user_global_rights,
+    get_user_article_role,
+    grant_article_permission,
+    list_admin_articles,
+    list_article_permissions,
+    list_audit_log,
+    list_known_users,
+    list_review_assignments,
+    revoke_article_permission,
+    set_global_user_role,
+    transfer_article_ownership,
 )
 from schemas.article import (
     DEFAULT_LUKB_DISCLAIMER,
@@ -92,26 +108,56 @@ def list_articles(
     search_query: str = "",
     status_filter: str = "all",
     include_archived: bool = False,
+    user_id: str | None = None,
+    include_all_for_admin: bool = False,
 ) -> list[dict[str, Any]]:
     """
-    Liefert eine kompakte Übersicht aller Artikel in der Datenbank (sortiert nach Änderungsdatum).
-    Standardmässig werden archivierte Artikel (Soft-Delete) ausgeblendet.
+    Liefert eine kompakte Übersicht der Artikel in der Datenbank (sortiert nach Änderungsdatum).
+    Wenn `user_id` übergeben wird (und `include_all_for_admin=False`), wird direkt in SQL
+    auf Artikel mit expliziter Berechtigung (`io_article_permissions`) gefiltert.
     """
+    uid = normalize_user_id(user_id) if user_id is not None else None
+    filter_by_user = user_id is not None and not include_all_for_admin
+    if filter_by_user and (not uid or is_technical_session_user(uid)):
+        return []
+
     with get_db_session() as session:
-        stmt = select(
-            ArticleModel.id,
-            ArticleModel.title,
-            ArticleModel.subtitle,
-            ArticleModel.category,
-            ArticleModel.template_id,
-            ArticleModel.status,
-            ArticleModel.authors_json,
-            ArticleModel.tags_json,
-            ArticleModel.publication_date,
-            ArticleModel.updated_at,
-            ArticleModel.created_at,
-            ArticleModel.updated_by,
-        ).order_by(desc(ArticleModel.updated_at))
+        if filter_by_user:
+            stmt = (
+                select(
+                    ArticleModel.id,
+                    ArticleModel.title,
+                    ArticleModel.subtitle,
+                    ArticleModel.category,
+                    ArticleModel.template_id,
+                    ArticleModel.status,
+                    ArticleModel.authors_json,
+                    ArticleModel.tags_json,
+                    ArticleModel.publication_date,
+                    ArticleModel.updated_at,
+                    ArticleModel.created_at,
+                    ArticleModel.updated_by,
+                    ArticlePermissionModel.role.label("article_role"),
+                )
+                .join(ArticlePermissionModel, ArticlePermissionModel.article_id == ArticleModel.id)
+                .where(ArticlePermissionModel.user_id == uid)
+                .order_by(desc(ArticleModel.updated_at))
+            )
+        else:
+            stmt = select(
+                ArticleModel.id,
+                ArticleModel.title,
+                ArticleModel.subtitle,
+                ArticleModel.category,
+                ArticleModel.template_id,
+                ArticleModel.status,
+                ArticleModel.authors_json,
+                ArticleModel.tags_json,
+                ArticleModel.publication_date,
+                ArticleModel.updated_at,
+                ArticleModel.created_at,
+                ArticleModel.updated_by,
+            ).order_by(desc(ArticleModel.updated_at))
         if status_filter == "all":
             if not include_archived:
                 stmt = stmt.where(ArticleModel.status != "archived")
@@ -166,6 +212,7 @@ def list_articles(
                     "updated_at": updated_str,
                     "updated_iso": updated_iso,
                     "updated_by": r.updated_by or "",
+                    "article_role": getattr(r, "article_role", "") or "",
                 }
             )
         return result
@@ -584,6 +631,17 @@ def save_article(
                         updated_by=user,
                     )
                     session.add(row)
+                    creator_uid = normalize_user_id(user)
+                    if creator_uid and not is_technical_session_user(creator_uid):
+                        session.add(
+                            ArticlePermissionModel(
+                                article_id=working_doc.id,
+                                user_id=creator_uid,
+                                role="owner",
+                                granted_by=creator_uid,
+                                granted_at=now,
+                            )
+                        )
 
                 if not retry_needed:
                     doc_dict = working_doc.model_dump()
@@ -696,10 +754,20 @@ def count_articles(include_archived: bool = False) -> int:
         return int(session.scalar(stmt) or 0)
 
 
-def get_first_article_id(include_archived: bool = False) -> str | None:
+def get_first_article_id(
+    include_archived: bool = False,
+    user_id: str | None = None,
+) -> str | None:
     """Liefert die ID des zuletzt aktualisierten Artikels ohne JSON-Deserialisierung."""
+    uid = normalize_user_id(user_id) if user_id is not None else None
+    if user_id is not None and (not uid or is_technical_session_user(uid)):
+        return None
     with get_db_session() as session:
         stmt = select(ArticleModel.id).order_by(desc(ArticleModel.updated_at)).limit(1)
+        if user_id is not None:
+            stmt = stmt.join(
+                ArticlePermissionModel, ArticlePermissionModel.article_id == ArticleModel.id
+            ).where(ArticlePermissionModel.user_id == uid)
         if not include_archived:
             stmt = stmt.where(ArticleModel.status != "archived")
         return session.scalar(stmt)

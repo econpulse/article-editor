@@ -11,6 +11,7 @@ import logging
 from shiny import Inputs, Outputs, Session, reactive, ui
 
 from database.repository import (
+    get_article,
     get_published_sync_status,
     list_article_revisions,
     restore_article_revision,
@@ -51,6 +52,10 @@ def register_editor_handlers(
         payload = input.lukb_upload_asset()
         if not isinstance(payload, dict):
             return
+        aid = payload.get("article_id") or state.current_article_id.get()
+        if not aid or not await asyncio.to_thread(state.can_access_article, aid, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=4)
+            return
         b64_str = payload.get("base64_data", "")
         if not b64_str:
             return
@@ -60,7 +65,7 @@ def register_editor_handlers(
             filename=payload.get("filename", "grafik.svg"),
             mime_type=payload.get("mime_type", "image/svg+xml"),
             data=raw_bytes,
-            article_id=payload.get("article_id"),
+            article_id=aid,
             asset_id=payload.get("asset_id"),
         )
         await state.send_active_preview(respect_auto_preview=True)
@@ -71,6 +76,9 @@ def register_editor_handlers(
     async def _on_collab_focus() -> None:
         payload = input.lukb_collab_focus()
         if not isinstance(payload, dict):
+            return
+        cur_aid = state.current_article_id.get()
+        if not cur_aid or not await asyncio.to_thread(state.can_access_article, cur_aid, "read"):
             return
         target = str(payload.get("target", ""))
         aid = set_peer_focus(state.session_id, target)
@@ -84,6 +92,10 @@ def register_editor_handlers(
         payload = input.lukb_request_block_lock()
         if not isinstance(payload, dict):
             return
+        cur_aid = state.current_article_id.get()
+        if not cur_aid or not await asyncio.to_thread(state.can_access_article, cur_aid, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=4)
+            return
         block_id = str(payload.get("block_id", "")).strip()
         if block_id:
             await transfer_block_lock(state.session_id, block_id)
@@ -94,6 +106,9 @@ def register_editor_handlers(
     async def _on_open_revisions() -> None:
         aid = state.current_article_id.get()
         if not aid:
+            return
+        if not await asyncio.to_thread(state.can_access_article, aid, "read"):
+            ui.notification_show("Keine Berechtigung für die Revisions-Historie.", type="warning", duration=4)
             return
         revs = await asyncio.to_thread(list_article_revisions, aid, 40)
         doc = state.current_doc.get()
@@ -116,6 +131,9 @@ def register_editor_handlers(
         aid = state.current_article_id.get()
         rev_id = payload.get("revision_id")
         if not aid or not rev_id:
+            return
+        if not await asyncio.to_thread(state.can_access_article, aid, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung zum Wiederherstellen einer Revision.", type="warning", duration=4)
             return
         try:
             save_info = await asyncio.to_thread(
@@ -164,6 +182,14 @@ def register_editor_handlers(
             return
         try:
             doc = ArticleDocument.model_validate(payload["article"])
+            if not state.is_authenticated:
+                ui.notification_show("Nicht authentifiziert: Speichern abgelehnt.", type="warning", duration=4)
+                return
+            existing_art = await asyncio.to_thread(get_article, doc.id)
+            if existing_art is not None:
+                if not await asyncio.to_thread(state.can_access_article, doc.id, "edit"):
+                    ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=4)
+                    return
             base_doc = None
             if payload.get("base_article"):
                 try:

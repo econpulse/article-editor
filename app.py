@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 from shiny import App, Inputs, Outputs, Session
 
-from config import WWW_DIR, should_sync_portal_on_startup
+from config import WWW_DIR, should_sync_portal_on_startup, validate_startup_admin_config
 from database.repository import init_db_and_seed
 from server import (
     ACTIVE_PEERS,
@@ -36,6 +36,9 @@ from ui import app_ui, get_asset_version
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lukb_cms")
+
+# Startkonfiguration auf Connect/MSSQL prüfen (mindestens ein ausdrücklich benanntes Admin-Konto)
+validate_startup_admin_config(raise_on_missing=True)
 
 # Datenbank-Tabellen & initiale Beispiel-Publikationen beim Start sicherstellen
 init_db_and_seed()

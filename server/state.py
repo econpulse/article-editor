@@ -8,8 +8,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any
-from shiny import Inputs, Session, reactive
+from shiny import Inputs, Session, reactive, ui
 
+from config import is_technical_session_user, normalize_user_id
+from database.permissions import check_article_permission
 from database.repository import (
     create_new_article,
     get_article,
@@ -24,6 +26,7 @@ from server.collab import (
     broadcast_presence,
     cleanup_peer,
     collect_article_assets_map,
+    filter_presence_by_allowed_articles,
     get_active_articles_presence,
     get_peer_color,
     get_peer_preview_mode,
@@ -54,17 +57,48 @@ class SessionState:
             user=self.current_user,
             color=self.peer_color,
             sync_doc_cb=self._update_local_doc_from_peer,
+            revoke_cb=self._revoke_article_from_session,
         )
 
         session.on_ended(self._on_session_ended)
 
     @property
     def current_user(self) -> str:
-        """Gibt den auf Posit Connect authentifizierten Benutzer oder einen Fallback-Namen zurück."""
+        """Gibt den auf Posit Connect authentifizierten Benutzer oder einen technischen Sitzungsnamen zurück."""
         user_name = getattr(self.session, "user", None)
         if user_name:
             return str(user_name)
         return f"Analyst ({self.session_id[:4]})"
+
+    @property
+    def current_user_id(self) -> str:
+        """Normalisierte Benutzerkennung (lowercase)."""
+        return normalize_user_id(self.current_user)
+
+    @property
+    def is_authenticated(self) -> bool:
+        """True nur bei einer echten, nicht-technischen Benutzeridentität."""
+        return not is_technical_session_user(self.current_user)
+
+    def can_access_article(
+        self,
+        article_id: str,
+        action: str = "read",
+        *,
+        allow_admin_override: bool = False,
+    ) -> bool:
+        """Zentrale Berechtigungsprüfung für diese Session."""
+        return check_article_permission(
+            article_id,
+            self.current_user_id,
+            action,
+            allow_admin_override=allow_admin_override,
+        )
+
+    def _revoke_article_from_session(self, revoked_article_id: str) -> None:
+        if self.current_article_id.get() == revoked_article_id:
+            self.current_article_id.set("")
+            self.current_doc.set(None)
 
     def _update_local_doc_from_peer(self, new_doc: ArticleDocument) -> None:
         self.current_doc.set(new_doc)
@@ -89,17 +123,21 @@ class SessionState:
         except Exception:
             pass
 
+        uid = self.current_user_id
+
         def _fetch_lists():
-            filtered = list_articles(search_query=search_q, status_filter=status_f)
+            filtered = list_articles(search_query=search_q, status_filter=status_f, user_id=uid)
             if not search_q.strip() and status_f == "all":
                 all_res = filtered
             elif include_all:
-                all_res = list_articles(search_query="", status_filter="all")
+                all_res = list_articles(search_query="", status_filter="all", user_id=uid)
             else:
                 all_res = None
             return filtered, all_res
 
         items, all_items = await asyncio.to_thread(_fetch_lists)
+        allowed_ids = {it["id"] for it in (all_items if all_items is not None else items) if it.get("id")}
+        filtered_presence = filter_presence_by_allowed_articles(get_active_articles_presence(), allowed_ids)
         await self.session.send_custom_message(
             "lukb_update_article_list",
             {
@@ -107,7 +145,7 @@ class SessionState:
                 "all_articles": all_items,
                 "active_id": active_id,
                 "self_session_id": self.session_id,
-                "active_peers_by_article": get_active_articles_presence(),
+                "active_peers_by_article": filtered_presence,
                 "sidebar_search_active": bool(search_q.strip()),
                 "sidebar_status_filter": status_f,
             },
@@ -172,15 +210,25 @@ class SessionState:
         )
 
     async def load_and_broadcast_article(self, article_id: str) -> None:
-        """Lädt einen Artikel, setzt den Session-Zustand und informiert andere Co-Autoren."""
+        """Lädt einen berechtigten Artikel, setzt den Session-Zustand und informiert Co-Autoren."""
+        uid = self.current_user_id
+
+        if article_id:
+            has_access = await asyncio.to_thread(check_article_permission, article_id, uid, "read")
+            if not has_access:
+                ui.notification_show(
+                    "Kein Zugriff auf diesen Artikel.",
+                    type="warning",
+                    duration=5,
+                )
+                return
+
         def _load_doc_and_assets():
             loaded_doc = get_article(article_id) if article_id else None
             if loaded_doc is None:
-                first_id = get_first_article_id()
+                first_id = get_first_article_id(user_id=uid)
                 if first_id:
                     loaded_doc = get_article(first_id)
-                else:
-                    loaded_doc = create_new_article(user=self.current_user)
             if loaded_doc is None:
                 return None, {}, [], None
             a_map = collect_article_assets_map(loaded_doc)
@@ -190,6 +238,17 @@ class SessionState:
 
         doc, assets_map, available_tickers, publish_sync = await asyncio.to_thread(_load_doc_and_assets)
         if doc is None:
+            set_peer_article(self.session_id, "")
+            self.current_article_id.set("")
+            self.current_doc.set(None)
+            await self.send_article_list("")
+            await self.session.send_custom_message(
+                "lukb_no_article_access",
+                {
+                    "authenticated": self.is_authenticated,
+                    "user": self.current_user,
+                },
+            )
             return
 
         prev_article_id = set_peer_article(self.session_id, doc.id)

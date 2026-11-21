@@ -496,6 +496,57 @@
       }
     });
 
+    window.Shiny.addCustomMessageHandler("lukb_access_revoked", function (msg) {
+      if (!msg) return;
+      if (state.autosaveTimer) {
+        clearTimeout(state.autosaveTimer);
+        state.autosaveTimer = null;
+      }
+      state.isDirty = false;
+      if (Array.isArray(msg.articles)) {
+        state.sidebarArticles = msg.articles;
+        state.allArticles = msg.articles;
+      }
+      if (msg.active_peers_by_article) {
+        state.activePeersByArticle = msg.active_peers_by_article;
+      }
+      if (state.article && state.article.id === msg.article_id) {
+        state.article = null;
+        state.baseArticle = null;
+        state.activeArticleId = "";
+        const canvas = document.getElementById("lukb-blocks-canvas");
+        if (canvas) {
+          canvas.innerHTML =
+            '<div style="padding:32px;text-align:center;color:#5A687C;">' +
+            "<strong>Zugriff entzogen</strong><p style=\"margin-top:8px;\">" +
+            (msg.message || "Ihr Zugriff auf diesen Artikel wurde entzogen.") +
+            "</p></div>";
+        }
+      }
+      if (typeof E.renderArticleList === "function") {
+        E.renderArticleList(state.sidebarArticles || [], state.activeArticleId || "", false);
+      }
+      if (msg.next_article_id && typeof E.sendShinyEvent === "function") {
+        E.sendShinyEvent("lukb_select_article", { id: msg.next_article_id });
+      }
+    });
+
+    window.Shiny.addCustomMessageHandler("lukb_no_article_access", function (msg) {
+      state.article = null;
+      state.baseArticle = null;
+      state.activeArticleId = "";
+      state.isDirty = false;
+      const canvas = document.getElementById("lukb-blocks-canvas");
+      if (canvas) {
+        const text = (msg && msg.authenticated)
+          ? "Sie haben aktuell noch keine eigenen oder zugewiesenen Artikel. Legen Sie oben links eine neue Publikation an oder lassen Sie sich einen Artikel zuweisen."
+          : "Nicht authentifizierte Sitzung: Bitte melden Sie sich über Posit Connect an, um auf Artikel zuzugreifen.";
+        canvas.innerHTML =
+          '<div style="padding:32px;text-align:center;color:#5A687C;">' +
+          "<strong>Kein Artikel geöffnet</strong><p style=\"margin-top:8px;\">" + text + "</p></div>";
+      }
+    });
+
     document.addEventListener("keydown", function (ev) {
       if (ev.key === "Escape") {
         const backdrop = document.getElementById("lukb-rev-modal-backdrop");

@@ -712,8 +712,12 @@ def test_rbac_and_soft_delete():
     orig_admins = config.PORTAL_ADMINS
     orig_pubs = config.PORTAL_PUBLISHERS
     try:
-        config.PORTAL_ADMINS = ["admin_user"]
-        config.PORTAL_PUBLISHERS = ["senior_editor"]
+        config.PORTAL_ADMINS = ["admin_user", "admin_only"]
+        config.PORTAL_PUBLISHERS = ["senior_editor", "admin_user"]
+
+        assert config.get_user_role("admin_only") == "admin"
+        assert config.is_global_admin("admin_only") is True
+        assert config.can_publish("admin_only") is False
 
         assert config.get_user_role("admin_user") == "admin"
         assert config.can_publish("admin_user") is True
