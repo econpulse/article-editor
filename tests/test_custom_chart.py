@@ -630,6 +630,116 @@ def test_consistent_axis_tick_decimals():
     assert ">2<" not in svg_db_chart
 
 
+def test_compact_legend_and_no_legend():
+    """Prüft kompakte Legendeneinträge (Textbreite + kleiner Abstand) und Option 'show_legend=False'."""
+    import re
+    from services.chart_generator import generate_db_chart_svg
+
+    # 1. Kompakte Legende bei kurzen Labels (SNB, EZB, Fed) in 1 Zeile ohne riesige Lücken
+    blk_short = {
+        "id": "blk_leg_short",
+        "type": "db_chart",
+        "layout": "column",
+        "start_date": "2022-01-01",
+        "series": [
+            {"ticker": "SNB_RATE", "chart_type": "step", "label": "SNB"},
+            {"ticker": "ECB_RATE", "chart_type": "step", "label": "EZB"},
+            {"ticker": "FED_RATE", "chart_type": "step", "label": "Fed"},
+        ],
+    }
+    svg_short = generate_db_chart_svg(blk_short, embed_fonts=False)
+    leg_matches = re.findall(r'<text x="([0-9.]+)" y="([0-9.]+)">(SNB|EZB|Fed)</text>', svg_short)
+    assert len(leg_matches) == 3
+    x_snb, y_snb, _ = leg_matches[0]
+    x_ezb, y_ezb, _ = leg_matches[1]
+    x_fed, y_fed, _ = leg_matches[2]
+    assert float(y_snb) == float(y_ezb) == float(y_fed), "Alle 3 kurzen Einträge müssen in 1 Zeile passen"
+    assert float(x_ezb) - float(x_snb) < 120.0, f"Abstand SNB->EZB zu gross: {float(x_ezb) - float(x_snb)}"
+    assert float(x_fed) - float(x_ezb) < 120.0, f"Abstand EZB->Fed zu gross: {float(x_fed) - float(x_ezb)}"
+
+    # 2. Längerer mittlerer Text: nachfolgender Eintrag rückt dynamisch nach
+    blk_long_mid = {
+        "id": "blk_leg_mid",
+        "type": "db_chart",
+        "layout": "column",
+        "start_date": "2022-01-01",
+        "series": [
+            {"ticker": "SNB_RATE", "chart_type": "step", "label": "SNB"},
+            {"ticker": "ECB_RATE", "chart_type": "step", "label": "EZB mit langem Text"},
+            {"ticker": "FED_RATE", "chart_type": "step", "label": "Fed"},
+        ],
+    }
+    svg_long_mid = generate_db_chart_svg(blk_long_mid, embed_fonts=False)
+    fed_match = re.search(r'<text x="([0-9.]+)" y="([0-9.]+)">Fed</text>', svg_long_mid)
+    assert fed_match is not None
+    x_fed_shifted = float(fed_match.group(1))
+    assert x_fed_shifted > float(x_fed) + 80.0
+    assert x_fed_shifted < 500.0
+
+    # 3. Explizite Spaltenanzahl (2 Spalten, 4 Einträge): Spalten sind kompakt & vertikal bündig
+    tsv_4 = (
+        "Datum\tA\tB\tC\tD\n"
+        "2023-01-01\t1\t2\t3\t4\n"
+        "2024-01-01\t2\t3\t4\t5\n"
+    )
+    blk_2col = {
+        "id": "blk_leg_2col",
+        "type": "custom_chart",
+        "chart_type": "timeseries",
+        "layout": "column",
+        "legend_columns": 2,
+        "raw_tsv": tsv_4,
+        "series": [
+            {"field": "A", "label": "Alpha", "chart_type": "line", "enabled": True},
+            {"field": "B", "label": "Beta", "chart_type": "line", "enabled": True},
+            {"field": "C", "label": "Gamma", "chart_type": "line", "enabled": True},
+            {"field": "D", "label": "Delta", "chart_type": "line", "enabled": True},
+        ],
+    }
+    svg_2col = generate_custom_chart_svg(blk_2col, embed_fonts=False)
+    m_alpha = re.search(r'<text x="([0-9.]+)" y="([0-9.]+)">Alpha</text>', svg_2col)
+    m_beta = re.search(r'<text x="([0-9.]+)" y="([0-9.]+)">Beta</text>', svg_2col)
+    m_gamma = re.search(r'<text x="([0-9.]+)" y="([0-9.]+)">Gamma</text>', svg_2col)
+    m_delta = re.search(r'<text x="([0-9.]+)" y="([0-9.]+)">Delta</text>', svg_2col)
+    assert m_alpha and m_beta and m_gamma and m_delta
+    assert float(m_alpha.group(1)) == float(m_gamma.group(1))
+    assert float(m_beta.group(1)) == float(m_delta.group(1))
+    assert float(m_beta.group(1)) - float(m_alpha.group(1)) < 140.0
+
+    # 4. Option 'show_legend=False' blendet Legende komplett aus & spart Höhe
+    blk_no_leg_db = dict(blk_short, show_legend=False)
+    svg_no_leg_db = generate_db_chart_svg(blk_no_leg_db, embed_fonts=False)
+    assert "SNB" not in svg_no_leg_db
+    assert "EZB" not in svg_no_leg_db
+    assert "Fed" not in svg_no_leg_db
+    h_with = int(re.search(r'height="([0-9]+)"', svg_short).group(1))
+    h_without = int(re.search(r'height="([0-9]+)"', svg_no_leg_db).group(1))
+    assert h_without < h_with
+
+    # Auch für Custom Category Bar und Doughnut
+    blk_cat_no_leg = {
+        "id": "blk_cat_noleg",
+        "type": "custom_chart",
+        "chart_type": "category_bar",
+        "raw_tsv": "Kat\tWert1\tWert2\nA\t10\t20\nB\t15\t25\n",
+        "show_legend": False,
+    }
+    svg_cat_no_leg = generate_custom_chart_svg(blk_cat_no_leg, embed_fonts=False)
+    assert "Wert1" not in svg_cat_no_leg
+    assert "Wert2" not in svg_cat_no_leg
+
+    blk_donut_no_leg = {
+        "id": "blk_donut_noleg",
+        "type": "custom_chart",
+        "chart_type": "doughnut",
+        "raw_tsv": "Kat\tAnteil\nAktien\t60\nObligationen\t40\n",
+        "show_legend": False,
+    }
+    svg_donut_no_leg = generate_custom_chart_svg(blk_donut_no_leg, embed_fonts=False)
+    assert "Aktien" not in svg_donut_no_leg
+    assert "Obligationen" not in svg_donut_no_leg
+
+
 if __name__ == "__main__":
     test_parsing_helpers()
     test_auto_detection()
@@ -641,4 +751,5 @@ if __name__ == "__main__":
     test_dual_output_typst_and_web_rendering()
     test_custom_chart_svg_cache()
     test_consistent_axis_tick_decimals()
+    test_compact_legend_and_no_legend()
     print("ALL CUSTOM CHART TESTS PASSED SUCCESSFULLY!")

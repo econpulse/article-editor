@@ -32,6 +32,7 @@ from services.chart_common import (
     _estimate_label_width_px,
     _format_ch_number,
     _render_empty_state_svg,
+    compute_legend_item_positions,
     compute_plot_height_px,
     format_axis_ticks,
     open_svg_document,
@@ -39,7 +40,9 @@ from services.chart_common import (
     parse_number,
     render_timeseries_svg,
     resolve_chart_palette,
+    resolve_explicit_legend_columns,
     resolve_legend_columns,
+    resolve_show_legend,
 )
 
 
@@ -214,9 +217,11 @@ def _render_doughnut_pie_svg(
 
     svg_w = 680
 
+    show_legend = resolve_show_legend(block_data)
     legend_pos = str(block_data.get("legend_position") or ("right" if not is_column else "bottom")).strip().lower()
-    is_legend_right = legend_pos == "right"
+    is_legend_right = show_legend and (legend_pos == "right")
     legend_cols = resolve_legend_columns(block_data, default_columns=1 if is_legend_right else 2)
+    explicit_leg_cols = resolve_explicit_legend_columns(block_data)
 
     # Typografie abgestimmt auf Corporate Design: Legende darf nicht kleiner sein als Untertitel/Quelle (mind. 20.5 im Column-Layout)
     font_size_cat = 20.5 if is_column else 14.0
@@ -227,7 +232,13 @@ def _render_doughnut_pie_svg(
     _, target_plot_h = compute_plot_height_px(block_data, is_column)
 
     # Geometrie & Positionierung
-    if is_legend_right:
+    bottom_legend_positions: list[tuple[float, int]] = []
+    if not show_legend:
+        cx = 340.0
+        r_outer = round(max(50.0, min(220.0, (target_plot_h - 30.0) / 2.0)), 1)
+        cy = round(20.0 + r_outer, 1)
+        svg_h = int(round(max(cy + r_outer + 20.0, target_plot_h + 24.0)))
+    elif is_legend_right:
         # Für jede Spalte die maximale Breite berechnen
         col_needed_widths = []
         for c in range(legend_cols):
@@ -270,11 +281,20 @@ def _render_doughnut_pie_svg(
         cy = round(20.0 + r_outer, 1)
         legend_start_y = round(cy + r_outer + 35.0, 1)
 
-        total_legend_rows = math.ceil(len(slices) / legend_cols)
-        legend_total_h = total_legend_rows * row_height
         legend_left_x = 0.0
         usable_w = svg_w - legend_left_x
-        col_w = usable_w / legend_cols
+        item_widths = [
+            22.0 + _estimate_label_width_px(f"{l} ({(v / total_sum) * 100.0:.1f} %)", font_size_cat)
+            for l, v in slices
+        ]
+        bottom_legend_positions = compute_legend_item_positions(
+            item_widths=item_widths,
+            max_width=usable_w,
+            item_gap=24.0 if is_column else 18.0,
+            explicit_columns=explicit_leg_cols,
+        )
+        total_legend_rows = (max(r for _, r in bottom_legend_positions) + 1) if bottom_legend_positions else 0
+        legend_total_h = total_legend_rows * row_height
         svg_h = int(round(max(legend_start_y + legend_total_h + 16.0, target_plot_h + legend_total_h + 40.0)))
 
     r_inner = r_outer * (hole_pct / 100.0)
@@ -343,7 +363,9 @@ def _render_doughnut_pie_svg(
     # Legende berechnen
     legend_elements: list[str] = []
 
-    if is_legend_right:
+    if not show_legend:
+        pass
+    elif is_legend_right:
         for idx, (label, val) in enumerate(slices):
             color = active_palette[idx % len(active_palette)]
             c_idx = idx % legend_cols
@@ -365,9 +387,8 @@ def _render_doughnut_pie_svg(
     else:
         for idx, (label, val) in enumerate(slices):
             color = active_palette[idx % len(active_palette)]
-            r_idx = idx // legend_cols
-            c_idx = idx % legend_cols
-            clx = legend_left_x + c_idx * col_w
+            x_off, r_idx = bottom_legend_positions[idx]
+            clx = legend_left_x + x_off
             ly = legend_start_y + r_idx * row_height
             pct_str = f"{(val / total_sum) * 100.0:.1f} %"
             safe_lbl = html.escape(label)
@@ -554,55 +575,50 @@ def _build_category_chart_legend(
 ) -> tuple[list[str], int]:
     """Erstellt die SVG-Legende für Kategorie-Säulen- und Balkendiagramme und berechnet `svg_h`."""
     legend_elements: list[str] = []
-    legend_rows = 0
-    items_per_legend_row = resolve_legend_columns(block_data, default_columns=2)
-    legend_row_gap = 28.0 if is_column else 22.0
-
-    if color_by_cat and len(active_series) == 1:
-        legend_rows = math.ceil(len(categories) / items_per_legend_row)
-    elif len(active_series) > 1:
-        legend_rows = math.ceil(len(active_series) / items_per_legend_row)
-
-    if legend_rows <= 0:
+    if not resolve_show_legend(block_data):
         return legend_elements, fallback_svg_h
+
+    legend_items: list[tuple[str, str]] = []
+    if color_by_cat and len(active_series) == 1:
+        legend_items = [
+            (active_palette[idx % len(active_palette)], cat["category"])
+            for idx, cat in enumerate(categories)
+        ]
+    elif len(active_series) > 1:
+        legend_items = [(s["color"], s["label"]) for s in active_series]
+
+    if not legend_items:
+        return legend_elements, fallback_svg_h
+
+    legend_left_x = 0.0
+    explicit_leg_cols = resolve_explicit_legend_columns(block_data)
+    legend_row_gap = 28.0 if is_column else 22.0
+    item_widths = [22.0 + _estimate_label_width_px(lbl, legend_font_size) for _, lbl in legend_items]
+    positions = compute_legend_item_positions(
+        item_widths=item_widths,
+        max_width=plot_right - legend_left_x,
+        item_gap=24.0 if is_column else 18.0,
+        explicit_columns=explicit_leg_cols,
+    )
+    legend_rows = max(r for _, r in positions) + 1
 
     desired_gap = 32.0 if is_column else 22.0
     external_gap = 12.0 if is_column else 8.0
     legend_top = axis_labels_bottom_y + desired_gap
     legend_start_y = round(legend_top + 13.0, 1)
 
-    legend_left_x = 0.0
-    col_w = (plot_right - legend_left_x) / max(1, items_per_legend_row)
-
-    if color_by_cat and len(active_series) == 1:
-        for idx, cat in enumerate(categories):
-            r_idx = idx // items_per_legend_row
-            c_idx = idx % items_per_legend_row
-            lx = legend_left_x + c_idx * col_w
-            ly = legend_start_y + r_idx * legend_row_gap
-            cat_color = active_palette[idx % len(active_palette)]
-            safe_lbl = html.escape(cat["category"])
-            legend_elements.append(
-                f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{cat_color}"/>'
-            )
-            legend_elements.append(
-                f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
-                f'{safe_lbl}</text>'
-            )
-    elif len(active_series) > 1:
-        for idx, s in enumerate(active_series):
-            r_idx = idx // items_per_legend_row
-            c_idx = idx % items_per_legend_row
-            lx = legend_left_x + c_idx * col_w
-            ly = legend_start_y + r_idx * legend_row_gap
-            safe_lbl = html.escape(s["label"])
-            legend_elements.append(
-                f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{s["color"]}"/>'
-            )
-            legend_elements.append(
-                f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
-                f'{safe_lbl}</text>'
-            )
+    for idx, (item_color, raw_lbl) in enumerate(legend_items):
+        x_off, r_idx = positions[idx]
+        lx = legend_left_x + x_off
+        ly = legend_start_y + r_idx * legend_row_gap
+        safe_lbl = html.escape(raw_lbl)
+        legend_elements.append(
+            f'    <rect x="{lx:.1f}" y="{ly - 12:.1f}" width="14" height="14" rx="2" fill="{item_color}"/>'
+        )
+        legend_elements.append(
+            f'    <text x="{lx + 22:.1f}" y="{ly:.1f}" font-size="{legend_font_size}" fill="#002855" font-family="{FONT_HEADING}">'
+            f'{safe_lbl}</text>'
+        )
 
     legend_bottom = legend_start_y + (legend_rows - 1) * legend_row_gap + 4.0
     internal_bottom_pad = max(10.0, desired_gap - external_gap)
@@ -1106,6 +1122,7 @@ def _compute_custom_chart_cache_key(
         "doughnut_hole_pct": block_data.get("doughnut_hole_pct"),
         "legend_position": str(block_data.get("legend_position") or "").strip().lower(),
         "legend_columns": leg_cols_str,
+        "show_legend": resolve_show_legend(block_data),
         "orientation": str(block_data.get("orientation") or "vertical").strip().lower(),
         "color_by_category": bool(block_data.get("color_by_category", False)),
         "bar_mode": str(block_data.get("bar_mode") or "grouped").strip(),

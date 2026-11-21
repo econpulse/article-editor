@@ -46,6 +46,7 @@ from services.chart_common import (
     render_timeseries_svg,
     resolve_chart_palette,
     resolve_legend_columns,
+    resolve_show_legend,
 )
 
 
@@ -109,6 +110,7 @@ def _compute_db_chart_cache_key(
         "chart_height_mm": str(block_data.get("chart_height_mm") or "36").strip(),
         "palette": resolve_chart_palette(block_data),
         "legend_columns": str(leg_cols) if leg_cols > 0 else "auto",
+        "show_legend": resolve_show_legend(block_data),
         "embed_fonts": bool(embed_fonts),
         "max_date": str(max_date or "").strip(),
     }

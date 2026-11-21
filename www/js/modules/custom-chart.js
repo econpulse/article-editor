@@ -166,6 +166,7 @@
     if (blk.color_by_category === undefined) blk.color_by_category = false;
     if (!blk.legend_position) blk.legend_position = "bottom";
     if (blk.legend_columns === undefined) blk.legend_columns = null;
+    if (blk.show_legend === undefined) blk.show_legend = true;
 
     // Sicherstellen, dass data_columns & data_rows initial synchronisiert sind
     if (!blk.data_columns || blk.data_columns.length === 0) {
@@ -676,30 +677,41 @@
         mapGrid.appendChild(holeWrap);
       }
 
-      // Spalten der Legende (für alle Diagrammtypen)
+      // Legende / Spalten der Legende (für alle Diagrammtypen)
       const legColsWrap = document.createElement("div");
       const legColsLbl = document.createElement("label");
       legColsLbl.className = "field-label";
-      legColsLbl.textContent = "Spalten der Legende";
+      legColsLbl.textContent = "Legende";
       const legColsSel = document.createElement("select");
       legColsSel.className = "cms-select";
 
       updateLegColsOptions = function () {
         const isRight = (blk.chart_type === "doughnut" || blk.chart_type === "pie") && blk.legend_position === "right";
-        const defCols = isRight ? 1 : 2;
-        const curVal = blk.legend_columns !== undefined && blk.legend_columns !== null ? String(blk.legend_columns) : "auto";
+        const autoLabel = isRight ? "Automatisch (1 Spalte)" : "Automatisch (kompakt)";
+        const curVal =
+          blk.show_legend === false
+            ? "none"
+            : blk.legend_columns !== undefined && blk.legend_columns !== null
+              ? String(blk.legend_columns)
+              : "auto";
         legColsSel.innerHTML =
-          '<option value="auto">Automatisch (' + defCols + ' ' + (defCols === 1 ? 'Spalte' : 'Spalten') + ')</option>' +
+          '<option value="auto">' + autoLabel + '</option>' +
           '<option value="1">1 Spalte</option>' +
           '<option value="2">2 Spalten</option>' +
           '<option value="3">3 Spalten</option>' +
-          '<option value="4">4 Spalten</option>';
+          '<option value="4">4 Spalten</option>' +
+          '<option value="none">Keine Legende</option>';
         legColsSel.value = curVal;
       };
       updateLegColsOptions();
 
       legColsSel.addEventListener("change", function () {
-        blk.legend_columns = legColsSel.value === "auto" ? null : parseInt(legColsSel.value, 10);
+        if (legColsSel.value === "none") {
+          blk.show_legend = false;
+        } else {
+          blk.show_legend = true;
+          blk.legend_columns = legColsSel.value === "auto" ? null : parseInt(legColsSel.value, 10);
+        }
         markDirty();
         requestCustomChartPreview(blk, true);
         if (typeof flushAutosave === "function") {

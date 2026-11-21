@@ -161,7 +161,11 @@ class ChartBlockBase(MarginAnchorBlockBase):
     )
     legend_columns: Optional[int] = Field(
         default=None,
-        description="Anzahl Spalten für die Legendeneinträge",
+        description="Anzahl Spalten für die Legendeneinträge (None = automatisch/kompakt)",
+    )
+    show_legend: bool = Field(
+        default=True,
+        description="Ob die Legende im Chart angezeigt wird",
     )
     asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
 
@@ -193,6 +197,16 @@ class ChartBlockBase(MarginAnchorBlockBase):
             return max(1, min(6, n))
         except (ValueError, TypeError):
             return None
+
+    @field_validator("show_legend", mode="before")
+    @classmethod
+    def validate_show_legend(cls, v: Any) -> bool:
+        if v is None:
+            return True
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        return s not in ("false", "0", "no", "none", "off")
 
 
 class FigureBlock(MarginAnchorBlockBase):

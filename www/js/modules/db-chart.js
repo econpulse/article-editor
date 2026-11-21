@@ -305,6 +305,9 @@
     if (blk.legend_columns === undefined) {
       blk.legend_columns = null;
     }
+    if (blk.show_legend === undefined) {
+      blk.show_legend = true;
+    }
 
     // Zeile 1: Grafik-Titel & Layout-Breite
     const topGrid = document.createElement("div");
@@ -445,31 +448,37 @@
     rebaseWrap.appendChild(rebaseLbl);
     rebaseWrap.appendChild(rebaseSel);
 
-    // Spalten der Legende (default: 2 Spalten bzw. 3 bei Vollbreite, identisch zu Custom Chart)
+    // Legende / Spalten der Legende
     const legColsWrap = document.createElement("div");
     const legColsLbl = document.createElement("label");
     legColsLbl.className = "field-label";
-    legColsLbl.textContent = "Spalten der Legende";
+    legColsLbl.textContent = "Legende";
     const legColsSel = document.createElement("select");
     legColsSel.className = "cms-select";
 
-    const isCol = (blk.layout || "column") === "column";
-    const defCols = isCol ? 2 : 3;
     const curVal =
-      blk.legend_columns !== undefined && blk.legend_columns !== null
-        ? String(blk.legend_columns)
-        : "auto";
+      blk.show_legend === false
+        ? "none"
+        : blk.legend_columns !== undefined && blk.legend_columns !== null
+          ? String(blk.legend_columns)
+          : "auto";
     legColsSel.innerHTML =
-      '<option value="auto">Automatisch (' + defCols + ' Spalten)</option>' +
+      '<option value="auto">Automatisch (kompakt)</option>' +
       '<option value="1">1 Spalte</option>' +
       '<option value="2">2 Spalten</option>' +
       '<option value="3">3 Spalten</option>' +
-      '<option value="4">4 Spalten</option>';
+      '<option value="4">4 Spalten</option>' +
+      '<option value="none">Keine Legende</option>';
     legColsSel.value = curVal;
 
     legColsSel.addEventListener("change", function () {
-      blk.legend_columns =
-        legColsSel.value === "auto" ? null : parseInt(legColsSel.value, 10);
+      if (legColsSel.value === "none") {
+        blk.show_legend = false;
+      } else {
+        blk.show_legend = true;
+        blk.legend_columns =
+          legColsSel.value === "auto" ? null : parseInt(legColsSel.value, 10);
+      }
       markDirty();
       requestDbChartPreview(blk, true);
       if (typeof flushAutosave === "function") flushAutosave(false);

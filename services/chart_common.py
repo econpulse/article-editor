@@ -125,6 +125,88 @@ def resolve_legend_columns(
     return default_columns
 
 
+def resolve_explicit_legend_columns(block_data: dict[str, Any]) -> int | None:
+    """Liefert eine explizit gesetzte Spaltenanzahl (1..6) oder `None` bei 'auto'."""
+    user_val = block_data.get("legend_columns")
+    if user_val is not None and user_val not in ("", "auto", 0, "none"):
+        try:
+            val = int(user_val)
+            if 1 <= val <= 6:
+                return val
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
+def resolve_show_legend(block_data: dict[str, Any]) -> bool:
+    """Ermittelt, ob eine Legende gerendert werden soll (Default: True)."""
+    raw = block_data.get("show_legend")
+    if raw is not None:
+        if raw is False or (isinstance(raw, str) and raw.strip().lower() in ("false", "0", "no", "none", "off")):
+            return False
+        if raw == 0:
+            return False
+    leg_pos = str(block_data.get("legend_position") or "").strip().lower()
+    if leg_pos == "none":
+        return False
+    leg_cols = block_data.get("legend_columns")
+    if leg_cols is not None and (leg_cols == 0 or (isinstance(leg_cols, str) and leg_cols.strip().lower() == "none")):
+        return False
+    return True
+
+
+def compute_legend_item_positions(
+    item_widths: list[float],
+    max_width: float,
+    item_gap: float = 22.0,
+    explicit_columns: int | None = None,
+) -> list[tuple[float, int]]:
+    """
+    Berechnet `(x_offset, row_idx)` für horizontale Legendeneinträge.
+
+    - Bei `explicit_columns is None` (Auto): Kompaktes Flow-Wrap anhand der tatsächlichen
+      Textbreiten + `item_gap` mit automatischem Zeilenumbruch bei `max_width`.
+    - Bei `explicit_columns >= 1`: Feste Spaltenzahl, aber jede Spalte ist nur so breit
+      wie ihr längster Eintrag + `item_gap` (vertikal bündig ohne unnötige Leerräume).
+    """
+    if not item_widths:
+        return []
+
+    if explicit_columns is None:
+        positions: list[tuple[float, int]] = []
+        cur_x = 0.0
+        row_idx = 0
+        for w in item_widths:
+            if cur_x > 0.0 and cur_x + w > max_width:
+                row_idx += 1
+                cur_x = 0.0
+            positions.append((cur_x, row_idx))
+            cur_x += w + item_gap
+        return positions
+
+    cols = max(1, min(explicit_columns, len(item_widths)))
+    if cols == 1:
+        return [(0.0, idx) for idx in range(len(item_widths))]
+
+    col_widths = [
+        max(item_widths[i] for i in range(c, len(item_widths), cols))
+        for c in range(cols)
+    ]
+    total_w = sum(col_widths) + (cols - 1) * item_gap
+    eff_gap = item_gap
+    if total_w > max_width and cols > 1:
+        avail_for_gaps = max(0.0, max_width - sum(col_widths))
+        eff_gap = avail_for_gaps / (cols - 1) if avail_for_gaps > 0.0 else 8.0
+
+    col_x: list[float] = []
+    acc = 0.0
+    for c in range(cols):
+        col_x.append(acc)
+        acc += col_widths[c] + eff_gap
+
+    return [(col_x[idx % cols], idx // cols) for idx in range(len(item_widths))]
+
+
 def _quote_svg_font(name: str) -> str:
     """Formatiert einen Font-Namen CSS-/SVG-konform (Mehrwortnamen in einfachen Anführungszeichen)."""
     cleaned = name.strip().strip("'\"").replace('"', "").replace("'", "")
@@ -667,12 +749,8 @@ def render_timeseries_svg(
 
     axis_font_size = 22.5 if is_column_layout else 14.5
     legend_font_size = 20.5 if is_column_layout else 14.0
-    default_leg_cols = 2 if is_column_layout else 3
-    items_per_legend_row = resolve_legend_columns(block_data, default_columns=default_leg_cols)
-
-    if len(resolved_series) < items_per_legend_row:
-        items_per_legend_row = max(1, len(resolved_series))
-    legend_rows = math.ceil(len(resolved_series) / items_per_legend_row)
+    show_legend = resolve_show_legend(block_data)
+    explicit_leg_cols = resolve_explicit_legend_columns(block_data)
     legend_row_gap = 29.0 if is_column_layout else 22.0
 
     y_tick_labels = format_axis_ticks(y_ticks, y_step)
@@ -694,7 +772,30 @@ def render_timeseries_svg(
 
     x_axis_label_y = plot_bottom + (31.0 if is_column_layout else 24.0)
     legend_start_y = x_axis_label_y + (34.0 if is_column_layout else 27.0)
-    svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + (10.0 if is_column_layout else 8.0)))
+
+    legend_left_x = 0.0
+    max_label_chars = 27 if is_column_layout else 34
+    icon_w = 24.0 if is_column_layout else 19.0
+    icon_h = 13.0 if is_column_layout else 11.0
+    icon_text_gap = 8.0
+    legend_item_gap = 24.0 if is_column_layout else 18.0
+
+    legend_positions: list[tuple[float, int]] = []
+    if show_legend and resolved_series:
+        leg_widths = [
+            icon_w + icon_text_gap + _estimate_label_width_px(s["label"][:max_label_chars], legend_font_size)
+            for s in resolved_series
+        ]
+        legend_positions = compute_legend_item_positions(
+            item_widths=leg_widths,
+            max_width=plot_right - legend_left_x,
+            item_gap=legend_item_gap,
+            explicit_columns=explicit_leg_cols,
+        )
+        legend_rows = max(r for _, r in legend_positions) + 1
+        svg_h = int(round(legend_start_y + (legend_rows - 1) * legend_row_gap + (10.0 if is_column_layout else 8.0)))
+    else:
+        svg_h = int(round(x_axis_label_y + (12.0 if is_column_layout else 10.0)))
 
     def x_px(dt: date) -> float:
         return plot_left + ((float(dt.toordinal()) - min_ord) / span_ord) * plot_w
@@ -911,59 +1012,53 @@ def render_timeseries_svg(
         svg_parts.append("  </g>")
 
     # Legende
-    legend_left_x = 0.0
-    col_step = (plot_right - legend_left_x) / max(1, items_per_legend_row)
-    max_label_chars = 27 if is_column_layout else 34
+    if show_legend and legend_positions:
+        svg_parts.append(
+            f'  <g font-family="{FONT_HEADING}" font-weight="{FONT_WEIGHT_HEADING}" font-size="{legend_font_size}" fill="#1A2433">'
+        )
+        for idx, s in enumerate(resolved_series):
+            x_off, row_num = legend_positions[idx]
+            lx = legend_left_x + x_off
+            ly = legend_start_y + row_num * legend_row_gap
+            col = s["color"]
+            ctypes = s["chart_types_set"]
+            lbl = html.escape(s["label"][:max_label_chars])
 
-    svg_parts.append(
-        f'  <g font-family="{FONT_HEADING}" font-weight="{FONT_WEIGHT_HEADING}" font-size="{legend_font_size}" fill="#1A2433">'
-    )
-    for idx, s in enumerate(resolved_series):
-        row_num = idx // items_per_legend_row
-        col_num = idx % items_per_legend_row
-        lx = legend_left_x + col_num * col_step
-        ly = legend_start_y + row_num * legend_row_gap
-        col = s["color"]
-        ctypes = s["chart_types_set"]
-        lbl = html.escape(s["label"][:max_label_chars])
+            icon_top = ly - icon_h + 1.0
 
-        icon_w = 24.0 if is_column_layout else 19.0
-        icon_h = 13.0 if is_column_layout else 11.0
-        icon_top = ly - icon_h + 1.0
+            if "bar" in ctypes or "stacked_bar" in ctypes:
+                svg_parts.append(
+                    f'    <rect x="{lx:.1f}" y="{icon_top:.1f}" width="{icon_w - 4:.1f}" height="{icon_h:.1f}" rx="1.5" fill="{col}"/>'
+                )
+            elif "area" in ctypes:
+                svg_parts.append(
+                    f'    <rect x="{lx:.1f}" y="{icon_top:.1f}" width="{icon_w:.1f}" height="{icon_h:.1f}" '
+                    f'fill="{col}" fill-opacity="0.24"/>'
+                )
 
-        if "bar" in ctypes or "stacked_bar" in ctypes:
-            svg_parts.append(
-                f'    <rect x="{lx:.1f}" y="{icon_top:.1f}" width="{icon_w - 4:.1f}" height="{icon_h:.1f}" rx="1.5" fill="{col}"/>'
-            )
-        elif "area" in ctypes:
-            svg_parts.append(
-                f'    <rect x="{lx:.1f}" y="{icon_top:.1f}" width="{icon_w:.1f}" height="{icon_h:.1f}" '
-                f'fill="{col}" fill-opacity="0.24"/>'
-            )
+            if "step" in ctypes:
+                mid_x = lx + icon_w * 0.5
+                svg_parts.append(
+                    f'    <path d="M {lx:.1f} {ly - 2:.1f} H {mid_x:.1f} V {icon_top + 1:.1f} H {lx + icon_w:.1f}" '
+                    f'fill="none" stroke="{col}" stroke-width="2.8"/>'
+                )
+            elif "line" in ctypes or ("area" in ctypes and "bar" not in ctypes and "stacked_bar" not in ctypes):
+                line_y = (icon_top + 1.0) if ("area" in ctypes and "line" not in ctypes) else (ly - 5.5)
+                svg_parts.append(
+                    f'    <line x1="{lx:.1f}" y1="{line_y:.1f}" x2="{lx + icon_w:.1f}" y2="{line_y:.1f}" '
+                    f'stroke="{col}" stroke-width="3.0" stroke-linecap="round"/>'
+                )
 
-        if "step" in ctypes:
-            mid_x = lx + icon_w * 0.5
-            svg_parts.append(
-                f'    <path d="M {lx:.1f} {ly - 2:.1f} H {mid_x:.1f} V {icon_top + 1:.1f} H {lx + icon_w:.1f}" '
-                f'fill="none" stroke="{col}" stroke-width="2.8"/>'
-            )
-        elif "line" in ctypes or ("area" in ctypes and "bar" not in ctypes and "stacked_bar" not in ctypes):
-            line_y = (icon_top + 1.0) if ("area" in ctypes and "line" not in ctypes) else (ly - 5.5)
-            svg_parts.append(
-                f'    <line x1="{lx:.1f}" y1="{line_y:.1f}" x2="{lx + icon_w:.1f}" y2="{line_y:.1f}" '
-                f'stroke="{col}" stroke-width="3.0" stroke-linecap="round"/>'
-            )
+            if "dot" in ctypes:
+                cx_icon = lx + icon_w * 0.5
+                cy_icon = ly - 5.5
+                svg_parts.append(
+                    f'    <circle cx="{cx_icon:.1f}" cy="{cy_icon:.1f}" r="4.6" fill="{col}" stroke="#FFFFFF" stroke-width="1.2"/>'
+                )
 
-        if "dot" in ctypes:
-            cx_icon = lx + icon_w * 0.5
-            cy_icon = ly - 5.5
-            svg_parts.append(
-                f'    <circle cx="{cx_icon:.1f}" cy="{cy_icon:.1f}" r="4.6" fill="{col}" stroke="#FFFFFF" stroke-width="1.2"/>'
-            )
-
-        text_x = lx + icon_w + 8.0
-        svg_parts.append(f'    <text x="{text_x:.1f}" y="{ly:.1f}">{lbl}</text>')
-    svg_parts.append("  </g>")
+            text_x = lx + icon_w + icon_text_gap
+            svg_parts.append(f'    <text x="{text_x:.1f}" y="{ly:.1f}">{lbl}</text>')
+        svg_parts.append("  </g>")
 
     svg_parts.append("</svg>")
     return "\n".join(svg_parts)

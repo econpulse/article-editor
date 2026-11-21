@@ -808,6 +808,7 @@
         rebasing: "none",
         palette: "lukb_classic",
         legend_columns: null,
+        show_legend: true,
         series: [
           { ticker: "SNB_RATE", chart_type: "line", chart_types: ["line"], label: "" },
           { ticker: "ECB_RATE", chart_type: "line", chart_types: ["line"], label: "" },
@@ -844,6 +845,7 @@
         ],
         doughnut_hole_pct: 55,
         bar_mode: "grouped",
+        show_legend: true,
       };
     }
     if (type === "table") {
