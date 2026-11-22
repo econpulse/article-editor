@@ -101,12 +101,21 @@
   function renderAuthorsList() {
     const container = document.getElementById("meta-authors-container");
     if (!container || !state.article) return;
+    if (container._authorsSortable) {
+      container._authorsSortable.destroy();
+      container._authorsSortable = null;
+    }
     container.innerHTML = "";
 
     const authors = state.article.metadata.authors || [];
     authors.forEach(function (author, idx) {
       const row = document.createElement("div");
       row.className = "author-row-item";
+
+      const dragHandle = document.createElement("span");
+      dragHandle.className = "author-drag-handle";
+      dragHandle.title = "Ziehen zum Umsortieren (Drag & Drop)";
+      dragHandle.textContent = "⋮⋮";
 
       const nameInput = document.createElement("input");
       nameInput.type = "text";
@@ -139,11 +148,29 @@
         markDirty();
       });
 
+      row.appendChild(dragHandle);
       row.appendChild(nameInput);
       row.appendChild(roleInput);
       row.appendChild(delBtn);
       container.appendChild(row);
     });
+
+    if (typeof window.Sortable !== "undefined" && authors.length > 1) {
+      container._authorsSortable = window.Sortable.create(container, {
+        handle: ".author-drag-handle",
+        draggable: ".author-row-item",
+        animation: 150,
+        ghostClass: "sortable-ghost",
+        onEnd: function (evt) {
+          if (evt.oldIndex == null || evt.newIndex == null || evt.oldIndex === evt.newIndex) return;
+          const list = state.article.metadata.authors;
+          const moved = list.splice(evt.oldIndex, 1)[0];
+          list.splice(evt.newIndex, 0, moved);
+          renderAuthorsList();
+          markDirty();
+        },
+      });
+    }
   }
 
   function bindMetadataStaticListeners() {

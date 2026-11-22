@@ -24,6 +24,7 @@ from sqlalchemy import desc, func, or_, select
 from config import can_publish, is_global_admin, normalize_user_id
 from database.connection import get_db_session
 from database.models import (
+    ArticleModel,
     AssetModel,
     MediaEntryModel,
     MediaUsageModel,
@@ -334,13 +335,39 @@ def search_media_library(
             stmt = stmt.where(MediaEntryModel.usage_channel == channel)
         if query and query.strip():
             q = f"%{query.strip()}%"
-            stmt = stmt.where(
-                or_(
-                    MediaEntryModel.title.ilike(q),
-                    MediaEntryModel.tags_json.ilike(q),
-                    MediaEntryModel.source_text.ilike(q),
-                )
-            )
+            # Sichtbare / publizierte Artikel, deren Titel, Kategorie oder Datum zur Suche passen
+            matching_art_ids = [
+                a.id
+                for a in session.scalars(
+                    select(ArticleModel).where(
+                        or_(
+                            ArticleModel.title.ilike(q),
+                            ArticleModel.category.ilike(q),
+                            ArticleModel.publication_date.ilike(q),
+                        )
+                    )
+                ).all()
+                if a.id in accessible_aids or a.status == "published" or a.live_snapshot_id is not None
+            ]
+            matching_media_ids: set[str] = set()
+            if matching_art_ids:
+                for u_mid in session.scalars(
+                    select(MediaUsageModel.media_id).where(MediaUsageModel.article_id.in_(matching_art_ids))
+                ).all():
+                    matching_media_ids.add(u_mid)
+                for o_mid in session.scalars(
+                    select(MediaEntryModel.id).where(MediaEntryModel.origin_article_id.in_(matching_art_ids))
+                ).all():
+                    matching_media_ids.add(o_mid)
+
+            conds = [
+                MediaEntryModel.title.ilike(q),
+                MediaEntryModel.tags_json.ilike(q),
+                MediaEntryModel.source_text.ilike(q),
+            ]
+            if matching_media_ids:
+                conds.append(MediaEntryModel.id.in_(list(matching_media_ids)))
+            stmt = stmt.where(or_(*conds))
 
         all_entries = session.scalars(stmt).all()
         visible_entries: list[MediaEntryModel] = []
@@ -356,6 +383,8 @@ def search_media_library(
         mids = [e.id for e in page_entries]
 
         latest_ver_by_mid: dict[str, MediaVersionModel] = {}
+        usages_by_mid: dict[str, list[str]] = {}
+        articles_by_id: dict[str, ArticleModel] = {}
         if mids:
             ver_rows = session.scalars(
                 select(MediaVersionModel)
@@ -366,6 +395,22 @@ def search_media_library(
                 if vr.media_id not in latest_ver_by_mid:
                     latest_ver_by_mid[vr.media_id] = vr
 
+            usage_rows = session.scalars(
+                select(MediaUsageModel).where(MediaUsageModel.media_id.in_(mids))
+            ).all()
+            art_ids_to_load: set[str] = set()
+            for ur in usage_rows:
+                usages_by_mid.setdefault(ur.media_id, []).append(ur.article_id)
+                art_ids_to_load.add(ur.article_id)
+            for e in page_entries:
+                if e.origin_article_id:
+                    art_ids_to_load.add(e.origin_article_id)
+            if art_ids_to_load:
+                for art in session.scalars(
+                    select(ArticleModel).where(ArticleModel.id.in_(list(art_ids_to_load)))
+                ).all():
+                    articles_by_id[art.id] = art
+
         items: list[dict[str, Any]] = []
         for e in page_entries:
             lv = latest_ver_by_mid.get(e.id)
@@ -375,6 +420,38 @@ def search_media_library(
                 tags = []
             # Keine privaten Quellartikel-Referenzen an Unberechtigte leaken
             can_see_origin = bool(e.origin_article_id and e.origin_article_id in accessible_aids)
+
+            raw_aids: list[str] = list(usages_by_mid.get(e.id, []))
+            if e.origin_article_id and e.origin_article_id not in raw_aids:
+                raw_aids.append(e.origin_article_id)
+            seen_aids: set[str] = set()
+            visible_usages: list[dict[str, Any]] = []
+            private_usage_count = 0
+            for aid_ref in raw_aids:
+                if not aid_ref or aid_ref in seen_aids:
+                    continue
+                seen_aids.add(aid_ref)
+                art = articles_by_id.get(aid_ref)
+                if art is None:
+                    continue
+                is_visible_art = (
+                    art.id in accessible_aids
+                    or art.status == "published"
+                    or art.live_snapshot_id is not None
+                )
+                if is_visible_art:
+                    visible_usages.append(
+                        {
+                            "article_id": art.id,
+                            "title": art.title,
+                            "category": art.category,
+                            "publication_date": art.publication_date,
+                            "status": art.status,
+                        }
+                    )
+                else:
+                    private_usage_count += 1
+
             items.append(
                 {
                     "media_id": e.id,
@@ -390,6 +467,8 @@ def search_media_library(
                     "latest_asset_id": lv.asset_id if lv else "",
                     "thumbnail_data_uri": (lv.thumbnail_data_uri or "") if lv else "",
                     "updated_at": e.updated_at.strftime("%d.%m.%Y %H:%M") if e.updated_at else "",
+                    "usages": visible_usages,
+                    "private_usage_count": private_usage_count,
                 }
             )
 
@@ -404,7 +483,10 @@ def search_media_library(
 def sync_article_media_usages(doc: ArticleDocument) -> None:
     """Aktualisiert die Verwendungsnachweise (`io_media_usages`) für einen Artikel."""
     asset_refs: list[tuple[str, str]] = []  # (asset_id, block_id)
+    media_refs: list[tuple[str, str]] = []  # (media_id, block_id)
     for blk in doc.blocks:
+        if not isinstance(blk, dict):
+            continue
         btype = blk.get("type")
         bid = str(blk.get("id") or "")
         if btype == "figure":
@@ -417,6 +499,10 @@ def sync_article_media_usages(doc: ArticleDocument) -> None:
                 aid = str(media.get("asset_id") or "").strip()
                 if aid:
                     asset_refs.append((aid, bid))
+        for key in ("shared_media_id", "source_media_id"):
+            mid = str(blk.get(key) or "").strip()
+            if mid:
+                media_refs.append((mid, bid))
 
     with get_db_session() as session:
         old_rows = session.scalars(
@@ -425,27 +511,57 @@ def sync_article_media_usages(doc: ArticleDocument) -> None:
         for r in old_rows:
             session.delete(r)
 
-        if not asset_refs:
+        if not asset_refs and not media_refs:
             return
 
-        aids = [aid for aid, _ in asset_refs]
-        ver_rows = session.scalars(
-            select(MediaVersionModel).where(MediaVersionModel.asset_id.in_(aids))
-        ).all()
-        ver_by_asset = {v.asset_id: v for v in ver_rows}
+        seen_pairs: set[tuple[str, str]] = set()
+        if asset_refs:
+            aids = [aid for aid, _ in asset_refs]
+            ver_rows = session.scalars(
+                select(MediaVersionModel).where(MediaVersionModel.asset_id.in_(aids))
+            ).all()
+            ver_by_asset = {v.asset_id: v for v in ver_rows}
 
-        for aid, bid in asset_refs:
-            v = ver_by_asset.get(aid)
-            if v is not None:
-                session.add(
-                    MediaUsageModel(
-                        media_id=v.media_id,
-                        media_version=v.version,
-                        asset_id=aid,
-                        article_id=doc.id,
-                        block_id=bid,
+            for aid, bid in asset_refs:
+                v = ver_by_asset.get(aid)
+                if v is not None and (v.media_id, bid) not in seen_pairs:
+                    seen_pairs.add((v.media_id, bid))
+                    session.add(
+                        MediaUsageModel(
+                            media_id=v.media_id,
+                            media_version=v.version,
+                            asset_id=aid,
+                            article_id=doc.id,
+                            block_id=bid,
+                        )
                     )
-                )
+
+        if media_refs:
+            mids = list({mid for mid, _ in media_refs})
+            latest_ver_by_mid: dict[str, MediaVersionModel] = {}
+            for vr in session.scalars(
+                select(MediaVersionModel)
+                .where(MediaVersionModel.media_id.in_(mids))
+                .order_by(desc(MediaVersionModel.version))
+            ).all():
+                if vr.media_id not in latest_ver_by_mid:
+                    latest_ver_by_mid[vr.media_id] = vr
+
+            for mid, bid in media_refs:
+                if (mid, bid) in seen_pairs:
+                    continue
+                v = latest_ver_by_mid.get(mid)
+                if v is not None:
+                    seen_pairs.add((mid, bid))
+                    session.add(
+                        MediaUsageModel(
+                            media_id=mid,
+                            media_version=v.version,
+                            asset_id=v.asset_id,
+                            article_id=doc.id,
+                            block_id=bid,
+                        )
+                    )
 
 
 def validate_article_media_for_channel(
@@ -592,7 +708,7 @@ def _build_block_preview_svg(block: dict[str, Any]) -> str:
 def _sanitize_shared_block(block: dict[str, Any]) -> dict[str, Any]:
     """Bereitet ein Block-Dict als unabhängige Vorlage ohne Artikel-Bindung auf."""
     clean = json.loads(json.dumps(block, ensure_ascii=False))
-    for k in ("id", "anchor_to", "share_in_media_library", "shared_media_id"):
+    for k in ("id", "anchor_to", "share_in_media_library", "shared_media_id", "source_media_id"):
         clean.pop(k, None)
     return clean
 
@@ -823,6 +939,8 @@ def clone_shared_block_for_insert(
         blk.pop("anchor_to", None)
         blk.pop("shared_media_id", None)
         blk["share_in_media_library"] = "no"
+        if ver is not None:
+            blk["source_media_id"] = ver.media_id
 
         assets_map: dict[str, str] = {}
 

@@ -154,6 +154,10 @@ class MarginAnchorBlockBase(BaseModel):
         default=None,
         description="ID des verknüpften Mediathek-Eintrags, falls dieser Block geteilt wird",
     )
+    source_media_id: Optional[str] = Field(
+        default=None,
+        description="ID des Mediathek-Eintrags, aus dem dieser Block als Kopie eingefügt wurde",
+    )
 
     @field_validator("full_position", mode="before")
     @classmethod

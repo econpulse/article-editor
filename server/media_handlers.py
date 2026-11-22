@@ -121,6 +121,16 @@ def register_media_handlers(
                     )
                 )
 
+            usage_parts = []
+            for u in it.get("usages") or []:
+                st_lbl = "Publiziert" if u.get("status") == "published" else (u.get("status") or "Entwurf")
+                dt_lbl = f" · {u['publication_date']}" if u.get("publication_date") else ""
+                usage_parts.append(f"{u.get('title') or 'Publikation'} ({st_lbl}{dt_lbl})")
+            priv_cnt = int(it.get("private_usage_count") or 0)
+            if priv_cnt > 0:
+                usage_parts.append(f"+{priv_cnt} weitere (privat)")
+            usage_line = "Verwendet in: " + ", ".join(usage_parts) if usage_parts else "Verwendet in: —"
+
             cards.append(
                 ui.div(
                     thumb_el,
@@ -133,6 +143,10 @@ def register_media_handlers(
                         ui.div(
                             f"Quelle: {it['source_text'] or '—'} · Stand: {it['data_as_of'] or '—'}",
                             style="font-size:11.5px;color:#5A687C;",
+                        ),
+                        ui.div(
+                            usage_line,
+                            style="font-size:11.5px;color:#002855;margin-top:2px;",
                         ),
                         style="flex:1;min-width:0;",
                     ),
@@ -150,7 +164,7 @@ def register_media_handlers(
             ui.modal(
                 ui.div(
                     ui.div(
-                        ui.input_text("media_search_query", "Suche", value=query, placeholder="Titel, Schlagwort, Quelle…"),
+                        ui.input_text("media_search_query", "Suche", value=query, placeholder="Titel, Schlagwort, Quelle, Publikation…"),
                         ui.input_select(
                             "media_filter_type",
                             "Typ",

@@ -45,6 +45,8 @@ def test_media_library_privacy_versioning_channel_and_revoke(monkeypatch) -> Non
 
     art_a = create_new_article(user=user_a)
     art_b = create_new_article(user=user_b)
+    art_a.metadata.title = f"Publikation-Alpha-{uuid.uuid4().hex[:6]}"
+    art_b.metadata.title = f"Publikation-Beta-{uuid.uuid4().hex[:6]}"
     try:
         # 1. A legt eine Grafik in seinem Artikel an -> zunächst privat
         svg_v1 = b'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="40"><rect width="100" height="40" fill="#002855"/></svg>'
@@ -137,6 +139,8 @@ def test_private_asset_binding_blocks_cross_article_overwrite_and_read() -> None
     user_b = f"autor.b.{uuid.uuid4().hex[:6]}@lukb.ch"
     art_a = create_new_article(user=user_a)
     art_b = create_new_article(user=user_b)
+    art_a.metadata.title = f"Publikation-Alpha-{uuid.uuid4().hex[:6]}"
+    art_b.metadata.title = f"Publikation-Beta-{uuid.uuid4().hex[:6]}"
     try:
         orig_svg = b'<svg xmlns="http://www.w3.org/2000/svg"><text>Private A</text></svg>'
         asset_a = save_asset(
@@ -190,6 +194,8 @@ def test_share_structured_blocks_directly_visible_and_forkable() -> None:
 
     art_a = create_new_article(user=user_a)
     art_b = create_new_article(user=user_b)
+    art_a.metadata.title = f"Publikation-Alpha-{uuid.uuid4().hex[:6]}"
+    art_b.metadata.title = f"Publikation-Beta-{uuid.uuid4().hex[:6]}"
     try:
         shared_title = f"Shared-KPI-{uuid.uuid4().hex[:6]}"
         kpi_blk = parse_block(
@@ -235,10 +241,23 @@ def test_share_structured_blocks_directly_visible_and_forkable() -> None:
         fork_blk["cards"][0]["value"] = "0.25 %"
         fork_blk["share_in_media_library"] = "external"
         art_b.blocks.append(fork_blk)
+        save_article(art_b, user=user_b)
         sync_b = sync_article_shared_media(art_b, user_id=user_b)
         assert len(sync_b) == 1
         media_id_b = sync_b[0]["media_id"]
         assert media_id_b != media_id_a
+
+        # Verwendungsnachweis zeigt Publikation Beta für das Original-Asset von User A, und ist nach Publikationstitel suchbar
+        by_pub = search_media_library(user_b, query=art_b.metadata.title)
+        by_pub_ids = {it["media_id"] for it in by_pub["items"]}
+        assert media_id_a in by_pub_ids
+        assert media_id_b in by_pub_ids
+        item_a_for_b = next(it for it in by_pub["items"] if it["media_id"] == media_id_a)
+        assert any(u["article_id"] == art_b.id and u["title"] == art_b.metadata.title for u in item_a_for_b["usages"])
+        # Privater Entwurf von User A wird für User B nicht geleakt
+        assert all(u["article_id"] != art_a.id for u in item_a_for_b["usages"])
+        assert item_a_for_b["private_usage_count"] >= 1
+        assert search_media_library(user_b, query=art_a.metadata.title)["total"] == 0
 
         # Original von User A bleibt unverändert
         orig_res = search_media_library(user_a, query=shared_title)

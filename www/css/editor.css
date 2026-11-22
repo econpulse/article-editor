@@ -656,13 +656,37 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 
 .author-row-item {
   display: grid;
-  grid-template-columns: 1fr 1.2fr auto;
+  grid-template-columns: auto 1fr 1.2fr auto;
   gap: 8px;
   align-items: center;
   background: var(--lukb-surface-alt);
   padding: 6px 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--lukb-border);
+}
+
+.author-drag-handle {
+  cursor: grab;
+  color: var(--lukb-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 4px 3px;
+  user-select: none;
+  border-radius: 3px;
+}
+
+.author-drag-handle:hover {
+  color: var(--lukb-navy);
+  background: #E2E8F0;
+}
+
+.author-drag-handle:active {
+  cursor: grabbing;
+}
+
+.author-row-item.sortable-ghost {
+  opacity: 0.45;
+  border-style: dashed;
 }
 
 /* ============================================================================
