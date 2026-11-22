@@ -1678,7 +1678,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         if val_txt:
                             p_val = cell.add_paragraph()
                             p_val.paragraph_format.space_before = Pt(0)
-                            p_val.paragraph_format.space_after = Pt(2)
+                            p_val.paragraph_format.space_after = Pt(5)
                             r_val = p_val.add_run(val_txt)
                             r_val.bold = True
                             r_val.font.size = Pt(13.0)

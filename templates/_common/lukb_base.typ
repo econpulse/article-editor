@@ -1010,60 +1010,60 @@
     )[
       #set par(justify: false, leading: 0.34em, spacing: 0.35em)
       #set text(hyphenate: false)
-      #if icon-path != "" or lbl-txt != "" [
-        #if icon-path != "" and lbl-txt != "" [
-          #grid(
-            columns: (auto, 1fr),
-            column-gutter: if is-margin { 5.5pt } else { 7pt },
-            align: (left + horizon, left + horizon),
-            box(
+      #let kpi-text-stack = if lbl-txt != "" or val-txt != "" [
+        #if lbl-txt != "" [
+          #text(
+            font: font-heading,
+            weight: "bold",
+            size: if is-margin { 7.3pt } else { 7.9pt },
+            fill: lukb-muted,
+          )[#lbl-txt]
+        ]
+        #if val-txt != "" [
+          #block(
+            above: if lbl-txt != "" { if is-margin { 3pt } else { 4pt } } else { 0pt },
+            below: 0pt,
+          )[
+            #set par(leading: 0.25em, justify: false)
+            #text(
+              font: font-heading,
+              weight: "medium",
+              size: if is-margin { 11.2pt } else { 13.2pt },
+              fill: lukb-navy,
+            )[#val-txt]
+          ]
+        ]
+      ]
+      #if icon-path != "" and (lbl-txt != "" or val-txt != "") [
+        #grid(
+          columns: (auto, 1fr),
+          column-gutter: if is-margin { 5.5pt } else { 7.5pt },
+          align: (left + top, left + top),
+          pad(top: if is-margin { 1pt } else { 1.5pt })[
+            #box(
               width: icon-box-sz,
               height: icon-box-sz,
               fill: badge-col,
               radius: 3.5pt,
               align(center + horizon)[#image(icon-path, width: icon-img-sz, height: icon-img-sz)]
-            ),
-            text(
-              font: font-heading,
-              weight: "medium",
-              size: if is-margin { 7.3pt } else { 7.9pt },
-              fill: lukb-muted,
-            )[#lbl-txt]
-          )
-        ] else if icon-path != "" [
-          #box(
-            width: icon-box-sz,
-            height: icon-box-sz,
-            fill: badge-col,
-            radius: 3.5pt,
-            align(center + horizon)[#image(icon-path, width: icon-img-sz, height: icon-img-sz)]
-          )
-        ] else [
-          #text(
-            font: font-heading,
-            weight: "medium",
-            size: if is-margin { 7.3pt } else { 7.9pt },
-            fill: lukb-muted,
-          )[#lbl-txt]
-        ]
-      ]
-      #if val-txt != "" [
-        #block(
-          above: if icon-path != "" or lbl-txt != "" { if is-margin { 4pt } else { 5.5pt } } else { 0pt },
-          below: 0pt,
-        )[
-          #set par(leading: 0.28em, justify: false)
-          #text(
-            font: font-heading,
-            weight: "medium",
-            size: if is-margin { 11.2pt } else { 13.2pt },
-            fill: lukb-navy,
-          )[#val-txt]
-        ]
+            )
+          ],
+          kpi-text-stack,
+        )
+      ] else if icon-path != "" [
+        #box(
+          width: icon-box-sz,
+          height: icon-box-sz,
+          fill: badge-col,
+          radius: 3.5pt,
+          align(center + horizon)[#image(icon-path, width: icon-img-sz, height: icon-img-sz)]
+        )
+      ] else [
+        #kpi-text-stack
       ]
       #if sub-card-txt != "" [
         #block(
-          above: if is-margin { 2.5pt } else { 3.5pt },
+          above: if icon-path != "" or lbl-txt != "" or val-txt != "" { if is-margin { 5pt } else { 6.5pt } } else { 0pt },
           below: 0pt,
         )[
           #set par(leading: 0.34em, justify: false)

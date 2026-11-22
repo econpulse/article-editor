@@ -738,14 +738,14 @@
 
     .kpi-card-head {
       display: flex;
-      align-items: center;
-      gap: 9px;
-      margin-bottom: 7px;
+      align-items: flex-start;
+      gap: 10px;
     }
 
     .kpi-card-icon-badge {
       width: 30px;
       height: 30px;
+      margin-top: 3px;
       border-radius: 5px;
       background: var(--kpi-badge, #DCE6F2);
       display: inline-flex;
@@ -760,12 +760,19 @@
       height: 18px;
     }
 
+    .kpi-card-main {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+
     .kpi-card-label {
       font-family: var(--font-heading);
-      font-weight: 500;
+      font-weight: 700;
       font-size: 0.78rem;
       color: var(--lukb-muted);
-      line-height: 1.25;
+      line-height: 1.2;
     }
 
     .kpi-card-value {
@@ -775,10 +782,17 @@
       color: var(--lukb-navy);
       line-height: 1.18;
       font-variant-numeric: tabular-nums;
+      margin-top: 5px;
+      white-space: normal;
+      overflow-wrap: break-word;
+    }
+
+    .kpi-card-value:first-child {
+      margin-top: 0;
     }
 
     .kpi-card-subtext {
-      margin-top: 4px;
+      margin-top: 9px;
       font-size: 0.80rem;
       color: var(--lukb-muted);
       line-height: 1.35;
@@ -1118,18 +1132,22 @@
           {% for card in cards %}
           {% set pal = card.palette or {} %}
           <div class="kpi-card kpi-style-{{ style_preset }}" style="--kpi-accent: {{ pal.accent or '#002855' }}; --kpi-tint: {{ pal.tint or '#EEF3F8' }}; --kpi-badge: {{ pal.badge or '#DCE6F2' }}; --kpi-border: {{ pal.border or '#C2D1E2' }};">
-            {% if card.icon_svg or card.label %}
+            {% if card.icon_svg or card.label or card.value %}
             <div class="kpi-card-head">
               {% if card.icon_svg %}
               <span class="kpi-card-icon-badge" aria-hidden="true">{{ card.icon_svg | safe }}</span>
               {% endif %}
-              {% if card.label %}
-              <span class="kpi-card-label">{{ card.label }}</span>
+              {% if card.label or card.value %}
+              <div class="kpi-card-main">
+                {% if card.label %}
+                <span class="kpi-card-label">{{ card.label }}</span>
+                {% endif %}
+                {% if card.value %}
+                <div class="kpi-card-value">{{ card.value }}</div>
+                {% endif %}
+              </div>
               {% endif %}
             </div>
-            {% endif %}
-            {% if card.value %}
-            <div class="kpi-card-value">{{ card.value }}</div>
             {% endif %}
             {% if card.subtext %}
             <div class="kpi-card-subtext">{{ card.subtext }}</div>
