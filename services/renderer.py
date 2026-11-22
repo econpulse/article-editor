@@ -337,7 +337,11 @@ def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
     return payload
 
 
-def _fetch_doc_asset_records(blocks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+def _fetch_doc_asset_records(
+    blocks: list[dict[str, Any]],
+    *,
+    article_id: str | None = None,
+) -> dict[str, dict[str, Any]]:
     """Lädt alle in `figure`- und `media_text`-Blöcken referenzierten Asset-Datensätze gebündelt aus der DB."""
     figure_aids: set[str] = set()
     for blk in blocks:
@@ -347,7 +351,7 @@ def _fetch_doc_asset_records(blocks: list[dict[str, Any]]) -> dict[str, dict[str
             media = blk.get("media")
             if isinstance(media, dict) and media.get("type") == "figure" and media.get("asset_id"):
                 figure_aids.add(media["asset_id"])
-    return get_assets_by_ids(figure_aids) if figure_aids else {}
+    return get_assets_by_ids(figure_aids, article_id=article_id) if figure_aids else {}
 
 
 def render_block_chart_svg(
@@ -393,7 +397,7 @@ def _prepare_typst_payload(
     payload = _prepare_common_article_payload(doc)
     payload["interactive_links"] = bool(interactive_links)
     raw_blocks = payload.get("blocks", [])
-    asset_cache = _fetch_doc_asset_records(raw_blocks)
+    asset_cache = _fetch_doc_asset_records(raw_blocks, article_id=doc.id)
 
     # Gliederungshierarchie für Acrobat / PDF-Bookmarks (H1, H2, H3) berechnen:
     # Falls keine H1 im Dokument existiert, wird H2 zur höchsten Ebene (Level 1 in der PDF-Outline).
@@ -799,7 +803,7 @@ def render_web_html(doc: ArticleDocument) -> str:
     payload = _prepare_common_article_payload(doc)
     raw_blocks = payload.get("blocks", [])
     payload["auto_footnotes"] = _transform_web_inline_footnotes(raw_blocks)
-    asset_records = _fetch_doc_asset_records(raw_blocks)
+    asset_records = _fetch_doc_asset_records(raw_blocks, article_id=doc.id)
     asset_uri_cache: dict[str, str] = {}
     for blk in raw_blocks:
         if blk.get("type") in ("richtext", "callout"):
@@ -1219,7 +1223,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
     # 5. Inhaltsblöcke rendern
     common_payload = _prepare_common_article_payload(doc_model)
     raw_common_blocks = common_payload.get("blocks", [])
-    docx_asset_records = _fetch_doc_asset_records(raw_common_blocks)
+    docx_asset_records = _fetch_doc_asset_records(raw_common_blocks, article_id=doc_model.id)
     grouped_blocks = _group_blocks_into_render_items(raw_common_blocks)
     docx_inline_footnotes: list[dict[str, str]] = []
     docx_has_footnotes_block = False

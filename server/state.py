@@ -10,7 +10,7 @@ import logging
 from typing import Any
 from shiny import Inputs, Session, reactive, ui
 
-from config import is_technical_session_user, normalize_user_id
+from config import LOCAL_DEV_USER, is_connect_environment, is_technical_session_user, normalize_user_id
 from database.permissions import check_article_permission
 from database.repository import (
     create_new_article,
@@ -72,10 +72,12 @@ class SessionState:
 
     @property
     def current_user(self) -> str:
-        """Gibt den auf Posit Connect authentifizierten Benutzer oder einen technischen Sitzungsnamen zurück."""
+        """Gibt den auf Posit Connect authentifizierten Benutzer oder im lokalen Dev-Modus `LOCAL_DEV_USER` zurück."""
         user_name = getattr(self.session, "user", None)
         if user_name:
             return str(user_name)
+        if not is_connect_environment():
+            return LOCAL_DEV_USER
         return f"Analyst ({self.session_id[:4]})"
 
     @property

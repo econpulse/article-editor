@@ -451,9 +451,14 @@ def list_review_assignments(user_id: str | None) -> list[dict[str, Any]]:
                 ArticleModel.id,
                 ArticleModel.title,
                 ArticleModel.status,
+                ArticleModel.template_id,
                 ArticleModel.version,
                 ArticleModel.updated_at,
                 ArticleModel.updated_by,
+                ArticleModel.submitted_revision_id,
+                ArticleModel.submitted_by,
+                ArticleModel.approved_revision_id,
+                ArticleModel.approved_by,
                 ArticlePermissionModel.role,
             )
             .join(ArticlePermissionModel, ArticlePermissionModel.article_id == ArticleModel.id)
@@ -470,10 +475,15 @@ def list_review_assignments(user_id: str | None) -> list[dict[str, Any]]:
                 "id": r.id,
                 "title": r.title,
                 "status": r.status,
+                "template_id": r.template_id,
                 "version": int(r.version or 1),
                 "article_role": r.role,
                 "updated_at": r.updated_at.strftime("%d.%m.%Y %H:%M") if r.updated_at else "",
                 "updated_by": r.updated_by or "",
+                "submitted_revision_id": r.submitted_revision_id,
+                "submitted_by": r.submitted_by or "",
+                "approved_revision_id": r.approved_revision_id,
+                "approved_by": r.approved_by or "",
             }
             for r in rows
         ]

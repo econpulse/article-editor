@@ -199,3 +199,27 @@ def test_orphan_articles_global_roles_review_assignments_and_audit_log(monkeypat
         )
     finally:
         delete_article(orphan_id, force=True)
+
+
+def test_local_dev_session_user_fallback_without_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    import server.state as state_mod
+
+    init_db_and_seed()
+    sess = _DummySession(f"sess_local_{uuid.uuid4().hex[:6]}", user=None)
+    sess.on_ended = lambda _cb: None
+
+    # 1. Ohne Connect-Umgebung: Session erhält LOCAL_DEV_USER und ist authentifiziert + arbeitsfähig
+    monkeypatch.setattr(state_mod, "is_connect_environment", lambda: False)
+    st_local = state_mod.SessionState(sess, None)
+    assert st_local.current_user == config.LOCAL_DEV_USER
+    assert st_local.is_authenticated is True
+    assert len(list_articles(user_id=st_local.current_user_id)) > 0
+
+    # 2. Mit Connect-Umgebung ohne session.user: technischer Sitzungsname ohne Rechte
+    monkeypatch.setattr(state_mod, "is_connect_environment", lambda: True)
+    st_connect = state_mod.SessionState(sess, None)
+    assert st_connect.current_user.startswith("Analyst (")
+    assert st_connect.is_authenticated is False
+    assert list_articles(user_id=st_connect.current_user_id) == []
+
+    ACTIVE_PEERS.pop(sess.id, None)

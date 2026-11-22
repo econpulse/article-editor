@@ -251,3 +251,72 @@ class PublicationJobModel(Base):
         DateTime(timezone=True), default=_utc_now, onupdate=_utc_now, nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class MediaEntryModel(Base):
+    """
+    Mediathek-Eintrag (Etappe 4): Metadaten, Herkunft, Freigabe & Nutzungskanal.
+    Die eigentlichen Binärdaten liegen unveränderlich in `io_assets` (via `io_media_versions`).
+    """
+
+    __tablename__ = "io_media_entries"
+
+    id: Mapped[str] = mapped_column(Unicode(64), primary_key=True)
+    title: Mapped[str] = mapped_column(Unicode(300), nullable=False)
+    media_type: Mapped[str] = mapped_column(Unicode(32), nullable=False, default="image")  # 'image' | 'chart'
+    tags_json: Mapped[str] = mapped_column(UnicodeText, nullable=False, default="[]")
+    source_text: Mapped[str] = mapped_column(Unicode(300), nullable=False, default="")
+    data_as_of: Mapped[str] = mapped_column(Unicode(64), nullable=False, default="")
+    origin_article_id: Mapped[str | None] = mapped_column(Unicode(64), nullable=True, index=True)
+    approval_status: Mapped[str] = mapped_column(
+        Unicode(32), nullable=False, default="private", index=True
+    )  # 'private' | 'pending' | 'approved' | 'revoked'
+    usage_channel: Mapped[str] = mapped_column(
+        Unicode(32), nullable=False, default="internal", index=True
+    )  # 'internal' | 'external'
+    requested_by: Mapped[str | None] = mapped_column(Unicode(150), nullable=True)
+    approved_by: Mapped[str | None] = mapped_column(Unicode(150), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utc_now, onupdate=_utc_now, nullable=False
+    )
+
+
+class MediaVersionModel(Base):
+    """Unveränderliche Dateiversion eines Mediathek-Eintrags, verknüpft mit `io_assets`."""
+
+    __tablename__ = "io_media_versions"
+    __table_args__ = (
+        UniqueConstraint("media_id", "version", name="uq_io_media_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    media_id: Mapped[str] = mapped_column(
+        Unicode(64), ForeignKey("io_media_entries.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    asset_id: Mapped[str] = mapped_column(Unicode(64), nullable=False, index=True)
+    thumbnail_data_uri: Mapped[str | None] = mapped_column(UnicodeText, nullable=True)
+    change_note: Mapped[str] = mapped_column(Unicode(255), nullable=False, default="")
+    created_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)
+
+
+class MediaUsageModel(Base):
+    """Nachweis, welcher Artikel und Block welche Mediathek-Version referenziert."""
+
+    __tablename__ = "io_media_usages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    media_id: Mapped[str] = mapped_column(
+        Unicode(64), ForeignKey("io_media_entries.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    media_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    asset_id: Mapped[str] = mapped_column(Unicode(64), nullable=False, index=True)
+    article_id: Mapped[str] = mapped_column(
+        Unicode(64), ForeignKey("io_articles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    block_id: Mapped[str] = mapped_column(Unicode(64), nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utc_now, nullable=False)

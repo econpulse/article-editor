@@ -225,6 +225,11 @@ def normalize_user_id(username: str | None) -> str:
     return (username or "").strip().lower()
 
 
+LOCAL_DEV_USER = normalize_user_id(
+    _clean_env_val(os.getenv("LOCAL_DEV_USER", ""))
+) or "local.dev@lukb.ch"
+
+
 def is_technical_session_user(username: str | None) -> bool:
     """
     Erkennt technische Sitzungsnamen oder leere Identitäten.

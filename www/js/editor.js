@@ -1424,18 +1424,50 @@
       summaryRow.style.cssText =
         "display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:#F4F7FA;border:1px dashed #D6DEE8;border-radius:6px;font-size:12.5px;color:#002855;";
       const summaryText = document.createElement("span");
-      const titleHint = blk.title ? " — " + blk.title : "";
-      summaryText.textContent = getBlockTypeLabel(blk.type) + titleHint;
+      const updateSummaryText = function () {
+        const titleHint = blk.title ? " — " + blk.title : "";
+        summaryText.textContent = getBlockTypeLabel(blk.type) + titleHint;
+      };
+      updateSummaryText();
       const expandBtn = document.createElement("button");
       expandBtn.type = "button";
       expandBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
       expandBtn.textContent = "Editor öffnen ▾";
+
+      function collapseLazyEditor() {
+        if (!expanded) return;
+        expanded = false;
+        updateSummaryText();
+        body.innerHTML = "";
+        body.appendChild(summaryRow);
+      }
+
       function expandLazyEditor() {
         if (expanded) return;
         expanded = true;
         body.innerHTML = "";
-        bodyBuilder(body, blk);
+        const toolbar = document.createElement("div");
+        toolbar.style.cssText =
+          "display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #E2E8F0;";
+        const label = document.createElement("span");
+        label.style.cssText = "font-size:12px;color:#5A687C;";
+        label.textContent = getBlockTypeLabel(blk.type) + (blk.title ? " — " + blk.title : "");
+        const collapseBtn = document.createElement("button");
+        collapseBtn.type = "button";
+        collapseBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+        collapseBtn.textContent = "Editor einklappen ▴";
+        collapseBtn.addEventListener("click", function (ev) {
+          ev.stopPropagation();
+          collapseLazyEditor();
+        });
+        toolbar.appendChild(label);
+        toolbar.appendChild(collapseBtn);
+        const editorHost = document.createElement("div");
+        body.appendChild(toolbar);
+        body.appendChild(editorHost);
+        bodyBuilder(editorHost, blk);
       }
+
       expandBtn.addEventListener("click", function (ev) {
         ev.stopPropagation();
         expandLazyEditor();
@@ -1444,6 +1476,7 @@
       summaryRow.appendChild(expandBtn);
       body.appendChild(summaryRow);
       card.lukbExpandLazyEditor = expandLazyEditor;
+      card.lukbCollapseLazyEditor = collapseLazyEditor;
     } else if (bodyBuilder) {
       bodyBuilder(body, blk);
     }
@@ -2762,6 +2795,22 @@
     if (!state.autoPreview) {
       E.sendShinyEvent("lukb_auto_preview_toggle", { enabled: false, refresh_now: false });
     }
+
+    // Mediathek-Asset (konkrete Version) als Figure-Block in den aktuellen Artikel einfügen
+    window.Shiny.addCustomMessageHandler("lukb_insert_media_figure", function (msg) {
+      if (!state.article || !msg || !msg.asset_id) return;
+      if (msg.data_uri) {
+        state.assetCache[msg.asset_id] = msg.data_uri;
+      }
+      const newBlk = createDefaultBlock("figure");
+      newBlk.asset_id = msg.asset_id;
+      if (msg.title) newBlk.title = msg.title;
+      if (msg.source) newBlk.source = msg.source;
+      state.article.blocks = state.article.blocks || [];
+      state.article.blocks.push(newBlk);
+      renderBlocksCanvas();
+      markDirty();
+    });
   }
 
   function initEditorApp() {

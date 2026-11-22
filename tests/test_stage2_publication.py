@@ -112,6 +112,259 @@ def test_four_eyes_and_failed_then_retry_keeps_live_snapshot(monkeypatch: pytest
         delete_article(doc.id, force=True)
 
 
+def test_confirm_unpublish_handler_regression(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    import server.workflow_handlers as wf_handlers
+
+    init_db_and_seed()
+    publisher = f"pub.{uuid.uuid4().hex[:6]}@lukb.ch"
+    monkeypatch.setattr(config, "PORTAL_PUBLISHERS", [publisher])
+
+    doc = create_new_article(template_id="market_flash", user=publisher)
+    doc.status = "published"
+    try:
+        effects: dict[str, object] = {}
+
+        class _FakeReactive:
+            @staticmethod
+            def effect(fn):
+                effects[fn.__name__] = fn
+                return fn
+
+            @staticmethod
+            def event(*args, **kwargs):
+                return lambda fn: fn
+
+        class _FakeInput:
+            lukb_submit_review = object()
+            lukb_publish_portal = object()
+            lukb_unpublish_portal = object()
+            btn_confirm_unpublish = object()
+
+        class _FakeVar:
+            def __init__(self, val):
+                self._val = val
+
+            def get(self):
+                return self._val
+
+            def set(self, val):
+                self._val = val
+
+        notifications: list[tuple[str, str]] = []
+        modals_removed = []
+        unpublish_calls: list[tuple[str, str, str]] = []
+
+        class _FakeState:
+            session_id = "sess_test"
+            current_user = publisher
+            current_user_id = publisher
+            current_doc = _FakeVar(doc)
+
+            def can_access_article(self, article_id: str, action: str, allow_admin_override: bool = False) -> bool:
+                return article_id == doc.id and action in ("read", "edit")
+
+            async def send_article_list(self, *_args, **_kwargs) -> None:
+                return None
+
+        monkeypatch.setattr(wf_handlers, "reactive", _FakeReactive)
+        monkeypatch.setattr(wf_handlers, "can_publish", lambda u: u == publisher)
+        monkeypatch.setattr(wf_handlers.ui, "modal_remove", lambda: modals_removed.append(True))
+        monkeypatch.setattr(
+            wf_handlers.ui,
+            "notification_show",
+            lambda msg, type="message", **_kw: notifications.append((type, msg)),
+        )
+        monkeypatch.setattr(
+            wf_handlers,
+            "execute_unpublish_job",
+            lambda aid, uid, new_status="draft": (
+                unpublish_calls.append((aid, uid, new_status))
+                or {"success": True, "deployed": False, "connect_deploy": {"deployed": False}}
+            ),
+        )
+        monkeypatch.setattr(wf_handlers, "get_published_sync_status", lambda _aid: {"is_published": False})
+        async def _noop_async(*_a, **_kw):
+            return None
+
+        monkeypatch.setattr(wf_handlers, "broadcast_article_list_to_all", _noop_async)
+        monkeypatch.setattr(wf_handlers, "broadcast_article_sync", _noop_async)
+
+        wf_handlers.register_workflow_handlers(_FakeInput(), SimpleNamespace(), SimpleNamespace(), _FakeState())
+        confirm_fn = effects["_on_confirm_unpublish"]
+        asyncio.run(confirm_fn())
+
+        assert len(modals_removed) == 1
+        assert unpublish_calls == [(doc.id, publisher, "draft")]
+        assert doc.status == "draft"
+        assert not any(t == "error" for t, _ in notifications)
+    finally:
+        delete_article(doc.id, force=True)
+
+
+def test_render_exception_and_unpublish_retry_fail_mark_job_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from database.models import PublicationJobModel
+
+    init_db_and_seed()
+    user = f"pub.{uuid.uuid4().hex[:6]}@lukb.ch"
+    monkeypatch.setattr(config, "FOUR_EYES_TEMPLATES", [])
+    monkeypatch.setattr(pub_svc, "is_connect_configured", lambda: True)
+
+    doc = create_new_article(template_id="market_flash", user=user)
+    try:
+        # 1. Renderer wirft Exception -> Auftrag darf nicht auf 'rendering' hängen bleiben!
+        monkeypatch.setattr(
+            pub_svc,
+            "render_publication_package",
+            lambda _doc: (_ for _ in ()).throw(RuntimeError("Typst crash")),
+        )
+        fail_render = pub_svc.execute_publish_job(doc.id, user)
+        assert fail_render["success"] is False
+        assert fail_render["state"] == "failed"
+        job1_id = fail_render["job_id"]
+        with get_db_session() as session:
+            j1 = session.get(PublicationJobModel, job1_id)
+            assert j1 is not None and j1.status == "failed"
+            assert "Typst crash" in (j1.error_message or "")
+
+        # 2. Kanal ist nicht blockiert; Retry gelingt nach Renderer-Fix
+        from services.renderer import render_publication_package as real_render
+
+        monkeypatch.setattr(pub_svc, "render_publication_package", real_render)
+        monkeypatch.setattr(
+            pub_svc,
+            "deploy_bundle_to_connect",
+            lambda _bp: {"success": True, "deployed": True, "state": "succeeded", "bundle_id": "b_ok", "task_id": "t_ok"},
+        )
+        ok_retry = pub_svc.retry_publication_job(job1_id, user)
+        assert ok_retry["success"] is True
+
+        # 3. Rückzug schlägt fehl, und Retry schlägt erneut fehl -> Status muss 'failed' sein, nicht 'pending'!
+        monkeypatch.setattr(
+            pub_svc,
+            "deploy_bundle_to_connect",
+            lambda _bp: {"success": False, "deployed": False, "state": "failed", "bundle_id": "b_u1", "task_id": "t_u1", "error": "Connect down"},
+        )
+        unpub_fail = pub_svc.execute_unpublish_job(doc.id, user)
+        assert unpub_fail["success"] is False
+        unpub_job_id = unpub_fail["job_id"]
+
+        unpub_retry_fail = pub_svc.retry_publication_job(unpub_job_id, user)
+        assert unpub_retry_fail["success"] is False
+        assert unpub_retry_fail["state"] == "failed"
+        with get_db_session() as session:
+            ju = session.get(PublicationJobModel, unpub_job_id)
+            assert ju is not None and ju.status == "failed"
+    finally:
+        delete_article(doc.id, force=True)
+
+
+def test_review_assignments_view_and_approve_for_reviewer_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    import server.admin_handlers as admin_handlers
+    from database.models import ArticleModel
+    from database.permissions import grant_article_permission, list_review_assignments
+
+    init_db_and_seed()
+    author = f"autor.{uuid.uuid4().hex[:6]}@lukb.ch"
+    reviewer = f"reviewer.{uuid.uuid4().hex[:6]}@lukb.ch"
+    monkeypatch.setattr(config, "FOUR_EYES_TEMPLATES", ["investment_focus"])
+
+    doc = create_new_article(template_id="investment_focus", user=author)
+    try:
+        # Nur reine 'reviewer'-Rolle (ohne 'edit')
+        grant_res = grant_article_permission(doc.id, reviewer, "reviewer", author)
+        assert grant_res["success"] is True
+
+        sub = pub_svc.submit_article_for_review(doc.id, author)
+        assert sub["success"] is True
+        rev_id = sub["revision_id"]
+
+        assignments = list_review_assignments(reviewer)
+        mine = [a for a in assignments if a["id"] == doc.id]
+        assert len(mine) == 1
+        assert mine[0]["submitted_revision_id"] == rev_id
+
+        effects: dict[str, object] = {}
+
+        class _FakeReactive:
+            @staticmethod
+            def effect(fn):
+                effects[fn.__name__] = fn
+                return fn
+
+            @staticmethod
+            def event(*args, **kwargs):
+                return lambda fn: fn
+
+        class _FakeInput:
+            def __init__(self):
+                self._view_payload = {"article_id": doc.id, "revision_id": rev_id}
+                self._approve_payload = {"article_id": doc.id, "revision_id": rev_id}
+
+            def __getattr__(self, name: str):
+                if name == "lukb_view_review_revision":
+                    return lambda: self._view_payload
+                if name == "lukb_approve_review_revision":
+                    return lambda: self._approve_payload
+                return lambda: None
+
+        shown_modals: list[object] = []
+        notifications: list[tuple[str, str]] = []
+
+        class _FakeState:
+            session_id = "sess_rev"
+            is_authenticated = True
+            current_user = reviewer
+            current_user_id = reviewer
+
+            def can_access_article(self, article_id: str, action: str, allow_admin_override: bool = False) -> bool:
+                from database.permissions import check_article_permission
+
+                return check_article_permission(article_id, reviewer, action, allow_admin_override=allow_admin_override)
+
+        monkeypatch.setattr(admin_handlers, "reactive", _FakeReactive)
+        monkeypatch.setattr(admin_handlers.ui, "modal_show", lambda m: shown_modals.append(m))
+        monkeypatch.setattr(
+            admin_handlers.ui,
+            "notification_show",
+            lambda msg, type="message", **_kw: notifications.append((type, msg)),
+        )
+
+        async def _noop_async(*_a, **_kw):
+            return None
+
+        monkeypatch.setattr(admin_handlers, "broadcast_article_list_to_all", _noop_async)
+
+        admin_handlers.register_admin_handlers(_FakeInput(), SimpleNamespace(), SimpleNamespace(), _FakeState())
+
+        # 1. Prüfaufträge öffnen -> enthält "Revision ansehen" und "Diese Revision freigeben"
+        asyncio.run(effects["_on_open_review_assignments"]())
+        modal_html = str(shown_modals[-1])
+        assert "Revision ansehen" in modal_html
+        assert "Diese Revision freigeben" in modal_html
+
+        # 2. Revision ansehen als reiner Reviewer (ohne edit-Recht)
+        asyncio.run(effects["_on_view_review_revision"]())
+        view_html = str(shown_modals[-1])
+        assert f"Rev #{rev_id}" in view_html
+
+        # 3. Revision direkt freigeben als reiner Reviewer
+        asyncio.run(effects["_on_approve_review_revision"]())
+        assert any(t == "message" and f"Revision #{rev_id}" in msg for t, msg in notifications)
+        with get_db_session() as session:
+            art = session.get(ArticleModel, doc.id)
+            assert art is not None
+            assert art.approved_revision_id == rev_id
+            assert art.approved_by == reviewer
+    finally:
+        delete_article(doc.id, force=True)
+
+
 def test_unknown_connect_task_single_channel_lock_poll_and_unpublish_without_local_dir(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -172,5 +425,258 @@ def test_unknown_connect_task_single_channel_lock_poll_and_unpublish_without_loc
         # Das frische Bundle enthält den zurückgezogenen Artikel nicht mehr
         assert len(captured_bundles) == 1
         assert not any(doc.id in name for name in captured_bundles[0])
+    finally:
+        delete_article(doc.id, force=True)
+
+
+def test_confirm_unpublish_handler_regression(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    import server.workflow_handlers as wf_handlers
+
+    init_db_and_seed()
+    publisher = f"pub.{uuid.uuid4().hex[:6]}@lukb.ch"
+    monkeypatch.setattr(config, "PORTAL_PUBLISHERS", [publisher])
+
+    doc = create_new_article(template_id="market_flash", user=publisher)
+    doc.status = "published"
+    try:
+        effects: dict[str, object] = {}
+
+        class _FakeReactive:
+            @staticmethod
+            def effect(fn):
+                effects[fn.__name__] = fn
+                return fn
+
+            @staticmethod
+            def event(*args, **kwargs):
+                return lambda fn: fn
+
+        class _FakeInput:
+            lukb_submit_review = object()
+            lukb_publish_portal = object()
+            lukb_unpublish_portal = object()
+            btn_confirm_unpublish = object()
+
+        class _FakeVar:
+            def __init__(self, val):
+                self._val = val
+
+            def get(self):
+                return self._val
+
+            def set(self, val):
+                self._val = val
+
+        notifications: list[tuple[str, str]] = []
+        modals_removed = []
+        unpublish_calls: list[tuple[str, str, str]] = []
+
+        class _FakeState:
+            session_id = "sess_test"
+            current_user = publisher
+            current_user_id = publisher
+            current_doc = _FakeVar(doc)
+
+            def can_access_article(self, article_id: str, action: str, allow_admin_override: bool = False) -> bool:
+                return article_id == doc.id and action in ("read", "edit")
+
+            async def send_article_list(self, *_args, **_kwargs) -> None:
+                return None
+
+        monkeypatch.setattr(wf_handlers, "reactive", _FakeReactive)
+        monkeypatch.setattr(wf_handlers, "can_publish", lambda u: u == publisher)
+        monkeypatch.setattr(wf_handlers.ui, "modal_remove", lambda: modals_removed.append(True))
+        monkeypatch.setattr(
+            wf_handlers.ui,
+            "notification_show",
+            lambda msg, type="message", **_kw: notifications.append((type, msg)),
+        )
+        monkeypatch.setattr(
+            wf_handlers,
+            "execute_unpublish_job",
+            lambda aid, uid, new_status="draft": (
+                unpublish_calls.append((aid, uid, new_status))
+                or {"success": True, "deployed": False, "connect_deploy": {"deployed": False}}
+            ),
+        )
+        monkeypatch.setattr(wf_handlers, "get_published_sync_status", lambda _aid: {"is_published": False})
+        async def _noop_async(*_a, **_kw):
+            return None
+
+        monkeypatch.setattr(wf_handlers, "broadcast_article_list_to_all", _noop_async)
+        monkeypatch.setattr(wf_handlers, "broadcast_article_sync", _noop_async)
+
+        wf_handlers.register_workflow_handlers(_FakeInput(), SimpleNamespace(), SimpleNamespace(), _FakeState())
+        confirm_fn = effects["_on_confirm_unpublish"]
+        asyncio.run(confirm_fn())
+
+        assert len(modals_removed) == 1
+        assert unpublish_calls == [(doc.id, publisher, "draft")]
+        assert doc.status == "draft"
+        assert not any(t == "error" for t, _ in notifications)
+    finally:
+        delete_article(doc.id, force=True)
+
+
+def test_render_exception_and_unpublish_retry_fail_mark_job_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from database.models import PublicationJobModel
+
+    init_db_and_seed()
+    user = f"pub.{uuid.uuid4().hex[:6]}@lukb.ch"
+    monkeypatch.setattr(config, "FOUR_EYES_TEMPLATES", [])
+    monkeypatch.setattr(pub_svc, "is_connect_configured", lambda: True)
+
+    doc = create_new_article(template_id="market_flash", user=user)
+    try:
+        # 1. Renderer wirft Exception -> Auftrag darf nicht auf 'rendering' hängen bleiben!
+        monkeypatch.setattr(
+            pub_svc,
+            "render_publication_package",
+            lambda _doc: (_ for _ in ()).throw(RuntimeError("Typst crash")),
+        )
+        fail_render = pub_svc.execute_publish_job(doc.id, user)
+        assert fail_render["success"] is False
+        assert fail_render["state"] == "failed"
+        job1_id = fail_render["job_id"]
+        with get_db_session() as session:
+            j1 = session.get(PublicationJobModel, job1_id)
+            assert j1 is not None and j1.status == "failed"
+            assert "Typst crash" in (j1.error_message or "")
+
+        # 2. Kanal ist nicht blockiert; Retry gelingt nach Renderer-Fix
+        from services.renderer import render_publication_package as real_render
+
+        monkeypatch.setattr(pub_svc, "render_publication_package", real_render)
+        monkeypatch.setattr(
+            pub_svc,
+            "deploy_bundle_to_connect",
+            lambda _bp: {"success": True, "deployed": True, "state": "succeeded", "bundle_id": "b_ok", "task_id": "t_ok"},
+        )
+        ok_retry = pub_svc.retry_publication_job(job1_id, user)
+        assert ok_retry["success"] is True
+
+        # 3. Rückzug schlägt fehl, und Retry schlägt erneut fehl -> Status muss 'failed' sein, nicht 'pending'!
+        monkeypatch.setattr(
+            pub_svc,
+            "deploy_bundle_to_connect",
+            lambda _bp: {"success": False, "deployed": False, "state": "failed", "bundle_id": "b_u1", "task_id": "t_u1", "error": "Connect down"},
+        )
+        unpub_fail = pub_svc.execute_unpublish_job(doc.id, user)
+        assert unpub_fail["success"] is False
+        unpub_job_id = unpub_fail["job_id"]
+
+        unpub_retry_fail = pub_svc.retry_publication_job(unpub_job_id, user)
+        assert unpub_retry_fail["success"] is False
+        assert unpub_retry_fail["state"] == "failed"
+        with get_db_session() as session:
+            ju = session.get(PublicationJobModel, unpub_job_id)
+            assert ju is not None and ju.status == "failed"
+    finally:
+        delete_article(doc.id, force=True)
+
+
+def test_review_assignments_view_and_approve_for_reviewer_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    from types import SimpleNamespace
+
+    import server.admin_handlers as admin_handlers
+    from database.models import ArticleModel
+    from database.permissions import grant_article_permission, list_review_assignments
+
+    init_db_and_seed()
+    author = f"autor.{uuid.uuid4().hex[:6]}@lukb.ch"
+    reviewer = f"reviewer.{uuid.uuid4().hex[:6]}@lukb.ch"
+    monkeypatch.setattr(config, "FOUR_EYES_TEMPLATES", ["investment_focus"])
+
+    doc = create_new_article(template_id="investment_focus", user=author)
+    try:
+        # Nur reine 'reviewer'-Rolle (ohne 'edit')
+        grant_res = grant_article_permission(doc.id, reviewer, "reviewer", author)
+        assert grant_res["success"] is True
+
+        sub = pub_svc.submit_article_for_review(doc.id, author)
+        assert sub["success"] is True
+        rev_id = sub["revision_id"]
+
+        assignments = list_review_assignments(reviewer)
+        mine = [a for a in assignments if a["id"] == doc.id]
+        assert len(mine) == 1
+        assert mine[0]["submitted_revision_id"] == rev_id
+
+        effects: dict[str, object] = {}
+
+        class _FakeReactive:
+            @staticmethod
+            def effect(fn):
+                effects[fn.__name__] = fn
+                return fn
+
+            @staticmethod
+            def event(*args, **kwargs):
+                return lambda fn: fn
+
+        class _FakeInput:
+            def __init__(self):
+                self._view_payload = {"article_id": doc.id, "revision_id": rev_id}
+                self._approve_payload = {"article_id": doc.id, "revision_id": rev_id}
+
+            def __getattr__(self, name: str):
+                if name == "lukb_view_review_revision":
+                    return lambda: self._view_payload
+                if name == "lukb_approve_review_revision":
+                    return lambda: self._approve_payload
+                return lambda: None
+
+        shown_modals: list[object] = []
+        notifications: list[tuple[str, str]] = []
+
+        class _FakeState:
+            session_id = "sess_rev"
+            is_authenticated = True
+            current_user = reviewer
+            current_user_id = reviewer
+
+            def can_access_article(self, article_id: str, action: str, allow_admin_override: bool = False) -> bool:
+                from database.permissions import check_article_permission
+
+                return check_article_permission(article_id, reviewer, action, allow_admin_override=allow_admin_override)
+
+        monkeypatch.setattr(admin_handlers, "reactive", _FakeReactive)
+        monkeypatch.setattr(admin_handlers.ui, "modal_show", lambda m: shown_modals.append(m))
+        monkeypatch.setattr(
+            admin_handlers.ui,
+            "notification_show",
+            lambda msg, type="message", **_kw: notifications.append((type, msg)),
+        )
+
+        async def _noop_async(*_a, **_kw):
+            return None
+
+        monkeypatch.setattr(admin_handlers, "broadcast_article_list_to_all", _noop_async)
+
+        admin_handlers.register_admin_handlers(_FakeInput(), SimpleNamespace(), SimpleNamespace(), _FakeState())
+
+        # 1. Prüfaufträge öffnen -> enthält "Revision ansehen" und "Diese Revision freigeben"
+        asyncio.run(effects["_on_open_review_assignments"]())
+        modal_html = str(shown_modals[-1])
+        assert "Revision ansehen" in modal_html
+        assert "Diese Revision freigeben" in modal_html
+
+        # 2. Revision ansehen als reiner Reviewer (ohne edit-Recht)
+        asyncio.run(effects["_on_view_review_revision"]())
+        view_html = str(shown_modals[-1])
+        assert f"Rev #{rev_id}" in view_html
+
+        # 3. Revision direkt freigeben als reiner Reviewer
+        asyncio.run(effects["_on_approve_review_revision"]())
+        assert any(t == "message" and f"Revision #{rev_id}" in msg for t, msg in notifications)
+        with get_db_session() as session:
+            art = session.get(ArticleModel, doc.id)
+            assert art is not None
+            assert art.approved_revision_id == rev_id
+            assert art.approved_by == reviewer
     finally:
         delete_article(doc.id, force=True)

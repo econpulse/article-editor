@@ -37,6 +37,7 @@ from services.connect_client import (
     is_connect_configured,
     poll_connect_task,
 )
+from services.media_library import validate_article_media_for_channel
 from services.portal_publisher import (
     _PORTAL_PUBLISH_LOCK,
     _ensure_portal_assets,
@@ -165,6 +166,31 @@ def approve_article_revision(
             "article_id": article_id,
             "revision_id": rev.id,
             "approved_by": approver,
+        }
+
+
+def get_article_revision_for_review(article_id: str, revision_id: int) -> dict[str, Any] | None:
+    """Lädt eine eingereichte Revision inklusive Artikelmetadaten für die Prüfer-Ansicht."""
+    if not article_id or not revision_id:
+        return None
+    with get_db_session() as session:
+        art = session.get(ArticleModel, article_id)
+        rev = session.get(ArticleRevisionModel, int(revision_id))
+        if not art or not rev or rev.article_id != article_id:
+            return None
+        doc = ArticleDocument.model_validate_json(rev.snapshot_json)
+        return {
+            "article_id": article_id,
+            "revision_id": rev.id,
+            "title": doc.metadata.title or art.title,
+            "status": art.status,
+            "saved_at": rev.saved_at.strftime("%d.%m.%Y %H:%M") if rev.saved_at else "",
+            "saved_by": rev.saved_by or "",
+            "submitted_by": art.submitted_by or rev.saved_by or "",
+            "approved_revision_id": art.approved_revision_id,
+            "approved_by": art.approved_by or "",
+            "note": rev.note or "",
+            "doc": doc,
         }
 
 
@@ -387,104 +413,32 @@ def _has_active_job_for_channel(session, target_channel: str, exclude_job_id: in
     return session.scalars(stmt).first()
 
 
-def _run_publish_job_internal(job_id: int) -> dict[str, Any]:
-    """Führt Rendering, Staging-Snapshot, frischen Bundle-Build und optionales Connect-Deployment für `job_id` aus."""
+def _mark_job_failed(job_id: int, error_message: str) -> dict[str, Any]:
+    """Markiert einen laufenden Auftrag im Fehlerfall deterministisch als `failed`."""
+    now = _utc_now()
     with get_db_session() as session:
         job = session.get(PublicationJobModel, job_id)
-        if not job:
-            return {"success": False, "error": "Auftrag nicht gefunden."}
-        rev = session.get(ArticleRevisionModel, job.revision_id) if job.revision_id else None
-        if not rev:
+        if job and job.status != "succeeded":
             job.status = "failed"
-            job.error_message = f"Revision #{job.revision_id} nicht gefunden."
-            return {"success": False, "error": job.error_message, "job_id": job.id}
-
-        rev_doc = ArticleDocument.model_validate_json(rev.snapshot_json)
-        job.status = "rendering"
-
-    # Rendern mit identischem Marktdatenstand für PDF und HTML
-    pdf_bytes, base_html = render_publication_package(rev_doc)
-    slug = _make_article_slug(rev_doc)
-    has_pdf = bool(pdf_bytes)
-    full_html = _inject_portal_nav(base_html, slug, has_pdf)
-    html_sha = _sha256_text(full_html)
-    pdf_sha = _sha256_bytes(pdf_bytes)
-    c_hash = compute_article_content_hash(rev_doc)
-
-    date_display = (
-        format_publication_date(rev_doc.metadata.publication_date)
-        or rev_doc.metadata.publication_date
-        or "Aktuell"
-    )
-    authors_str = " · ".join([a.name for a in rev_doc.metadata.authors])
-    tags_list = [str(t).strip() for t in (rev_doc.metadata.tags or []) if str(t).strip()]
-    meta_entry = {
-        "id": rev_doc.id,
-        "slug": slug,
-        "title": rev_doc.metadata.title,
-        "subtitle": rev_doc.metadata.subtitle,
-        "lead": rev_doc.metadata.lead,
-        "category": rev_doc.metadata.category or "",
-        "template_id": rev_doc.template_id,
-        "publication_date": rev_doc.metadata.publication_date,
-        "date_display": date_display,
-        "authors": [a.model_dump() for a in rev_doc.metadata.authors],
-        "authors_str": authors_str,
-        "tags": tags_list,
-        "tags_str": ", ".join(tags_list),
-        "published_at": _utc_now().isoformat(),
-        "has_pdf": has_pdf,
+            job.error_message = error_message
+            job.completed_at = now
+    return {
+        "success": False,
+        "deployed": False,
+        "state": "failed",
+        "job_id": job_id,
+        "error": error_message,
     }
 
-    with get_db_session() as session:
-        job = session.get(PublicationJobModel, job_id)
-        max_ver = session.scalars(
-            select(PublishedSnapshotModel.version)
-            .where(PublishedSnapshotModel.article_id == job.article_id)
-            .order_by(desc(PublishedSnapshotModel.version))
-            .limit(1)
-        ).first() or 0
-        next_ver = int(max_ver) + 1
 
-        snap = PublishedSnapshotModel(
-            article_id=job.article_id,
-            version=next_ver,
-            is_active=False,  # Erst nach bestätigtem Connect-Erfolg aktiv!
-            slug=slug,
-            title=rev_doc.metadata.title,
-            publication_date=rev_doc.metadata.publication_date or "",
-            metadata_json=json.dumps(meta_entry, ensure_ascii=False),
-            html_content=full_html,
-            pdf_bytes=pdf_bytes if has_pdf else None,
-            published_by=job.requested_by,
-            change_note=f"Auftrag #{job.id} (Revision #{job.revision_id})",
-            revision_id=job.revision_id,
-            content_hash=c_hash,
-            html_sha256=html_sha,
-            pdf_sha256=pdf_sha,
-        )
-        session.add(snap)
-        session.flush()
-
-        job.snapshot_id = snap.id
-        job.html_sha256 = html_sha
-        job.pdf_sha256 = pdf_sha
-        job.status = "uploading"
-
-        bundle_snapshots = _load_active_snapshots_for_bundle(session, include_snapshot_id=snap.id)
-
-    # Frisches Verzeichnis für Bundle-Erstellung verwenden
-    with tempfile.TemporaryDirectory() as tmp_dir_str:
-        fresh_dir = Path(tmp_dir_str) / "fresh_portal"
-        build_portal_directory_from_snapshots(fresh_dir, bundle_snapshots)
-        bundle_path = Path(tmp_dir_str) / "portal_bundle.tar.gz"
-        create_connect_bundle(output_dir=fresh_dir, bundle_path=bundle_path)
-
-        if not is_connect_configured():
-            return _finalize_publish_success(job_id)
-
-        deploy_res = deploy_bundle_to_connect(bundle_path)
-
+def _handle_connect_deploy_result(
+    job_id: int,
+    deploy_res: dict[str, Any],
+    *,
+    action: str,
+    new_status: str = "draft",
+) -> dict[str, Any]:
+    """Einheitliche Auswertung des Connect-Deployments für Publikation und Rückzug."""
     state_str = deploy_res.get("state") or ("succeeded" if deploy_res.get("deployed") else "failed")
     bundle_id = deploy_res.get("bundle_id")
     task_id = deploy_res.get("task_id")
@@ -495,26 +449,140 @@ def _run_publish_job_internal(job_id: int) -> dict[str, Any]:
             if job:
                 job.connect_bundle_id = str(bundle_id) if bundle_id else None
                 job.connect_task_id = str(task_id) if task_id else None
-        res = _finalize_publish_success(job_id)
+        if action == "unpublish":
+            res = _finalize_unpublish_success(job_id, new_status=new_status)
+        else:
+            res = _finalize_publish_success(job_id)
         res["connect_deploy"] = deploy_res
         return res
 
+    default_err = "Connect Rückzug nicht bestätigt." if action == "unpublish" else "Connect Deployment nicht bestätigt."
+    err_msg = deploy_res.get("error") or default_err
+    next_status = "unknown" if state_str == "unknown" else "failed"
     with get_db_session() as session:
         job = session.get(PublicationJobModel, job_id)
-        if job:
+        if job and job.status != "succeeded":
             job.connect_bundle_id = str(bundle_id) if bundle_id else None
             job.connect_task_id = str(task_id) if task_id else None
-            job.status = "unknown" if state_str == "unknown" else "failed"
-            job.error_message = deploy_res.get("error") or "Connect Deployment nicht bestätigt."
+            job.status = next_status
+            job.error_message = err_msg
+            if next_status == "failed":
+                job.completed_at = _utc_now()
 
     return {
         "success": False,
         "deployed": False,
         "state": state_str,
         "job_id": job_id,
-        "error": deploy_res.get("error") or "Connect Deployment nicht bestätigt.",
+        "error": err_msg,
         "connect_deploy": deploy_res,
     }
+
+
+def _run_publish_job_internal(job_id: int) -> dict[str, Any]:
+    """Führt Rendering, Staging-Snapshot, frischen Bundle-Build und optionales Connect-Deployment für `job_id` aus."""
+    try:
+        with get_db_session() as session:
+            job = session.get(PublicationJobModel, job_id)
+            if not job:
+                return {"success": False, "error": "Auftrag nicht gefunden."}
+            rev = session.get(ArticleRevisionModel, job.revision_id) if job.revision_id else None
+            if not rev:
+                job.status = "failed"
+                job.error_message = f"Revision #{job.revision_id} nicht gefunden."
+                job.completed_at = _utc_now()
+                return {"success": False, "error": job.error_message, "job_id": job.id}
+
+            rev_doc = ArticleDocument.model_validate_json(rev.snapshot_json)
+            job.status = "rendering"
+
+        # Rendern mit identischem Marktdatenstand für PDF und HTML
+        pdf_bytes, base_html = render_publication_package(rev_doc)
+        slug = _make_article_slug(rev_doc)
+        has_pdf = bool(pdf_bytes)
+        full_html = _inject_portal_nav(base_html, slug, has_pdf)
+        html_sha = _sha256_text(full_html)
+        pdf_sha = _sha256_bytes(pdf_bytes)
+        c_hash = compute_article_content_hash(rev_doc)
+
+        date_display = (
+            format_publication_date(rev_doc.metadata.publication_date)
+            or rev_doc.metadata.publication_date
+            or "Aktuell"
+        )
+        authors_str = " · ".join([a.name for a in rev_doc.metadata.authors])
+        tags_list = [str(t).strip() for t in (rev_doc.metadata.tags or []) if str(t).strip()]
+        meta_entry = {
+            "id": rev_doc.id,
+            "slug": slug,
+            "title": rev_doc.metadata.title,
+            "subtitle": rev_doc.metadata.subtitle,
+            "lead": rev_doc.metadata.lead,
+            "category": rev_doc.metadata.category or "",
+            "template_id": rev_doc.template_id,
+            "publication_date": rev_doc.metadata.publication_date,
+            "date_display": date_display,
+            "authors": [a.model_dump() for a in rev_doc.metadata.authors],
+            "authors_str": authors_str,
+            "tags": tags_list,
+            "tags_str": ", ".join(tags_list),
+            "published_at": _utc_now().isoformat(),
+            "has_pdf": has_pdf,
+        }
+
+        with get_db_session() as session:
+            job = session.get(PublicationJobModel, job_id)
+            max_ver = session.scalars(
+                select(PublishedSnapshotModel.version)
+                .where(PublishedSnapshotModel.article_id == job.article_id)
+                .order_by(desc(PublishedSnapshotModel.version))
+                .limit(1)
+            ).first() or 0
+            next_ver = int(max_ver) + 1
+
+            snap = PublishedSnapshotModel(
+                article_id=job.article_id,
+                version=next_ver,
+                is_active=False,  # Erst nach bestätigtem Connect-Erfolg aktiv!
+                slug=slug,
+                title=rev_doc.metadata.title,
+                publication_date=rev_doc.metadata.publication_date or "",
+                metadata_json=json.dumps(meta_entry, ensure_ascii=False),
+                html_content=full_html,
+                pdf_bytes=pdf_bytes if has_pdf else None,
+                published_by=job.requested_by,
+                change_note=f"Auftrag #{job.id} (Revision #{job.revision_id})",
+                revision_id=job.revision_id,
+                content_hash=c_hash,
+                html_sha256=html_sha,
+                pdf_sha256=pdf_sha,
+            )
+            session.add(snap)
+            session.flush()
+
+            job.snapshot_id = snap.id
+            job.html_sha256 = html_sha
+            job.pdf_sha256 = pdf_sha
+            job.status = "uploading"
+
+            bundle_snapshots = _load_active_snapshots_for_bundle(session, include_snapshot_id=snap.id)
+
+        # Frisches Verzeichnis für Bundle-Erstellung verwenden
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            fresh_dir = Path(tmp_dir_str) / "fresh_portal"
+            build_portal_directory_from_snapshots(fresh_dir, bundle_snapshots)
+            bundle_path = Path(tmp_dir_str) / "portal_bundle.tar.gz"
+            create_connect_bundle(output_dir=fresh_dir, bundle_path=bundle_path)
+
+            if not is_connect_configured():
+                return _finalize_publish_success(job_id)
+
+            deploy_res = deploy_bundle_to_connect(bundle_path)
+
+        return _handle_connect_deploy_result(job_id, deploy_res, action="publish")
+    except Exception as exc:
+        logger.exception("Interner Fehler bei Publikationsauftrag #%s", job_id)
+        return _mark_job_failed(job_id, f"Interner Publikationsfehler: {exc}")
 
 
 def execute_publish_job(
@@ -564,6 +632,11 @@ def execute_publish_job(
         if not rev or rev.article_id != article_id:
             return {"success": False, "error": f"Revision #{target_rev_id} nicht gefunden."}
 
+        rev_doc_check = ArticleDocument.model_validate_json(rev.snapshot_json)
+        media_check = validate_article_media_for_channel(rev_doc_check, target_channel=target_channel)
+        if not media_check["valid"]:
+            return {"success": False, "error": " ".join(media_check["errors"])}
+
         # Vier-Augen-Prüfung auch bei direkter Publikation durchsetzen
         if requires_four_eyes(row.template_id):
             approved_by = normalize_user_id(getattr(row, "approved_by", None))
@@ -602,6 +675,38 @@ def execute_publish_job(
     return _run_publish_job_internal(job_id)
 
 
+def _run_unpublish_job_internal(job_id: int, *, new_status: str = "draft") -> dict[str, Any]:
+    """Führt Bundle-Build und optionales Connect-Deployment für einen Rückzugsauftrag aus."""
+    try:
+        with get_db_session() as session:
+            job = session.get(PublicationJobModel, job_id)
+            if not job:
+                return {"success": False, "error": "Auftrag nicht gefunden."}
+            job.status = "uploading"
+            bundle_snapshots = _load_active_snapshots_for_bundle(session, exclude_article_id=job.article_id)
+
+        with tempfile.TemporaryDirectory() as tmp_dir_str:
+            fresh_dir = Path(tmp_dir_str) / "fresh_portal"
+            build_portal_directory_from_snapshots(fresh_dir, bundle_snapshots)
+            bundle_path = Path(tmp_dir_str) / "portal_bundle.tar.gz"
+            create_connect_bundle(output_dir=fresh_dir, bundle_path=bundle_path)
+
+            if not is_connect_configured():
+                return _finalize_unpublish_success(job_id, new_status=new_status)
+
+            deploy_res = deploy_bundle_to_connect(bundle_path)
+
+        return _handle_connect_deploy_result(
+            job_id,
+            deploy_res,
+            action="unpublish",
+            new_status=new_status,
+        )
+    except Exception as exc:
+        logger.exception("Interner Fehler bei Rückzugsauftrag #%s", job_id)
+        return _mark_job_failed(job_id, f"Interner Rückzugsfehler: {exc}")
+
+
 def execute_unpublish_job(
     article_id: str,
     user_id: str,
@@ -626,56 +731,15 @@ def execute_unpublish_job(
             article_id=article_id,
             action="unpublish",
             target_channel=target_channel,
-            status="uploading",
+            status="pending",
             attempt=1,
             requested_by=uid,
         )
         session.add(job)
         session.flush()
         job_id = job.id
-        bundle_snapshots = _load_active_snapshots_for_bundle(session, exclude_article_id=article_id)
 
-    with tempfile.TemporaryDirectory() as tmp_dir_str:
-        fresh_dir = Path(tmp_dir_str) / "fresh_portal"
-        build_portal_directory_from_snapshots(fresh_dir, bundle_snapshots)
-        bundle_path = Path(tmp_dir_str) / "portal_bundle.tar.gz"
-        create_connect_bundle(output_dir=fresh_dir, bundle_path=bundle_path)
-
-        if not is_connect_configured():
-            return _finalize_unpublish_success(job_id, new_status=new_status)
-
-        deploy_res = deploy_bundle_to_connect(bundle_path)
-
-    state_str = deploy_res.get("state") or ("succeeded" if deploy_res.get("deployed") else "failed")
-    bundle_id = deploy_res.get("bundle_id")
-    task_id = deploy_res.get("task_id")
-
-    if state_str == "succeeded" and deploy_res.get("deployed"):
-        with get_db_session() as session:
-            job = session.get(PublicationJobModel, job_id)
-            if job:
-                job.connect_bundle_id = str(bundle_id) if bundle_id else None
-                job.connect_task_id = str(task_id) if task_id else None
-        res = _finalize_unpublish_success(job_id, new_status=new_status)
-        res["connect_deploy"] = deploy_res
-        return res
-
-    with get_db_session() as session:
-        job = session.get(PublicationJobModel, job_id)
-        if job:
-            job.connect_bundle_id = str(bundle_id) if bundle_id else None
-            job.connect_task_id = str(task_id) if task_id else None
-            job.status = "unknown" if state_str == "unknown" else "failed"
-            job.error_message = deploy_res.get("error") or "Connect Rückzug nicht bestätigt."
-
-    return {
-        "success": False,
-        "deployed": False,
-        "state": state_str,
-        "job_id": job_id,
-        "error": deploy_res.get("error") or "Connect Rückzug nicht bestätigt.",
-        "connect_deploy": deploy_res,
-    }
+    return _run_unpublish_job_internal(job_id, new_status=new_status)
 
 
 def poll_publication_job(job_id: int) -> dict[str, Any]:
@@ -730,23 +794,11 @@ def retry_publication_job(job_id: int, user_id: str) -> dict[str, Any]:
         job.connect_bundle_id = None
         job.connect_task_id = None
         job.requested_by = uid
+        job.completed_at = None
         action = job.action
-        article_id = job.article_id
 
     if action == "unpublish":
-        with get_db_session() as session:
-            bundle_snapshots = _load_active_snapshots_for_bundle(session, exclude_article_id=article_id)
-        with tempfile.TemporaryDirectory() as tmp_dir_str:
-            fresh_dir = Path(tmp_dir_str) / "fresh_portal"
-            build_portal_directory_from_snapshots(fresh_dir, bundle_snapshots)
-            bundle_path = Path(tmp_dir_str) / "portal_bundle.tar.gz"
-            create_connect_bundle(output_dir=fresh_dir, bundle_path=bundle_path)
-            if not is_connect_configured():
-                return _finalize_unpublish_success(job_id)
-            deploy_res = deploy_bundle_to_connect(bundle_path)
-        if deploy_res.get("state") == "succeeded" and deploy_res.get("deployed"):
-            return _finalize_unpublish_success(job_id)
-        return {"success": False, "job_id": job_id, "error": deploy_res.get("error")}
+        return _run_unpublish_job_internal(job_id)
 
     return _run_publish_job_internal(job_id)
 

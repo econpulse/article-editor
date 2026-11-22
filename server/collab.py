@@ -52,7 +52,7 @@ def collect_article_assets_map(
                 aid = media.get("asset_id", "")
                 if aid and (known_set is None or aid not in known_set):
                     needed_figure_aids.add(aid)
-    asset_records = get_assets_by_ids(needed_figure_aids) if needed_figure_aids else {}
+    asset_records = get_assets_by_ids(needed_figure_aids, article_id=doc.id) if needed_figure_aids else {}
 
     assets_map: dict[str, str] = {}
     for blk in doc.blocks:

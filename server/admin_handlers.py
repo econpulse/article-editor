@@ -5,6 +5,7 @@ LUKB Investment Office — Artikelrechte-, Prüfaufträge- & Admin-Dashboard-Han
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from shiny import Inputs, Outputs, Session, reactive, ui
 
@@ -22,14 +23,17 @@ from database.permissions import (
     set_global_user_role,
     transfer_article_ownership,
 )
-from server.collab import broadcast_article_list_to_all, enforce_article_access_revoked
+from server.collab import broadcast_article_list_to_all, broadcast_article_sync, enforce_article_access_revoked
 from server.state import SessionState
 from services.publication_service import (
+    approve_article_revision,
     get_admin_publication_overview,
+    get_article_revision_for_review,
     list_publication_jobs,
     poll_publication_job,
     retry_publication_job,
 )
+from services.renderer import render_web_html
 
 logger = logging.getLogger("lukb_cms.admin_handlers")
 
@@ -198,28 +202,65 @@ def register_admin_handlers(
     # ------------------------------------------------------------------
     # Prüfaufträge (für Prüfberechtigte)
     # ------------------------------------------------------------------
-    @reactive.effect
-    @reactive.event(input.lukb_open_review_assignments)
-    async def _on_open_review_assignments() -> None:
-        if not state.is_authenticated:
-            ui.notification_show("Bitte melden Sie sich mit Ihrem Connect-Konto an.", type="warning", duration=4)
-            return
+    async def _show_review_assignments_modal() -> None:
         items = await asyncio.to_thread(list_review_assignments, state.current_user_id)
         rows = []
         for it in items:
+            sub_rev_id = it.get("submitted_revision_id")
+            app_rev_id = it.get("approved_revision_id")
+            is_approved = bool(sub_rev_id and app_rev_id and int(sub_rev_id) == int(app_rev_id))
+            if sub_rev_id:
+                rev_label = f"Rev #{sub_rev_id} · {'Freigegeben' if is_approved else 'Zur Prüfung'}"
+            else:
+                rev_label = "Keine Einreichung"
+
+            aid_js = json.dumps(it["id"])
+            action_buttons = []
+            if sub_rev_id:
+                rev_id_int = int(sub_rev_id)
+                action_buttons.append(
+                    ui.tags.button(
+                        "Revision ansehen",
+                        type="button",
+                        class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                        onclick=(
+                            f"Shiny.setInputValue('lukb_view_review_revision', "
+                            f"{{article_id: {aid_js}, revision_id: {rev_id_int}, ts: Date.now()}}, {{priority:'event'}});"
+                        ),
+                    )
+                )
+                if not is_approved:
+                    action_buttons.append(
+                        ui.tags.button(
+                            "Diese Revision freigeben",
+                            type="button",
+                            class_="btn-lukb btn-lukb-success btn-lukb-sm",
+                            onclick=(
+                                f"Shiny.setInputValue('lukb_approve_review_revision', "
+                                f"{{article_id: {aid_js}, revision_id: {rev_id_int}, ts: Date.now()}}, {{priority:'event'}});"
+                            ),
+                        )
+                    )
+            action_buttons.append(
+                ui.tags.button(
+                    "Öffnen",
+                    type="button",
+                    class_="btn-lukb btn-lukb-primary btn-lukb-sm",
+                    onclick=(
+                        f"Shiny.setInputValue('lukb_select_article', {{id: {aid_js}, ts: Date.now()}}, {{priority:'event'}}); "
+                        "document.querySelectorAll('.modal .btn-close, .modal [data-bs-dismiss=\"modal\"]').forEach(b=>b.click());"
+                    ),
+                )
+            )
             rows.append(
                 ui.tags.tr(
                     ui.tags.td(it["title"], style="font-weight:600;padding:6px 8px;"),
                     ui.tags.td(it["status"], style="padding:6px 8px;"),
+                    ui.tags.td(rev_label, style="padding:6px 8px;font-size:12px;color:#002855;"),
                     ui.tags.td(f"v{it['version']} · {it['updated_at']}", style="padding:6px 8px;color:#5A687C;font-size:12px;"),
                     ui.tags.td(ROLE_LABELS.get(it["article_role"], it["article_role"]), style="padding:6px 8px;font-size:12px;"),
                     ui.tags.td(
-                        ui.tags.button(
-                            "Öffnen",
-                            type="button",
-                            class_="btn-lukb btn-lukb-primary btn-lukb-sm",
-                            onclick=f"Shiny.setInputValue('lukb_select_article', {{id: '{it['id']}', ts: Date.now()}}, {{priority:'event'}}); document.querySelectorAll('.modal .btn-close, .modal [data-bs-dismiss=\"modal\"]').forEach(b=>b.click());",
-                        ),
+                        ui.div(*action_buttons, style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap;"),
                         style="padding:6px 8px;text-align:right;",
                     ),
                 )
@@ -227,7 +268,7 @@ def register_admin_handlers(
         if not rows:
             rows.append(
                 ui.tags.tr(
-                    ui.tags.td("Keine zugeteilten Prüfaufträge vorhanden.", colspan="5", style="padding:12px;color:#5A687C;")
+                    ui.tags.td("Keine zugeteilten Prüfaufträge vorhanden.", colspan="6", style="padding:12px;color:#5A687C;")
                 )
             )
         ui.modal_show(
@@ -237,6 +278,7 @@ def register_admin_handlers(
                         ui.tags.tr(
                             ui.tags.th("Artikel", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
                             ui.tags.th("Status", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Einreichung", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
                             ui.tags.th("Stand", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
                             ui.tags.th("Rolle", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
                             ui.tags.th("", style="padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
@@ -246,11 +288,112 @@ def register_admin_handlers(
                     style="width:100%;border-collapse:collapse;font-size:13px;",
                 ),
                 title="Meine Prüfaufträge",
-                size="l",
+                size="xl",
                 easy_close=True,
                 footer=ui.modal_button("Schliessen", class_="btn-lukb btn-lukb-ghost"),
             )
         )
+
+    @reactive.effect
+    @reactive.event(input.lukb_open_review_assignments)
+    async def _on_open_review_assignments() -> None:
+        if not state.is_authenticated:
+            ui.notification_show("Bitte melden Sie sich mit Ihrem Connect-Konto an.", type="warning", duration=4)
+            return
+        await _show_review_assignments_modal()
+
+    @reactive.effect
+    @reactive.event(input.lukb_view_review_revision)
+    async def _on_view_review_revision() -> None:
+        if not state.is_authenticated:
+            ui.notification_show("Bitte melden Sie sich mit Ihrem Connect-Konto an.", type="warning", duration=4)
+            return
+        payload = input.lukb_view_review_revision()
+        if not isinstance(payload, dict):
+            return
+        aid = str(payload.get("article_id") or "").strip()
+        rev_id = payload.get("revision_id")
+        if not aid or not rev_id:
+            return
+        if not await asyncio.to_thread(state.can_access_article, aid, "review", allow_admin_override=True):
+            ui.notification_show("Keine Prüfberechtigung für diesen Artikel.", type="warning", duration=5)
+            return
+        rev_info = await asyncio.to_thread(get_article_revision_for_review, aid, int(rev_id))
+        if not rev_info:
+            ui.notification_show("Eingereichte Revision konnte nicht geladen werden.", type="warning", duration=4)
+            return
+        preview_html = await asyncio.to_thread(render_web_html, rev_info["doc"])
+        is_approved = bool(
+            rev_info.get("approved_revision_id") and int(rev_info["approved_revision_id"]) == int(rev_info["revision_id"])
+        )
+        aid_js = json.dumps(aid)
+        rev_id_int = int(rev_info["revision_id"])
+        footer_items = [
+            ui.tags.button(
+                "Zurück zu Prüfaufträgen",
+                type="button",
+                class_="btn-lukb btn-lukb-ghost",
+                onclick="Shiny.setInputValue('lukb_open_review_assignments', {ts: Date.now()}, {priority:'event'});",
+            ),
+            ui.modal_button("Schliessen", class_="btn-lukb btn-lukb-ghost"),
+        ]
+        if not is_approved:
+            footer_items.append(
+                ui.tags.button(
+                    "Diese Revision freigeben",
+                    type="button",
+                    class_="btn-lukb btn-lukb-success",
+                    onclick=(
+                        f"Shiny.setInputValue('lukb_approve_review_revision', "
+                        f"{{article_id: {aid_js}, revision_id: {rev_id_int}, ts: Date.now()}}, {{priority:'event'}});"
+                    ),
+                )
+            )
+        ui.modal_show(
+            ui.modal(
+                ui.div(
+                    ui.p(
+                        f"Revision #{rev_id_int} · Eingereicht von {rev_info.get('submitted_by') or 'unbekannt'} "
+                        f"am {rev_info.get('saved_at') or ''}"
+                        + (" · ✅ Bereits freigegeben" if is_approved else ""),
+                        style="font-size:12.5px;color:#5A687C;margin-bottom:10px;",
+                    ),
+                    ui.tags.iframe(
+                        srcdoc=preview_html,
+                        sandbox="allow-same-origin",
+                        style="width:100%;height:65vh;border:1px solid #D6DEE8;border-radius:6px;background:#fff;",
+                    ),
+                ),
+                title=f"Prüfansicht: {rev_info['title']} (Rev #{rev_id_int})",
+                size="xl",
+                easy_close=True,
+                footer=ui.div(*footer_items, style="display:flex;gap:8px;justify-content:flex-end;width:100%;"),
+            )
+        )
+
+    @reactive.effect
+    @reactive.event(input.lukb_approve_review_revision)
+    async def _on_approve_review_revision() -> None:
+        if not state.is_authenticated:
+            ui.notification_show("Bitte melden Sie sich mit Ihrem Connect-Konto an.", type="warning", duration=4)
+            return
+        payload = input.lukb_approve_review_revision()
+        if not isinstance(payload, dict):
+            return
+        aid = str(payload.get("article_id") or "").strip()
+        rev_id = payload.get("revision_id")
+        if not aid or not rev_id:
+            return
+        if not await asyncio.to_thread(state.can_access_article, aid, "review", allow_admin_override=True):
+            ui.notification_show("Keine Prüfberechtigung für diesen Artikel.", type="warning", duration=5)
+            return
+        res = await asyncio.to_thread(approve_article_revision, aid, int(rev_id), state.current_user_id)
+        if not res.get("success"):
+            ui.notification_show(res.get("error", "Freigabe fehlgeschlagen."), type="warning", duration=6)
+            return
+        ui.notification_show(f"✅ Revision #{rev_id} wurde freigegeben.", type="message", duration=5)
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
+        await _show_review_assignments_modal()
 
     # ------------------------------------------------------------------
     # Admin-Dashboard (Artikel & Benutzer + Publikationen & Protokoll)
@@ -506,8 +649,13 @@ def register_admin_handlers(
         )
 
     @reactive.effect
-    @reactive.event(input.lukb_open_admin_dashboard, input.btn_admin_refresh)
+    @reactive.event(input.lukb_open_admin_dashboard)
     async def _on_open_admin_dashboard() -> None:
+        await _show_admin_dashboard("articles")
+
+    @reactive.effect
+    @reactive.event(input.btn_admin_refresh)
+    async def _on_refresh_admin_dashboard() -> None:
         await _show_admin_dashboard("articles")
 
     @reactive.effect

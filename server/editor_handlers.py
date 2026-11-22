@@ -60,14 +60,18 @@ def register_editor_handlers(
         if not b64_str:
             return
         raw_bytes = base64.b64decode(b64_str)
-        await asyncio.to_thread(
-            save_asset,
-            filename=payload.get("filename", "grafik.svg"),
-            mime_type=payload.get("mime_type", "image/svg+xml"),
-            data=raw_bytes,
-            article_id=aid,
-            asset_id=payload.get("asset_id"),
-        )
+        try:
+            await asyncio.to_thread(
+                save_asset,
+                filename=payload.get("filename", "grafik.svg"),
+                mime_type=payload.get("mime_type", "image/svg+xml"),
+                data=raw_bytes,
+                article_id=aid,
+                asset_id=payload.get("asset_id"),
+            )
+        except PermissionError as exc:
+            ui.notification_show(str(exc), type="warning", duration=5)
+            return
         await state.send_active_preview(respect_auto_preview=True)
 
     # Live-Fokus-Meldung eines Autors (welcher Block / welches Feld wird gerade editiert?)

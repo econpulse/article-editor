@@ -145,6 +145,7 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
   padding: 0 20px;
   border-bottom: 2px solid var(--lukb-cyan);
   z-index: 100;
@@ -185,7 +186,8 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
 .cms-topbar-center {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  min-width: 0;
 }
 
 .autosave-pill {
@@ -290,6 +292,13 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-shrink: 0;
+}
+
+.cms-topbar-actions .btn-lukb {
+  height: 34px;
+  box-sizing: border-box;
+  line-height: 1.2;
 }
 
 /* ============================================================================
@@ -2664,13 +2673,18 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  min-width: 240px;
+  min-width: 215px;
   background: #FFFFFF;
   border: 1px solid var(--lukb-border);
-  border-radius: 6px;
+  border-radius: 8px;
   box-shadow: 0 10px 25px -5px rgba(0, 45, 98, 0.2), 0 8px 10px -6px rgba(0, 45, 98, 0.1);
-  padding: 6px 0;
+  padding: 6px;
   z-index: 1050;
+}
+
+.lukb-dropdown-menu.lukb-dropdown-menu-left {
+  left: 0;
+  right: auto;
 }
 
 .lukb-dropdown.show .lukb-dropdown-menu {
@@ -2680,21 +2694,33 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
 .lukb-dropdown-item {
   display: flex !important;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
-  padding: 9px 16px;
+  margin: 0 !important;
+  padding: 8px 12px;
   color: var(--lukb-text) !important;
   background: transparent !important;
   border: none !important;
-  border-radius: 0 !important;
+  border-radius: 5px !important;
   font-size: 13px !important;
   font-family: var(--font-body);
+  line-height: 1.35;
   text-align: left;
   text-decoration: none !important;
   cursor: pointer;
   box-shadow: none !important;
   transition: background 0.15s ease, color 0.15s ease;
   white-space: nowrap;
+}
+
+.lukb-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  flex-shrink: 0;
+  font-size: 14px;
+  line-height: 1;
 }
 
 .lukb-dropdown-item:hover,

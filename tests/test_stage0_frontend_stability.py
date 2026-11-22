@@ -187,3 +187,61 @@ console.log(JSON.stringify({{ ok: true }}));
 """
     res = _run_node(js)
     assert res["ok"] is True
+
+
+def test_submit_for_review_waits_for_pending_save_ack() -> None:
+    js = f"""
+const assert = require('assert');
+const fs = require('fs');
+
+const sentEvents = [];
+
+global.window = global;
+global.window.Shiny = {{
+  setInputValue: (name, data) => sentEvents.push({{ name, data }}),
+}};
+global.document = {{
+  addEventListener: () => {{}},
+  getElementById: () => null,
+  querySelector: () => null,
+}};
+
+eval(fs.readFileSync({json.dumps(str(STATE_JS))}, 'utf8'));
+
+const E = window.LUKBEditor;
+E.state.article = {{ id: 'art_1', version: 1, status: 'draft', metadata: {{ title: 'T1' }}, blocks: [] }};
+E.state.baseArticle = E.deepClone(E.state.article);
+E.state.editSeq = 0;
+E.state.lastSavedSeq = 0;
+E.state.isDirty = false;
+
+(async () => {{
+  // 1. Lokale Änderung -> dirty
+  E.markDirty();
+  assert.strictEqual(E.state.editSeq, 1);
+  assert.strictEqual(E.state.isDirty, true);
+
+  // 2. Zur Prüfung einreichen stösst Autosave an und wartet auf Bestätigung
+  const submitPromise = E.submitForReview();
+  assert.strictEqual(sentEvents.filter(e => e.name === 'lukb_autosave_payload').length, 1);
+  assert.strictEqual(sentEvents.filter(e => e.name === 'lukb_submit_review').length, 0);
+
+  // 3. Bestätigung trifft ein -> erst jetzt wird lukb_submit_review gesendet
+  E.handleAutosaveAck({{
+    id: 'art_1',
+    client_edit_seq: 1,
+    saved_at: '10:00:00',
+    article: {{ id: 'art_1', version: 2, status: 'draft', metadata: {{ title: 'T1' }}, blocks: [] }},
+  }});
+  const confirmed = await submitPromise;
+  assert.strictEqual(confirmed, true);
+  const submitEvents = sentEvents.filter(e => e.name === 'lukb_submit_review');
+  assert.strictEqual(submitEvents.length, 1);
+  assert.strictEqual(submitEvents[0].data.save_confirmed, true);
+
+  if (E.state.autosaveTimer) clearTimeout(E.state.autosaveTimer);
+  console.log(JSON.stringify({{ ok: true }}));
+}})();
+"""
+    res = _run_node(js)
+    assert res["ok"] is True

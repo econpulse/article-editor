@@ -186,6 +186,12 @@ def register_workflow_handlers(
     @reactive.event(input.btn_confirm_unpublish)
     async def _on_confirm_unpublish() -> None:
         ui.modal_remove()
+        doc = state.current_doc.get()
+        if not doc:
+            return
+        if not await asyncio.to_thread(state.can_access_article, doc.id, "edit"):
+            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=5)
+            return
         user = state.current_user
         if not can_publish(user) or not await asyncio.to_thread(
             state.can_access_article, doc.id, "read", allow_admin_override=True
@@ -195,12 +201,6 @@ def register_workflow_handlers(
                 type="warning",
                 duration=6,
             )
-            return
-        doc = state.current_doc.get()
-        if not doc:
-            return
-        if not await asyncio.to_thread(state.can_access_article, doc.id, "edit"):
-            ui.notification_show("Keine Bearbeitungsberechtigung für diesen Artikel.", type="warning", duration=5)
             return
         try:
             res = await asyncio.to_thread(

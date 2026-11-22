@@ -28,6 +28,7 @@ from server.collab import (
 )
 from server.downloads import register_download_handlers, slugify_filename
 from server.editor_handlers import register_editor_handlers
+from server.media_handlers import register_media_handlers
 from server.preview_handlers import register_preview_handlers
 from server.state import SessionState
 from server.workflow_handlers import register_workflow_handlers
@@ -45,6 +46,7 @@ def register_all_handlers(
     register_preview_handlers(input, output, session, state)
     register_workflow_handlers(input, output, session, state)
     register_admin_handlers(input, output, session, state)
+    register_media_handlers(input, output, session, state)
     register_download_handlers(output, state.current_doc.get, lambda: state.current_user_id)
     return state
 

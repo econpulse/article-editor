@@ -31,6 +31,7 @@
     autosaveTimer: null,
     editSeq: 0,
     lastSavedSeq: 0,
+    pendingSaveSeq: null,
     lastPreviewedSeq: -1,
     lastAppliedPreviewSeq: -1,
     sortableInstance: null,
@@ -760,6 +761,8 @@
     return getBlockById(bid) || (typeof blkOrId === "object" ? blkOrId : null);
   }
 
+  const saveAckWaiters = [];
+
   function flushAutosave(createRevision, revisionNote) {
     if (!state.article) return;
     if (state.autosaveTimer) {
@@ -775,6 +778,7 @@
     const knownAssets = Object.keys(state.assetCache || {});
     const currentMode = state.previewMode || "pdf";
     const saveSeq = state.editSeq;
+    state.pendingSaveSeq = Math.max(state.pendingSaveSeq || 0, saveSeq);
     const previewAlreadyCurrent = state.lastPreviewedSeq === saveSeq;
 
     sendShinyEvent("lukb_autosave_payload", {
@@ -840,21 +844,79 @@
 
     if (hasNewerEdits) {
       state.isDirty = true;
-      if (Number(ackSeq) > (state.lastSavedSeq || 0)) {
+      if (ackSeq !== undefined && ackSeq !== null && Number(ackSeq) > (state.lastSavedSeq || 0)) {
         state.lastSavedSeq = Number(ackSeq);
       }
       setAutosaveIndicator("dirty", "Ungespeicherte Änderungen …");
+      if (saveAckWaiters.length > 0) {
+        flushAutosave(false);
+      }
     } else {
       state.isDirty = false;
       state.lastSavedSeq = state.editSeq;
+      state.pendingSaveSeq = null;
       const suffix = msg.merged ? " (mit Co-Autor zusammengeführt)" : "";
       setAutosaveIndicator("saved", "Gespeichert um " + (msg.saved_at || "") + suffix);
+      for (let i = saveAckWaiters.length - 1; i >= 0; i--) {
+        if (state.lastSavedSeq >= saveAckWaiters[i].targetSeq) {
+          const waiter = saveAckWaiters.splice(i, 1)[0];
+          waiter.finish(true);
+        }
+      }
     }
 
     if (msg.publish_sync !== undefined && E.renderPublishSyncBanner) {
       E.renderPublishSyncBanner(msg.publish_sync);
     }
     return !hasNewerEdits;
+  }
+
+  function submitForReview() {
+    if (!state.article) {
+      sendShinyEvent("lukb_submit_review", { ts: Date.now() });
+      return Promise.resolve(true);
+    }
+    const needsFlush = state.isDirty || state.lastSavedSeq < state.editSeq;
+    const hasPendingSave =
+      state.pendingSaveSeq !== null && state.lastSavedSeq < state.pendingSaveSeq;
+
+    if (!needsFlush && !hasPendingSave) {
+      sendShinyEvent("lukb_submit_review", {
+        ts: Date.now(),
+        client_edit_seq: state.editSeq,
+        save_confirmed: true,
+      });
+      return Promise.resolve(true);
+    }
+
+    return new Promise(function (resolve) {
+      const targetSeq = state.editSeq;
+      let settled = false;
+      let timer = null;
+      const finish = function (confirmed) {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        sendShinyEvent("lukb_submit_review", {
+          ts: Date.now(),
+          client_edit_seq: state.editSeq,
+          save_confirmed: !!confirmed,
+        });
+        resolve(!!confirmed);
+      };
+      timer = setTimeout(function () {
+        const idx = saveAckWaiters.findIndex(function (w) {
+          return w.finish === finish;
+        });
+        if (idx >= 0) saveAckWaiters.splice(idx, 1);
+        finish(false);
+      }, 8000);
+
+      saveAckWaiters.push({ targetSeq: targetSeq, finish: finish });
+      if (needsFlush) {
+        flushAutosave(false);
+      }
+    });
   }
 
   // ==========================================================================
@@ -1411,6 +1473,7 @@
     showUndoToast: showUndoToast,
     state: state,
     statsDebounceTimer: statsDebounceTimer,
+    submitForReview: submitForReview,
     uid: uid,
     undoToastTimer: undoToastTimer,
     updateLiveStatsCounter: updateLiveStatsCounter,

@@ -25,6 +25,8 @@ from database.models import (
     ArticlePermissionModel,
     ArticleRevisionModel,
     AssetModel,
+    MediaEntryModel,
+    MediaVersionModel,
     PublishedSnapshotModel,
     TimeSeriesModel,
 )
@@ -699,6 +701,13 @@ def save_article(
                 f"Artikel {doc.id} wurde wiederholt parallel geändert. Bitte erneut versuchen."
             )
 
+        try:
+            from services.media_library import sync_article_media_usages
+
+            sync_article_media_usages(working_doc)
+        except Exception:
+            pass
+
         return {
             "id": working_doc.id,
             "version": working_doc.version,
@@ -1268,6 +1277,17 @@ def save_asset(
     with get_db_session() as session:
         existing = session.get(AssetModel, aid)
         if existing:
+            if existing.article_id != article_id:
+                raise PermissionError(
+                    f"Asset '{aid}' ist an einen anderen Artikel gebunden und kann nicht überschrieben werden."
+                )
+            is_media_ver = session.scalars(
+                select(MediaVersionModel.id).where(MediaVersionModel.asset_id == aid).limit(1)
+            ).first()
+            if is_media_ver is not None:
+                raise PermissionError(
+                    f"Asset '{aid}' ist eine unveränderliche Mediathek-Version und kann nicht überschrieben werden."
+                )
             existing.filename = filename
             existing.mime_type = mime_type
             existing.data = data
@@ -1285,23 +1305,96 @@ def save_asset(
     return aid
 
 
-def get_asset(asset_id: str) -> dict[str, Any] | None:
-    """Lädt ein Grafik-Asset aus der Datenbank."""
+def _filter_accessible_asset_ids(
+    session,
+    rows: list[AssetModel],
+    *,
+    article_id: str | None = None,
+    user_id: str | None = None,
+) -> set[str]:
+    """Prüft für geladene Asset-Datensätze die serverseitige Artikelbindung bzw. Mediathek-Freigabe."""
+    if not rows:
+        return set()
+    if article_id is None and user_id is None:
+        return {r.id for r in rows}
+
+    row_ids = [r.id for r in rows]
+    mv_stmt = (
+        select(
+            MediaVersionModel.asset_id,
+            MediaEntryModel.approval_status,
+            MediaEntryModel.origin_article_id,
+        )
+        .join(MediaEntryModel, MediaEntryModel.id == MediaVersionModel.media_id)
+        .where(MediaVersionModel.asset_id.in_(row_ids))
+    )
+    media_by_asset: dict[str, tuple[str, str | None]] = {}
+    for asset_id_val, approval_status, origin_aid in session.execute(mv_stmt).all():
+        media_by_asset[str(asset_id_val)] = (str(approval_status or ""), origin_aid)
+
+    allowed: set[str] = set()
+    for r in rows:
+        media_info = media_by_asset.get(r.id)
+        if media_info is not None and media_info[0] == "approved":
+            allowed.add(r.id)
+            continue
+
+        # Globale Beispiel-Assets ohne Artikelbindung und ohne Mediathek-Sperre
+        if r.article_id is None and media_info is None:
+            allowed.add(r.id)
+            continue
+
+        # Privates oder widerrufenes Asset: strikt an seinen Artikel gebunden
+        bound_aid = r.article_id or (media_info[1] if media_info else None)
+        if not bound_aid:
+            continue
+        if article_id is not None and bound_aid != article_id:
+            continue
+        if user_id is not None and not check_article_permission(
+            bound_aid, user_id, "read", allow_admin_override=False
+        ):
+            continue
+        allowed.add(r.id)
+
+    return allowed
+
+
+def get_asset(
+    asset_id: str,
+    *,
+    article_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, Any] | None:
+    """Lädt ein Grafik-Asset aus der Datenbank (unter Berücksichtigung von Artikelbindung & Mediathek-Freigabe)."""
     if not asset_id:
         return None
     with get_db_session() as session:
         row = session.get(AssetModel, asset_id)
         if not row:
             return None
+        allowed = _filter_accessible_asset_ids(
+            session,
+            [row],
+            article_id=article_id,
+            user_id=user_id,
+        )
+        if row.id not in allowed:
+            return None
         return {
             "id": row.id,
+            "article_id": row.article_id,
             "filename": row.filename,
             "mime_type": row.mime_type,
             "data": row.data,
         }
 
 
-def get_assets_by_ids(asset_ids: set[str] | list[str]) -> dict[str, dict[str, Any]]:
+def get_assets_by_ids(
+    asset_ids: set[str] | list[str],
+    *,
+    article_id: str | None = None,
+    user_id: str | None = None,
+) -> dict[str, dict[str, Any]]:
     """Lädt mehrere Grafik-Assets in einer einzigen SQL-Abfrage (vermeidet N+1 Queries)."""
     cleaned_ids = [aid for aid in set(asset_ids) if aid]
     if not cleaned_ids:
@@ -1309,14 +1402,22 @@ def get_assets_by_ids(asset_ids: set[str] | list[str]) -> dict[str, dict[str, An
     with get_db_session() as session:
         stmt = select(AssetModel).where(AssetModel.id.in_(cleaned_ids))
         rows = session.scalars(stmt).all()
+        allowed = _filter_accessible_asset_ids(
+            session,
+            rows,
+            article_id=article_id,
+            user_id=user_id,
+        )
         return {
             r.id: {
                 "id": r.id,
+                "article_id": r.article_id,
                 "filename": r.filename,
                 "mime_type": r.mime_type,
                 "data": r.data,
             }
             for r in rows
+            if r.id in allowed
         }
 
 
@@ -1900,6 +2001,33 @@ def _ensure_schema_columns() -> None:
         logger.warning("Schema-Migration io_articles übersprungen: %s", exc)
 
 
+def _ensure_local_dev_article_ownership() -> None:
+    """Ordnet im lokalen Dev-Modus (ohne Connect) unzugewiesene Bestandsartikel dem LOCAL_DEV_USER zu."""
+    from config import LOCAL_DEV_USER, is_connect_environment
+
+    if is_connect_environment() or is_technical_session_user(LOCAL_DEV_USER):
+        return
+    with get_db_session() as session:
+        assigned_ids = {
+            str(aid)
+            for aid in session.scalars(select(ArticlePermissionModel.article_id).distinct()).all()
+            if aid
+        }
+        unassigned_ids = session.scalars(
+            select(ArticleModel.id).where(ArticleModel.status != "archived")
+        ).all()
+        for aid in unassigned_ids:
+            if str(aid) not in assigned_ids:
+                session.add(
+                    ArticlePermissionModel(
+                        article_id=str(aid),
+                        user_id=LOCAL_DEV_USER,
+                        role="owner",
+                        granted_by="system_local_dev",
+                    )
+                )
+
+
 def init_db_and_seed() -> None:
     """Erstellt alle MSSQL/SQLAlchemy-Tabellen und legt initiale Beispielartikel an, falls leer."""
     Base.metadata.create_all(bind=engine)
@@ -1971,6 +2099,7 @@ def init_db_and_seed() -> None:
                     save_article(fs_doc, user="LUKB Expert Fondsleitung AG", create_revision=True, revision_note="Initiales Factsheet Expert-Ertrag")
                 except Exception as exc:
                     logger.warning(f"Factsheet seed fehlgeschlagen: {exc}")
+        _ensure_local_dev_article_ownership()
         return
 
     # Beispiel-Artikel 1: Investment Focus (2-spaltiges Flaggschiff-Layout)
@@ -2164,3 +2293,4 @@ def init_db_and_seed() -> None:
         ],
     )
     save_article(art2, user="Sabine Lustenberger, CFA", create_revision=True, revision_note="Entwurf zur Prüfung")
+    _ensure_local_dev_article_ownership()
