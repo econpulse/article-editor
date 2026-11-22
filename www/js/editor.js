@@ -1315,6 +1315,8 @@
       const blkToDup = state.article.blocks[currentIdx];
       const clone = deepClone(blkToDup);
       clone.id = uid("blk");
+      clone.share_in_media_library = "no";
+      clone.shared_media_id = null;
       state.article.blocks.splice(currentIdx + 1, 0, clone);
 
       const canvas = document.getElementById("lukb-blocks-canvas");
@@ -1374,6 +1376,38 @@
         items: [{ index: deletedIndex, block: deletedBlock }],
       });
     });
+
+    if (MARGIN_BLOCK_TYPES.has(blk.type)) {
+      const shareSel = document.createElement("select");
+      shareSel.className = "block-share-select";
+      shareSel.title = "In Mediathek teilen (direkt für alle sichtbar)";
+      [
+        { value: "no", label: "Mediathek: Nein" },
+        { value: "internal", label: "Mediathek: Intern" },
+        { value: "external", label: "Mediathek: Extern" },
+      ].forEach(function (opt) {
+        const o = document.createElement("option");
+        o.value = opt.value;
+        o.textContent = opt.label;
+        shareSel.appendChild(o);
+      });
+      const curShare = blk.share_in_media_library === "internal" || blk.share_in_media_library === "external"
+        ? blk.share_in_media_library
+        : "no";
+      shareSel.value = curShare;
+      if (curShare !== "no") shareSel.classList.add("is-shared");
+      shareSel.addEventListener("change", function () {
+        blk.share_in_media_library = shareSel.value;
+        shareSel.classList.toggle("is-shared", shareSel.value !== "no");
+        markDirty();
+        E.sendShinyEvent("lukb_sync_block_share", {
+          article_id: state.article ? state.article.id : null,
+          block: deepClone(blk),
+          ts: Date.now(),
+        });
+      });
+      headerActions.appendChild(shareSel);
+    }
 
     headerActions.appendChild(upBtn);
     headerActions.appendChild(downBtn);
@@ -2810,6 +2844,34 @@
       state.article.blocks.push(newBlk);
       renderBlocksCanvas();
       markDirty();
+    });
+
+    // Geteilten Mediathek-Block als eigenständige, bearbeitbare Kopie einfügen
+    window.Shiny.addCustomMessageHandler("lukb_insert_media_block", function (msg) {
+      if (!state.article || !msg || !msg.block) return;
+      if (msg.assets && typeof msg.assets === "object") {
+        Object.keys(msg.assets).forEach(function (aid) {
+          if (msg.assets[aid]) state.assetCache[aid] = msg.assets[aid];
+        });
+      }
+      const cloned = deepClone(msg.block);
+      cloned.id = uid("blk");
+      cloned.anchor_to = null;
+      cloned.share_in_media_library = "no";
+      cloned.shared_media_id = null;
+      state.article.blocks = state.article.blocks || [];
+      state.article.blocks.push(cloned);
+      renderBlocksCanvas();
+      markDirty();
+    });
+
+    // Rückmeldung nach Sofort-Teilen eines Blocks in der Mediathek
+    window.Shiny.addCustomMessageHandler("lukb_block_share_ack", function (msg) {
+      if (!state.article || !Array.isArray(state.article.blocks) || !msg || !msg.block_id) return;
+      const target = state.article.blocks.find(function (b) { return b && b.id === msg.block_id; });
+      if (target && msg.shared_media_id) {
+        target.shared_media_id = msg.shared_media_id;
+      }
     });
   }
 

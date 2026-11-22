@@ -169,3 +169,88 @@ def test_private_asset_binding_blocks_cross_article_overwrite_and_read() -> None
     finally:
         delete_article(art_a.id, force=True)
         delete_article(art_b.id, force=True)
+
+
+def test_share_structured_blocks_directly_visible_and_forkable() -> None:
+    from schemas.article import KpiCardsBlock, TableBlock, parse_block
+    from services.media_library import (
+        clone_shared_block_for_insert,
+        sync_article_shared_media,
+    )
+
+    init_db_and_seed()
+    user_a = f"autor.a.{uuid.uuid4().hex[:6]}@lukb.ch"
+    user_b = f"autor.b.{uuid.uuid4().hex[:6]}@lukb.ch"
+
+    # Default ist immer 'no'
+    tbl_default = TableBlock(title="Default-Tabelle")
+    kpi_default = KpiCardsBlock(cards=[{"label": "SNB", "value": "0.50 %"}])
+    assert tbl_default.share_in_media_library == "no"
+    assert kpi_default.share_in_media_library == "no"
+
+    art_a = create_new_article(user=user_a)
+    art_b = create_new_article(user=user_b)
+    try:
+        shared_title = f"Shared-KPI-{uuid.uuid4().hex[:6]}"
+        kpi_blk = parse_block(
+            {
+                "type": "kpi_cards",
+                "title": shared_title,
+                "share_in_media_library": "internal",
+                "cards": [{"icon": "central_bank", "label": "SNB", "value": "0.50 %", "tone": "navy"}],
+            }
+        ).model_dump()
+        art_a.blocks.append(kpi_blk)
+        save_article(art_a, user=user_a)
+
+        sync_res = sync_article_shared_media(art_a, user_id=user_a)
+        assert len(sync_res) == 1
+        assert sync_res[0]["shared"] is True
+        media_id_a = sync_res[0]["media_id"]
+        assert art_a.blocks[-1]["shared_media_id"] == media_id_a
+
+        # Direkt für User B sichtbar (approval_status == 'approved')
+        res_b = search_media_library(user_b, query=shared_title, media_type="kpi_cards")
+        assert res_b["total"] == 1
+        item = res_b["items"][0]
+        assert item["media_id"] == media_id_a
+        assert item["approval_status"] == "approved"
+        assert item["usage_channel"] == "internal"
+        assert item["thumbnail_data_uri"].startswith("data:image/svg+xml;base64,")
+
+        # User B fügt eine eigenständige Kopie ein, ändert sie und teilt sie als neues Asset
+        cloned = clone_shared_block_for_insert(
+            item["latest_asset_id"],
+            user_id=user_b,
+            target_article_id=art_b.id,
+        )
+        assert cloned is not None
+        assert cloned["kind"] == "block"
+        fork_blk = cloned["block"]
+        assert fork_blk["share_in_media_library"] == "no"
+        assert "shared_media_id" not in fork_blk
+
+        fork_title = f"Fork-KPI-{uuid.uuid4().hex[:6]}"
+        fork_blk["title"] = fork_title
+        fork_blk["cards"][0]["value"] = "0.25 %"
+        fork_blk["share_in_media_library"] = "external"
+        art_b.blocks.append(fork_blk)
+        sync_b = sync_article_shared_media(art_b, user_id=user_b)
+        assert len(sync_b) == 1
+        media_id_b = sync_b[0]["media_id"]
+        assert media_id_b != media_id_a
+
+        # Original von User A bleibt unverändert
+        orig_res = search_media_library(user_a, query=shared_title)
+        assert orig_res["total"] == 1
+        orig_clone = clone_shared_block_for_insert(orig_res["items"][0]["latest_asset_id"], user_id=user_a)
+        assert orig_clone["block"]["cards"][0]["value"] == "0.50 %"
+
+        # Zurückstellen auf 'no' blendet den Eintrag für andere aus, Kopie bleibt intakt
+        art_a.blocks[-1]["share_in_media_library"] = "no"
+        sync_article_shared_media(art_a, user_id=user_a)
+        hidden_res = search_media_library(user_b, query=shared_title)
+        assert hidden_res["total"] == 0
+    finally:
+        delete_article(art_a.id, force=True)
+        delete_article(art_b.id, force=True)

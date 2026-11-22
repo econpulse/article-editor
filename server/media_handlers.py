@@ -16,9 +16,11 @@ from database.repository import get_asset
 from server.state import SessionState
 from services.media_library import (
     approve_media_release,
+    clone_shared_block_for_insert,
     request_media_release,
     revoke_media_release,
     search_media_library,
+    sync_block_to_media_library,
 )
 
 logger = logging.getLogger("lukb_cms.media_handlers")
@@ -149,7 +151,19 @@ def register_media_handlers(
                 ui.div(
                     ui.div(
                         ui.input_text("media_search_query", "Suche", value=query, placeholder="Titel, Schlagwort, Quelle…"),
-                        ui.input_select("media_filter_type", "Typ", choices={"all": "Alle", "image": "Bilder", "chart": "Charts"}, selected=mtype),
+                        ui.input_select(
+                            "media_filter_type",
+                            "Typ",
+                            choices={
+                                "all": "Alle",
+                                "image": "Bilder",
+                                "chart": "Charts",
+                                "table": "Tabellen",
+                                "kpi_cards": "KPI-Karten",
+                                "media_text": "Media & Text",
+                            },
+                            selected=mtype,
+                        ),
                         ui.input_select("media_filter_channel", "Kanal", choices={"all": "Alle", "internal": "Intern", "external": "Extern"}, selected=channel),
                         ui.input_action_button("btn_media_search", "Suchen", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
                         style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:8px;align-items:end;margin-bottom:12px;",
@@ -232,25 +246,67 @@ def register_media_handlers(
         aid = str(payload.get("asset_id", "")).strip()
         if not aid:
             return
-        # Originaldatei erst beim Einfügen laden (serverseitig an Artikel/Mediathek-Freigabe gebunden)
-        asset = await asyncio.to_thread(
-            get_asset,
+        res = await asyncio.to_thread(
+            clone_shared_block_for_insert,
             aid,
-            article_id=state.current_article_id.get(),
             user_id=state.current_user_id,
+            target_article_id=state.current_article_id.get(),
         )
-        if not asset or not asset.get("data"):
-            ui.notification_show("Originaldatei konnte nicht geladen werden.", type="warning", duration=4)
+        if not res:
+            ui.notification_show("Asset konnte nicht geladen werden.", type="warning", duration=4)
             return
-        b64 = base64.b64encode(asset["data"]).decode("ascii")
-        data_uri = f"data:{asset['mime_type']};base64,{b64}"
         ui.modal_remove()
+        if res.get("kind") == "block":
+            await session.send_custom_message(
+                "lukb_insert_media_block",
+                {
+                    "block": res["block"],
+                    "assets": res.get("assets") or {},
+                },
+            )
+            return
         await session.send_custom_message(
             "lukb_insert_media_figure",
             {
-                "asset_id": aid,
-                "data_uri": data_uri,
-                "title": payload.get("title") or asset.get("filename") or "Grafik",
-                "source": payload.get("source") or "",
+                "asset_id": res["asset_id"],
+                "data_uri": res["data_uri"],
+                "title": str(payload.get("title", "") or ""),
+                "source": str(payload.get("source", "") or ""),
             },
         )
+
+    @reactive.effect
+    @reactive.event(input.lukb_sync_block_share)
+    async def _on_sync_block_share() -> None:
+        payload = input.lukb_sync_block_share()
+        if not isinstance(payload, dict) or not state.current_user_id:
+            return
+        block = payload.get("block")
+        if not isinstance(block, dict):
+            return
+        article_id = str(payload.get("article_id") or state.current_article_id.get() or "").strip() or None
+        if article_id and not await asyncio.to_thread(state.can_access_article, article_id, "edit"):
+            return
+        res = await asyncio.to_thread(
+            sync_block_to_media_library,
+            article_id,
+            block,
+            state.current_user_id,
+        )
+        await session.send_custom_message(
+            "lukb_block_share_ack",
+            {
+                "block_id": block.get("id"),
+                "shared_media_id": res.get("media_id"),
+                "share_in_media_library": block.get("share_in_media_library", "no"),
+            },
+        )
+        if res.get("shared"):
+            ch_lbl = "Extern" if res.get("usage_channel") == "external" else "Intern"
+            ui.notification_show(
+                f"In Mediathek geteilt ({ch_lbl}, direkt für alle sichtbar).",
+                type="message",
+                duration=3,
+            )
+        else:
+            ui.notification_show("Mediathek-Freigabe für diesen Block deaktiviert.", type="message", duration=3)

@@ -19,6 +19,7 @@ from database.repository import (
     save_asset,
 )
 from schemas.article import ArticleDocument
+from services.media_library import sync_article_shared_media
 from server.collab import (
     broadcast_article_list_to_all,
     broadcast_article_sync,
@@ -202,6 +203,7 @@ def register_editor_handlers(
                     base_doc = None
 
             user_label = state.current_user
+            await asyncio.to_thread(sync_article_shared_media, doc, state.current_user_id)
             save_info = await asyncio.to_thread(
                 save_article,
                 doc=doc,

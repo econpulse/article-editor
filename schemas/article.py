@@ -105,6 +105,7 @@ class BoxEndBlock(BaseModel):
 
 
 FullPositionMode = Literal["auto", "top", "bottom", "inline"]
+MediaShareMode = Literal["no", "internal", "external"]
 
 
 def _normalize_full_position(v: Any) -> str:
@@ -117,6 +118,17 @@ def _normalize_anchor_to(v: Any) -> Optional[str]:
         return None
     s = str(v).strip()
     return s if s and s.lower() != "auto" else None
+
+
+def _normalize_share_mode(v: Any) -> str:
+    if isinstance(v, bool):
+        return "internal" if v else "no"
+    s = str(v or "no").strip().lower()
+    if s in ("internal", "external"):
+        return s
+    if s in ("yes", "ja", "true", "1"):
+        return "internal"
+    return "no"
 
 
 class MarginAnchorBlockBase(BaseModel):
@@ -134,6 +146,14 @@ class MarginAnchorBlockBase(BaseModel):
         default=None,
         description="Block-ID des Bezugsabsatzes (Hauptspalte), an dem dieses Randelement verankert ist",
     )
+    share_in_media_library: MediaShareMode = Field(
+        default="no",
+        description="Block als eigenständige Vorlage in der Mediathek teilen ('no', 'internal', 'external')",
+    )
+    shared_media_id: Optional[str] = Field(
+        default=None,
+        description="ID des verknüpften Mediathek-Eintrags, falls dieser Block geteilt wird",
+    )
 
     @field_validator("full_position", mode="before")
     @classmethod
@@ -144,6 +164,11 @@ class MarginAnchorBlockBase(BaseModel):
     @classmethod
     def validate_anchor_to(cls, v: Any) -> Optional[str]:
         return _normalize_anchor_to(v)
+
+    @field_validator("share_in_media_library", mode="before")
+    @classmethod
+    def validate_share_in_media_library(cls, v: Any) -> str:
+        return _normalize_share_mode(v)
 
 
 class ChartBlockBase(MarginAnchorBlockBase):
