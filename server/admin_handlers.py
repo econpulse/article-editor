@@ -617,7 +617,9 @@ def register_admin_handlers(
         return search_q, only_orphans
 
     async def _render_admin_articles_table() -> ui.Tag:
-        _ = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        tick = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        if tick <= 0:
+            return ui.span()
         if not await asyncio.to_thread(is_global_admin, state.current_user_id):
             return ui.span()
 
@@ -665,7 +667,9 @@ def register_admin_handlers(
         )
 
     async def _render_admin_users_table() -> ui.Tag:
-        _ = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        tick = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        if tick <= 0:
+            return ui.span()
         if not await asyncio.to_thread(is_global_admin, state.current_user_id):
             return ui.span()
 
@@ -762,7 +766,9 @@ def register_admin_handlers(
         )
 
     async def _render_admin_publications_audit() -> ui.Tag:
-        _ = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        tick = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        if tick <= 0:
+            return ui.span()
         if not await asyncio.to_thread(is_global_admin, state.current_user_id):
             return ui.span()
 
@@ -897,68 +903,9 @@ def register_admin_handlers(
             return
 
         _bump_admin_refresh()
-        ui.modal_show(
-            ui.modal(
-                ui.navset_tab(
-                    ui.nav_panel(
-                        "Artikel und Benutzer",
-                        ui.div(
-                            ui.div(
-                                ui.input_text("admin_article_search", "Artikel suchen", value="", placeholder="Titel, Autor, Kategorie…"),
-                                ui.input_checkbox("admin_only_orphans", "Nur verwaiste Artikel anzeigen", value=False),
-                                ui.input_action_button("btn_admin_refresh", "Filter anwenden", class_="btn-lukb btn-lukb-ghost btn-lukb-sm"),
-                                style="display:flex;gap:12px;align-items:flex-end;margin:10px 0;",
-                            ),
-                            ui.output_ui("admin_articles_table_ui"),
-                            ui.div(
-                                ui.h6("Artikel zuordnen / Verantwortung übertragen", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
-                                ui.div(
-                                    ui.input_text("admin_assign_article_id", "Artikel-ID", placeholder="Artikel-ID aus Tabelle wählen…"),
-                                    ui.input_text("admin_assign_user_id", "Ziel-Benutzerkennung", placeholder="z. B. autor.a@lukb.ch"),
-                                    ui.input_select(
-                                        "admin_assign_role",
-                                        "Aktion / Rolle",
-                                        choices={
-                                            "transfer_owner": "Verantwortung übertragen (Owner)",
-                                            **{r: ROLE_LABELS[r] for r in VALID_ARTICLE_ROLES},
-                                            "revoke": "Zugriff entziehen",
-                                        },
-                                    ),
-                                    style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;",
-                                ),
-                                ui.tags.script(
-                                    "setTimeout(function(){var el=document.getElementById('admin_assign_user_id');if(el)el.setAttribute('list','lukb-admin-users-datalist');},0);"
-                                ),
-                                ui.input_action_button("btn_admin_apply_article_perm", "Zuordnung ausführen", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
-                                style="background:#F4F7FA;padding:10px;border-radius:6px;border:1px solid #D6DEE8;margin-bottom:12px;",
-                            ),
-                            ui.div(
-                                ui.h6("Globale Benutzerrollen & Konten (Admin, Publizieren & Alias)", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
-                                ui.div(
-                                    ui.input_text("admin_role_user_id", "Benutzerkennung", placeholder="z. B. editor@lukb.ch"),
-                                    ui.input_text("admin_role_display_name", "Alias / Name", placeholder="z. B. Max Muster"),
-                                    ui.input_checkbox("admin_role_is_admin", "Admin-Zugriff", value=False),
-                                    ui.input_checkbox("admin_role_can_publish", "Darf publizieren", value=False),
-                                    ui.input_action_button("btn_admin_save_user_role", "Rolle speichern", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
-                                    style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;",
-                                ),
-                                ui.output_ui("admin_users_table_ui"),
-                                style="background:#FFFFFF;padding:10px;border-radius:6px;border:1px solid #D6DEE8;",
-                            ),
-                        ),
-                    ),
-                    ui.nav_panel(
-                        "Publikationen und Protokoll",
-                        ui.output_ui("admin_publications_audit_ui"),
-                    ),
-                    selected="Publikationen und Protokoll" if active_tab == "audit" else "Artikel und Benutzer",
-                ),
-                title="Admin-Dashboard — Artikelrechte, Benutzer & Protokoll",
-                size="xl",
-                easy_close=True,
-                fade=False,
-                footer=ui.modal_button("Schliessen", class_="btn-lukb btn-lukb-ghost"),
-            )
+        await session.send_custom_message(
+            "lukb_admin_modal",
+            {"open": True, "tab": "audit" if active_tab == "audit" else "articles"},
         )
 
     @reactive.effect

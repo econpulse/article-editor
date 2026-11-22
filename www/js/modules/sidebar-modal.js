@@ -696,6 +696,36 @@
   window.lukbOpenPubModal = openPubModal;
   window.lukbClosePubModal = closePubModal;
 
+  function switchAdminModalTab(tab) {
+    const activeTab = tab === "audit" ? "audit" : "articles";
+    document.querySelectorAll("[data-admin-tab]").forEach(function (btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-admin-tab") === activeTab);
+    });
+    const articlesPane = document.getElementById("admin-tab-pane-articles");
+    const auditPane = document.getElementById("admin-tab-pane-audit");
+    if (articlesPane) articlesPane.style.display = activeTab === "articles" ? "block" : "none";
+    if (auditPane) auditPane.style.display = activeTab === "audit" ? "block" : "none";
+  }
+
+  function openAdminModal(tab) {
+    const backdrop = document.getElementById("lukb-admin-modal-backdrop");
+    if (!backdrop) return;
+    switchAdminModalTab(tab || "articles");
+    backdrop.style.display = "flex";
+    const userInp = document.getElementById("admin_assign_user_id");
+    if (userInp) userInp.setAttribute("list", "lukb-admin-users-datalist");
+  }
+
+  function closeAdminModal() {
+    const backdrop = document.getElementById("lukb-admin-modal-backdrop");
+    if (!backdrop) return;
+    backdrop.style.display = "none";
+  }
+
+  window.lukbOpenAdminModal = openAdminModal;
+  window.lukbCloseAdminModal = closeAdminModal;
+  window.lukbSwitchAdminTab = switchAdminModalTab;
+
   function bindSidebarAndModalListeners() {
     const btnToggleTop = document.getElementById("btn-toggle-sidebar");
     const btnToggleInner = document.getElementById("btn-sidebar-collapse-inner");
@@ -738,6 +768,14 @@
       backdrop.addEventListener("click", function (ev) {
         if (ev.target === backdrop) {
           closePubModal();
+        }
+      });
+    }
+    const adminBackdrop = document.getElementById("lukb-admin-modal-backdrop");
+    if (adminBackdrop) {
+      adminBackdrop.addEventListener("click", function (ev) {
+        if (ev.target === adminBackdrop) {
+          closeAdminModal();
         }
       });
     }
@@ -823,9 +861,15 @@
             performUndo();
           }
         }
-      } else if (ev.key === "Escape" && state.modalOpen) {
-        ev.preventDefault();
-        closePubModal();
+      } else if (ev.key === "Escape") {
+        const adminBackdrop = document.getElementById("lukb-admin-modal-backdrop");
+        if (adminBackdrop && adminBackdrop.style.display === "flex") {
+          ev.preventDefault();
+          closeAdminModal();
+        } else if (state.modalOpen) {
+          ev.preventDefault();
+          closePubModal();
+        }
       }
     });
   }

@@ -2900,6 +2900,18 @@
         target.shared_media_id = msg.shared_media_id;
       }
     });
+
+    // Persistentes Admin-Dashboard öffnen / schliessen
+    window.Shiny.addCustomMessageHandler("lukb_admin_modal", function (msg) {
+      if (!msg) return;
+      if (msg.open) {
+        if (typeof window.lukbOpenAdminModal === "function") {
+          window.lukbOpenAdminModal(msg.tab || "articles");
+        }
+      } else if (typeof window.lukbCloseAdminModal === "function") {
+        window.lukbCloseAdminModal();
+      }
+    });
   }
 
   function initEditorApp() {

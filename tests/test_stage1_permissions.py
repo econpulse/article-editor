@@ -445,7 +445,12 @@ def test_admin_dashboard_does_not_reopen_modal_on_actions(monkeypatch):
                 return None
 
         shown_modals = []
+        sent_messages = []
         outputs_registered = {}
+
+        class _FakeSession:
+            async def send_custom_message(self, msg_type, payload):
+                sent_messages.append((msg_type, payload))
 
         def _fake_output(id=None):
             def _dec(fn):
@@ -462,7 +467,7 @@ def test_admin_dashboard_does_not_reopen_modal_on_actions(monkeypatch):
         monkeypatch.setattr(admin_handlers.ui, "notification_show", lambda *_a, **_kw: None)
         monkeypatch.setattr(admin_handlers, "broadcast_article_list_to_all", _noop_async)
 
-        admin_handlers.register_admin_handlers(_FakeInput(), _fake_output, SimpleNamespace(), _FakeState())
+        admin_handlers.register_admin_handlers(_FakeInput(), _fake_output, _FakeSession(), _FakeState())
 
         assert "admin_articles_table_ui" in outputs_registered
         assert "admin_users_table_ui" in outputs_registered
@@ -473,9 +478,12 @@ def test_admin_dashboard_does_not_reopen_modal_on_actions(monkeypatch):
             await effects["_on_admin_apply_article_perm"]()
             await effects["_on_admin_save_user_role"]()
             await effects["_on_refresh_admin_dashboard"]()
+            tbl = await outputs_registered["admin_articles_table_ui"]()
+            assert "<table" in str(tbl)
 
         asyncio.run(_run())
-        assert len(shown_modals) == 1
+        assert len(shown_modals) == 0
+        assert sent_messages == [("lukb_admin_modal", {"open": True, "tab": "articles"})]
     finally:
         from database.models import UserRoleModel
         with get_db_session() as s:

@@ -697,8 +697,7 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   position: sticky;
   top: -22px;
   z-index: 30;
-  background: rgba(238, 242, 247, 0.94);
-  backdrop-filter: blur(6px);
+  background: #EEF2F7;
   padding: 10px 0;
   margin-bottom: 12px;
   border-bottom: 1px solid var(--lukb-border);
@@ -2499,8 +2498,7 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
 .pub-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 24, 51, 0.58);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 24, 51, 0.62);
   z-index: 2500;
   display: flex;
   align-items: center;
@@ -2692,6 +2690,35 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.admin-modal-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 10px 22px 0 22px;
+  border-bottom: 1px solid var(--lukb-border);
+  background: #F8FAFC;
+  flex-shrink: 0;
+}
+
+.admin-modal-tab-btn {
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--lukb-muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.admin-modal-tab-btn.active {
+  background: #FFFFFF;
+  color: var(--lukb-navy);
+  border-color: var(--lukb-border);
+  border-bottom: 1px solid #FFFFFF;
 }
 
 

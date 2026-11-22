@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from shiny import ui
 
+from database.permissions import VALID_ARTICLE_ROLES
 from services.renderer import list_available_templates
+
+_ADMIN_ROLE_LABELS = {
+    "owner": "Verantwortlich (Owner)",
+    "editor": "Mitarbeit (Editor)",
+    "reviewer": "Prüfung (Reviewer)",
+    "viewer": "Lesen (Viewer)",
+}
 
 
 def _short_template_label(tpl: dict) -> str:
@@ -198,6 +206,111 @@ def revisions_modal_ui() -> ui.Tag:
             style="max-width:860px;",
         ),
         id="lukb-rev-modal-backdrop",
+        class_="pub-modal-backdrop",
+        style="display:none;",
+    )
+
+
+def admin_dashboard_modal_ui() -> ui.Tag:
+    """Rendert das persistente Admin-Dashboard als Overlay ohne Bootstrap-Modal-Teardown."""
+    return ui.div(
+        ui.div(
+            ui.div(
+                ui.h2("Admin-Dashboard — Artikelrechte, Benutzer & Protokoll", class_="pub-modal-title"),
+                ui.tags.button(
+                    "✕ Schliessen (Esc)",
+                    id="btn-close-admin-modal",
+                    type="button",
+                    class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                    onclick="if(window.lukbCloseAdminModal){window.lukbCloseAdminModal();}",
+                ),
+                class_="pub-modal-header",
+            ),
+            ui.div(
+                ui.tags.button(
+                    "Artikel und Benutzer",
+                    type="button",
+                    class_="admin-modal-tab-btn active",
+                    **{"data-admin-tab": "articles"},
+                    onclick="if(window.lukbSwitchAdminTab){window.lukbSwitchAdminTab('articles');}",
+                ),
+                ui.tags.button(
+                    "Publikationen und Protokoll",
+                    type="button",
+                    class_="admin-modal-tab-btn",
+                    **{"data-admin-tab": "audit"},
+                    onclick="if(window.lukbSwitchAdminTab){window.lukbSwitchAdminTab('audit');}",
+                ),
+                class_="admin-modal-tabs",
+            ),
+            ui.div(
+                ui.div(
+                    ui.div(
+                        ui.input_text("admin_article_search", "Artikel suchen", value="", placeholder="Titel, Autor, Kategorie…"),
+                        ui.input_checkbox("admin_only_orphans", "Nur verwaiste Artikel anzeigen", value=False),
+                        ui.input_action_button("btn_admin_refresh", "Filter anwenden", class_="btn-lukb btn-lukb-ghost btn-lukb-sm"),
+                        style="display:flex;gap:12px;align-items:flex-end;margin:0 0 10px 0;flex-wrap:wrap;",
+                    ),
+                    ui.output_ui("admin_articles_table_ui"),
+                    ui.div(
+                        ui.h6("Artikel zuordnen / Verantwortung übertragen", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
+                        ui.div(
+                            ui.input_text("admin_assign_article_id", "Artikel-ID", placeholder="Artikel-ID aus Tabelle wählen…"),
+                            ui.input_text("admin_assign_user_id", "Ziel-Benutzerkennung", placeholder="z. B. autor.a@lukb.ch"),
+                            ui.input_select(
+                                "admin_assign_role",
+                                "Aktion / Rolle",
+                                choices={
+                                    "transfer_owner": "Verantwortung übertragen (Owner)",
+                                    **{r: _ADMIN_ROLE_LABELS.get(r, r) for r in VALID_ARTICLE_ROLES},
+                                    "revoke": "Zugriff entziehen",
+                                },
+                            ),
+                            style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;",
+                        ),
+                        ui.tags.script(
+                            "setTimeout(function(){var el=document.getElementById('admin_assign_user_id');if(el)el.setAttribute('list','lukb-admin-users-datalist');},0);"
+                        ),
+                        ui.input_action_button("btn_admin_apply_article_perm", "Zuordnung ausführen", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
+                        style="background:#F4F7FA;padding:10px;border-radius:6px;border:1px solid #D6DEE8;margin-bottom:12px;",
+                    ),
+                    ui.div(
+                        ui.h6("Globale Benutzerrollen & Konten (Admin, Publizieren & Alias)", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
+                        ui.div(
+                            ui.input_text("admin_role_user_id", "Benutzerkennung", placeholder="z. B. editor@lukb.ch"),
+                            ui.input_text("admin_role_display_name", "Alias / Name", placeholder="z. B. Max Muster"),
+                            ui.input_checkbox("admin_role_is_admin", "Admin-Zugriff", value=False),
+                            ui.input_checkbox("admin_role_can_publish", "Darf publizieren", value=False),
+                            ui.input_action_button("btn_admin_save_user_role", "Rolle speichern", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
+                            style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;",
+                        ),
+                        ui.output_ui("admin_users_table_ui"),
+                        style="background:#FFFFFF;padding:10px;border-radius:6px;border:1px solid #D6DEE8;",
+                    ),
+                    id="admin-tab-pane-articles",
+                ),
+                ui.div(
+                    ui.output_ui("admin_publications_audit_ui"),
+                    id="admin-tab-pane-audit",
+                    style="display:none;",
+                ),
+                style="padding:16px 22px;overflow-y:auto;flex:1;",
+            ),
+            ui.div(
+                ui.span("Tipp: Mit Escape oder Schliessen-Button beenden", class_="pub-modal-hint"),
+                ui.tags.button(
+                    "Schliessen",
+                    id="btn-footer-close-admin-modal",
+                    type="button",
+                    class_="btn-lukb btn-lukb-ghost",
+                    onclick="if(window.lukbCloseAdminModal){window.lukbCloseAdminModal();}",
+                ),
+                class_="pub-modal-footer",
+            ),
+            class_="pub-modal-dialog",
+            style="max-width:1200px;max-height:90vh;",
+        ),
+        id="lukb-admin-modal-backdrop",
         class_="pub-modal-backdrop",
         style="display:none;",
     )
