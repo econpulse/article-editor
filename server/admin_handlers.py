@@ -341,6 +341,7 @@ def register_admin_handlers(
             title="Artikel-Berechtigungen & Mitarbeit",
             size="l",
             easy_close=True,
+            fade=False,
             footer=ui.modal_button("Schliessen", class_="btn-lukb btn-lukb-ghost"),
         )
 
@@ -955,6 +956,7 @@ def register_admin_handlers(
                 title="Admin-Dashboard — Artikelrechte, Benutzer & Protokoll",
                 size="xl",
                 easy_close=True,
+                fade=False,
                 footer=ui.modal_button("Schliessen", class_="btn-lukb btn-lukb-ghost"),
             )
         )
