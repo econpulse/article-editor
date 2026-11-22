@@ -502,7 +502,7 @@ def delete_user_account(
     with get_db_session() as session:
         active_pub_count = session.scalar(
             select(func.count(PublishedSnapshotModel.id)).where(
-                PublishedSnapshotModel.is_active.is_(True),
+                PublishedSnapshotModel.is_active == True,  # noqa: E712
                 func.lower(PublishedSnapshotModel.published_by) == target,
             )
         ) or 0
@@ -627,7 +627,7 @@ def list_known_users() -> list[dict[str, Any]]:
                     func.lower(PublishedSnapshotModel.published_by),
                     func.count(PublishedSnapshotModel.id),
                 )
-                .where(PublishedSnapshotModel.is_active.is_(True))
+                .where(PublishedSnapshotModel.is_active == True)  # noqa: E712
                 .group_by(func.lower(PublishedSnapshotModel.published_by))
             ).all()
         )
