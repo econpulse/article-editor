@@ -20,10 +20,40 @@ from services.renderer import render_block_chart_svg, render_preview_pdf_base64,
 logger = logging.getLogger("lukb_cms.collab")
 
 PEER_COLORS = ["#009FE3", "#0D9488", "#C59B27", "#7C3AED", "#E11D48", "#2563EB"]
+_PEER_SEND_TIMEOUT_SECONDS = 2.5
 
 # Globaler Kollaborations-Speicher für alle aktiven Shiny-Sessions
 ACTIVE_PEERS: dict[str, dict[str, Any]] = {}
 _ACTIVE_PEERS = ACTIVE_PEERS  # Abwärtskompatibler Alias
+
+
+async def _safe_send_custom_message(
+    session_id: str,
+    sess: Session | None,
+    msg_type: str,
+    payload: dict[str, Any],
+    *,
+    timeout: float | None = None,
+) -> bool:
+    """Sendet eine Custom-Message mit Timeout, damit verwaiste/hängende WebSockets andere Sessions nicht blockieren."""
+    if sess is None:
+        return False
+    effective_timeout = _PEER_SEND_TIMEOUT_SECONDS if timeout is None else timeout
+    try:
+        await asyncio.wait_for(sess.send_custom_message(msg_type, payload), timeout=effective_timeout)
+        return True
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Timeout (%.1fs) beim Senden von %s an Session %s — entferne verwaisten Peer.",
+            effective_timeout,
+            msg_type,
+            session_id,
+        )
+        ACTIVE_PEERS.pop(session_id, None)
+        return False
+    except Exception as exc:
+        logger.debug("Fehler beim Senden von %s an Session %s: %s", msg_type, session_id, exc)
+        return False
 
 
 def get_peer_color(session_id: str) -> str:
@@ -167,6 +197,7 @@ async def broadcast_global_presence() -> None:
     """Sendet die globale Artikel-Belegung empfängerbezogen gefiltert an alle Sessions."""
     by_article = get_active_articles_presence()
     allowed_cache: dict[str, set[str]] = {}
+    send_tasks = []
     for sid, info in list(ACTIVE_PEERS.items()):
         sess: Session | None = info.get("session")
         if sess is None:
@@ -175,16 +206,19 @@ async def broadcast_global_presence() -> None:
         if uid not in allowed_cache:
             allowed_cache[uid] = await asyncio.to_thread(get_accessible_article_ids, uid)
         filtered_presence = filter_presence_by_allowed_articles(by_article, allowed_cache[uid])
-        try:
-            await sess.send_custom_message(
+        send_tasks.append(
+            _safe_send_custom_message(
+                sid,
+                sess,
                 "lukb_global_presence",
                 {
                     "self_session_id": sid,
                     "active_peers_by_article": filtered_presence,
                 },
             )
-        except Exception:
-            pass
+        )
+    if send_tasks:
+        await asyncio.gather(*send_tasks, return_exceptions=True)
 
 
 async def broadcast_article_list_to_all(exclude_session_id: str | None = None) -> None:
@@ -200,6 +234,7 @@ async def broadcast_article_list_to_all(exclude_session_id: str | None = None) -
     by_article = get_active_articles_presence()
     items_by_user: dict[str, list[dict[str, Any]]] = {}
     allowed_by_user: dict[str, set[str]] = {}
+    send_tasks = []
 
     for sid, info in targets:
         sess: Session | None = info.get("session")
@@ -216,8 +251,10 @@ async def broadcast_article_list_to_all(exclude_session_id: str | None = None) -
             items_by_user[uid] = user_items
             allowed_by_user[uid] = {it["id"] for it in user_items if it.get("id")}
         filtered_presence = filter_presence_by_allowed_articles(by_article, allowed_by_user[uid])
-        try:
-            await sess.send_custom_message(
+        send_tasks.append(
+            _safe_send_custom_message(
+                sid,
+                sess,
                 "lukb_global_article_list",
                 {
                     "all_articles": items_by_user[uid],
@@ -226,8 +263,9 @@ async def broadcast_article_list_to_all(exclude_session_id: str | None = None) -
                     "active_peers_by_article": filtered_presence,
                 },
             )
-        except Exception:
-            pass
+        )
+    if send_tasks:
+        await asyncio.gather(*send_tasks, return_exceptions=True)
 
 
 async def enforce_article_access_revoked(article_id: str, target_user: str) -> int:
@@ -263,7 +301,9 @@ async def enforce_article_access_revoked(article_id: str, target_user: str) -> i
                 filtered_presence = filter_presence_by_allowed_articles(
                     get_active_articles_presence(), allowed_ids
                 )
-                await sess.send_custom_message(
+                await _safe_send_custom_message(
+                    sid,
+                    sess,
                     "lukb_access_revoked",
                     {
                         "article_id": article_id,
@@ -302,16 +342,15 @@ async def transfer_block_lock(requester_session_id: str, block_id: str) -> None:
             info["focused_target"] = ""
             sess: Session | None = info.get("session")
             if sess is not None:
-                try:
-                    await sess.send_custom_message(
-                        "lukb_collab_notice",
-                        {
-                            "message": f"✏️ {req_user} hat die Bearbeitung des Blocks übernommen.",
-                            "block_id": block_id,
-                        },
-                    )
-                except Exception:
-                    pass
+                await _safe_send_custom_message(
+                    sid,
+                    sess,
+                    "lukb_collab_notice",
+                    {
+                        "message": f"✏️ {req_user} hat die Bearbeitung des Blocks übernommen.",
+                        "block_id": block_id,
+                    },
+                )
 
     req_info["focused_target"] = block_id
     await broadcast_presence(article_id)
@@ -340,14 +379,17 @@ async def broadcast_presence(article_id: str) -> None:
     if not article_id:
         return
     peers = get_article_peers(article_id)
+    send_tasks = []
     for sid, info in list(ACTIVE_PEERS.items()):
         if info.get("article_id") == article_id:
             if not await asyncio.to_thread(check_article_permission, article_id, info.get("user"), "read"):
                 continue
             sess: Session | None = info.get("session")
             if sess is not None:
-                try:
-                    await sess.send_custom_message(
+                send_tasks.append(
+                    _safe_send_custom_message(
+                        sid,
+                        sess,
                         "lukb_collab_presence",
                         {
                             "article_id": article_id,
@@ -355,8 +397,9 @@ async def broadcast_presence(article_id: str) -> None:
                             "peers": peers,
                         },
                     )
-                except Exception:
-                    pass
+                )
+    if send_tasks:
+        await asyncio.gather(*send_tasks, return_exceptions=True)
 
 
 async def broadcast_article_sync(
@@ -383,6 +426,7 @@ async def broadcast_article_sync(
 
     resolved_assets = assets_map if assets_map is not None else collect_article_assets_map(doc)
     doc_payload = doc.model_dump()
+    send_tasks = []
     for sid, info in targets:
         sess: Session | None = info.get("session")
         sync_cb = info.get("sync_doc_cb")
@@ -392,8 +436,10 @@ async def broadcast_article_sync(
             except Exception:
                 pass
         if sess is not None:
-            try:
-                await sess.send_custom_message(
+            send_tasks.append(
+                _safe_send_custom_message(
+                    sid,
+                    sess,
                     "lukb_remote_sync",
                     {
                         "article": doc_payload,
@@ -403,8 +449,9 @@ async def broadcast_article_sync(
                         "publish_sync": publish_sync,
                     },
                 )
-            except Exception:
-                pass
+            )
+    if send_tasks:
+        await asyncio.gather(*send_tasks, return_exceptions=True)
 
 
 async def broadcast_preview_to_coauthors(
@@ -456,13 +503,16 @@ async def broadcast_preview_to_coauthors(
         except Exception:
             shared_pdf_base64 = None
 
+    send_tasks = []
     for _sid, info in coauthor_targets:
         peer_sess: Session | None = info.get("session")
         if peer_sess is not None:
-            try:
-                peer_auto = bool(info.get("auto_preview", True))
-                peer_mode = info.get("preview_mode", "pdf")
-                await peer_sess.send_custom_message(
+            peer_auto = bool(info.get("auto_preview", True))
+            peer_mode = info.get("preview_mode", "pdf")
+            send_tasks.append(
+                _safe_send_custom_message(
+                    _sid,
+                    peer_sess,
                     "lukb_update_preview",
                     {
                         "pdf_base64": shared_pdf_base64 if (peer_auto and peer_mode == "pdf") else None,
@@ -471,8 +521,9 @@ async def broadcast_preview_to_coauthors(
                         "web_skipped": peer_mode != "web",
                     },
                 )
-            except Exception:
-                pass
+            )
+    if send_tasks:
+        await asyncio.gather(*send_tasks, return_exceptions=True)
 
 
 def set_peer_article(session_id: str, article_id: str) -> str:

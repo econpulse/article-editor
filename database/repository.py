@@ -1997,6 +1997,18 @@ def _ensure_schema_columns() -> None:
                     if col_name not in snap_cols:
                         conn.execute(text(f"ALTER TABLE io_published_snapshots ADD {add_kw}{col_name} {col_def}"))
                         conn.commit()
+            if "io_user_roles" in inspector.get_table_names():
+                role_cols = {c["name"] for c in inspector.get_columns("io_user_roles")}
+                if "is_active" not in role_cols:
+                    if engine.dialect.name == "sqlite":
+                        conn.execute(
+                            text("ALTER TABLE io_user_roles ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT 1")
+                        )
+                    else:
+                        conn.execute(
+                            text("ALTER TABLE io_user_roles ADD is_active BIT NOT NULL DEFAULT 1")
+                        )
+                    conn.commit()
     except Exception as exc:
         logger.warning("Schema-Migration io_articles übersprungen: %s", exc)
 

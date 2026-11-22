@@ -198,6 +198,7 @@ class UserRoleModel(Base):
     display_name: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="")
     is_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     can_publish: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     updated_by: Mapped[str] = mapped_column(Unicode(150), nullable=False, default="System")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utc_now, onupdate=_utc_now, nullable=False

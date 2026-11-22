@@ -27,6 +27,7 @@ from database.models import (
     ArticleModel,
     ArticlePermissionModel,
     AuditLogModel,
+    PublishedSnapshotModel,
     UserRoleModel,
 )
 
@@ -63,6 +64,18 @@ def record_audit_log(
     )
 
 
+def is_user_active(user_id: str | None) -> bool:
+    """Prüft, ob das Benutzerkonto aktiv ist (deaktivierte Konten in io_user_roles liefern False)."""
+    uid = normalize_user_id(user_id)
+    if not uid or is_technical_session_user(uid):
+        return False
+    with get_db_session() as session:
+        row = session.get(UserRoleModel, uid)
+        if row is not None:
+            return bool(row.is_active)
+        return True
+
+
 def get_db_user_global_rights(user_id: str) -> tuple[bool, bool] | None:
     """Liest (is_admin, can_publish) aus io_user_roles, falls der Benutzer dort gepflegt ist."""
     uid = normalize_user_id(user_id)
@@ -72,6 +85,8 @@ def get_db_user_global_rights(user_id: str) -> tuple[bool, bool] | None:
         row = session.get(UserRoleModel, uid)
         if not row:
             return None
+        if not bool(row.is_active):
+            return (False, False)
         return (bool(row.is_admin), bool(row.can_publish))
 
 
@@ -104,6 +119,8 @@ def check_article_permission(
     uid = normalize_user_id(user_id)
     if not article_id or not uid or is_technical_session_user(uid):
         return False
+    if not is_user_active(uid):
+        return False
 
     if allow_admin_override and is_global_admin(uid):
         return True
@@ -119,6 +136,8 @@ def get_accessible_article_ids(user_id: str | None) -> set[str]:
     uid = normalize_user_id(user_id)
     if not uid or is_technical_session_user(uid):
         return set()
+    if not is_user_active(uid):
+        return set()
     with get_db_session() as session:
         rows = session.scalars(
             select(ArticlePermissionModel.article_id).where(ArticlePermissionModel.user_id == uid)
@@ -127,7 +146,7 @@ def get_accessible_article_ids(user_id: str | None) -> set[str]:
 
 
 def list_article_permissions(article_id: str) -> list[dict[str, Any]]:
-    """Listet alle Benutzer-Zuordnungen eines Artikels."""
+    """Listet alle Benutzer-Zuordnungen eines Artikels inkl. Alias/Anzeigename."""
     if not article_id:
         return []
     with get_db_session() as session:
@@ -136,10 +155,20 @@ def list_article_permissions(article_id: str) -> list[dict[str, Any]]:
             .where(ArticlePermissionModel.article_id == article_id)
             .order_by(ArticlePermissionModel.granted_at.asc())
         ).all()
+        uids = {r.user_id for r in rows if r.user_id}
+        role_rows = (
+            session.scalars(select(UserRoleModel).where(UserRoleModel.user_id.in_(uids))).all()
+            if uids
+            else []
+        )
+        names_by_uid = {rr.user_id: (rr.display_name or rr.user_id) for rr in role_rows}
+        active_by_uid = {rr.user_id: bool(rr.is_active) for rr in role_rows}
         return [
             {
                 "article_id": r.article_id,
                 "user_id": r.user_id,
+                "display_name": names_by_uid.get(r.user_id, r.user_id),
+                "is_active": active_by_uid.get(r.user_id, True),
                 "role": r.role,
                 "granted_by": r.granted_by,
                 "granted_at": r.granted_at.strftime("%d.%m.%Y %H:%M") if r.granted_at else "",
@@ -168,6 +197,8 @@ def grant_article_permission(
         return {"success": False, "error": f"Ungültige Artikelrolle: {role}"}
     if not article_id or not target or is_technical_session_user(target):
         return {"success": False, "error": "Ungültige Ziel-Benutzerkennung."}
+    if not is_user_active(target):
+        return {"success": False, "error": f"Benutzer '{target}' ist deaktiviert und kann nicht zugewiesen werden."}
     if not allow_system:
         if not actor or is_technical_session_user(actor):
             return {"success": False, "error": "Nicht authentifiziert."}
@@ -330,8 +361,9 @@ def set_global_user_role(
     can_publish: bool,
     actor_user: str,
     display_name: str = "",
+    is_active: bool | None = None,
 ) -> dict[str, Any]:
-    """Setzt globale Rechte (Admin und Publizieren getrennt) für einen Benutzer und protokolliert dies."""
+    """Setzt globale Rechte (Admin und Publizieren getrennt) sowie Alias/Aktiv-Status für einen Benutzer."""
     actor = normalize_user_id(actor_user)
     target = normalize_user_id(target_user)
     if not actor or not is_global_admin(actor):
@@ -339,26 +371,39 @@ def set_global_user_role(
     if not target or is_technical_session_user(target):
         return {"success": False, "error": "Ungültige Benutzerkennung."}
 
+    clean_name = (display_name or "").strip()
     with get_db_session() as session:
         row = session.get(UserRoleModel, target)
         old_state = (
-            {"is_admin": bool(row.is_admin), "can_publish": bool(row.can_publish)}
+            {
+                "is_admin": bool(row.is_admin),
+                "can_publish": bool(row.can_publish),
+                "display_name": row.display_name,
+                "is_active": bool(row.is_active),
+            }
             if row
             else None
         )
         if row:
             row.is_admin = bool(is_admin)
             row.can_publish = bool(can_publish)
-            if display_name:
-                row.display_name = display_name.strip()
+            if clean_name:
+                row.display_name = clean_name
+            if is_active is not None:
+                row.is_active = bool(is_active)
             row.updated_by = actor
+            final_active = bool(row.is_active)
+            final_name = row.display_name or target
         else:
+            final_active = True if is_active is None else bool(is_active)
+            final_name = clean_name or target
             session.add(
                 UserRoleModel(
                     user_id=target,
-                    display_name=(display_name or target).strip(),
+                    display_name=final_name,
                     is_admin=bool(is_admin),
                     can_publish=bool(can_publish),
+                    is_active=final_active,
                     updated_by=actor,
                 )
             )
@@ -369,19 +414,133 @@ def set_global_user_role(
             target_user=target,
             details={
                 "old": old_state,
-                "new": {"is_admin": bool(is_admin), "can_publish": bool(can_publish)},
+                "new": {
+                    "is_admin": bool(is_admin),
+                    "can_publish": bool(can_publish),
+                    "display_name": final_name,
+                    "is_active": final_active,
+                },
             },
         )
     return {
         "success": True,
         "user_id": target,
+        "display_name": final_name,
         "is_admin": bool(is_admin),
         "can_publish": bool(can_publish),
+        "is_active": final_active,
     }
 
 
+def set_user_active_status(
+    target_user: str,
+    *,
+    is_active: bool,
+    actor_user: str,
+) -> dict[str, Any]:
+    """Aktiviert oder deaktiviert ein Benutzerkonto (Standard-Massnahme statt Löschen)."""
+    actor = normalize_user_id(actor_user)
+    target = normalize_user_id(target_user)
+    if not actor or not is_global_admin(actor):
+        return {"success": False, "error": "Nur Administratoren dürfen Benutzer deaktivieren oder reaktivieren."}
+    if not target or is_technical_session_user(target):
+        return {"success": False, "error": "Ungültige Benutzerkennung."}
+    if not is_active and target == actor:
+        return {"success": False, "error": "Sie können Ihr eigenes Konto nicht deaktivieren."}
+    if not is_active and target in PORTAL_ADMINS:
+        return {"success": False, "error": "In der Startkonfiguration (PORTAL_ADMINS) hinterlegte Konten können nicht deaktiviert werden."}
+
+    with get_db_session() as session:
+        row = session.get(UserRoleModel, target)
+        old_active = bool(row.is_active) if row else True
+        if row:
+            row.is_active = bool(is_active)
+            if not is_active:
+                row.is_admin = False
+                row.can_publish = False
+            row.updated_by = actor
+        else:
+            session.add(
+                UserRoleModel(
+                    user_id=target,
+                    display_name=target,
+                    is_admin=False,
+                    can_publish=False,
+                    is_active=bool(is_active),
+                    updated_by=actor,
+                )
+            )
+        record_audit_log(
+            session,
+            actor_user=actor,
+            action="reactivate_user" if is_active else "deactivate_user",
+            target_user=target,
+            details={"old_active": old_active, "new_active": bool(is_active)},
+        )
+    return {"success": True, "user_id": target, "is_active": bool(is_active)}
+
+
+def delete_user_account(
+    target_user: str,
+    actor_user: str,
+) -> dict[str, Any]:
+    """
+    Löscht einen Benutzer endgültig aus io_user_roles (z. B. bei Tippfehlern bei der Erfassung).
+    Zulässig NUR, wenn der Benutzer keine zugewiesenen Artikel und keine aktiven Portal-Publikationen hat.
+    """
+    actor = normalize_user_id(actor_user)
+    target = normalize_user_id(target_user)
+    if not actor or not is_global_admin(actor):
+        return {"success": False, "error": "Nur Administratoren dürfen Benutzer löschen."}
+    if not target or is_technical_session_user(target):
+        return {"success": False, "error": "Ungültige Benutzerkennung."}
+    if target == actor:
+        return {"success": False, "error": "Sie können Ihr eigenes Konto nicht löschen."}
+    if target in PORTAL_ADMINS or target in PORTAL_PUBLISHERS:
+        return {"success": False, "error": "In der Env-Konfiguration hinterlegte Benutzer können nicht gelöscht werden."}
+
+    with get_db_session() as session:
+        active_pub_count = session.scalar(
+            select(func.count(PublishedSnapshotModel.id)).where(
+                PublishedSnapshotModel.is_active.is_(True),
+                func.lower(PublishedSnapshotModel.published_by) == target,
+            )
+        ) or 0
+        if active_pub_count > 0:
+            return {
+                "success": False,
+                "error": "Benutzer hat noch publizierte Artikel auf dem Portal und kann nur deaktiviert werden.",
+            }
+
+        assigned_count = session.scalar(
+            select(func.count(ArticlePermissionModel.id)).where(
+                ArticlePermissionModel.user_id == target,
+            )
+        ) or 0
+        if assigned_count > 0:
+            return {
+                "success": False,
+                "error": "Benutzer hat noch zugewiesene Artikel und kann nicht gelöscht, sondern nur deaktiviert werden.",
+            }
+
+        row = session.get(UserRoleModel, target)
+        if not row:
+            return {"success": False, "error": "Benutzerkonto nicht in der Datenbank gefunden."}
+
+        old_name = row.display_name
+        session.delete(row)
+        record_audit_log(
+            session,
+            actor_user=actor,
+            action="delete_user",
+            target_user=target,
+            details={"deleted_display_name": old_name},
+        )
+    return {"success": True, "user_id": target}
+
+
 def list_known_users() -> list[dict[str, Any]]:
-    """Liefert alle bekannten Benutzerkennungen aus DB-Rollen, Artikelzuordnungen und Env-Konfiguration."""
+    """Liefert alle bekannten Benutzerkennungen inkl. Alias, Aktiv-Status und Löschbarkeit."""
     users_map: dict[str, dict[str, Any]] = {}
     for uid in PORTAL_ADMINS:
         if not is_technical_session_user(uid):
@@ -390,7 +549,11 @@ def list_known_users() -> list[dict[str, Any]]:
                 "display_name": uid,
                 "is_admin": True,
                 "can_publish": uid in PORTAL_PUBLISHERS,
+                "is_active": True,
                 "source": "env",
+                "assigned_article_count": 0,
+                "active_published_count": 0,
+                "can_delete": False,
             }
     for uid in PORTAL_PUBLISHERS:
         if not is_technical_session_user(uid):
@@ -401,7 +564,11 @@ def list_known_users() -> list[dict[str, Any]]:
                     "display_name": uid,
                     "is_admin": False,
                     "can_publish": True,
+                    "is_active": True,
                     "source": "env",
+                    "assigned_article_count": 0,
+                    "active_published_count": 0,
+                    "can_delete": False,
                 },
             )
             entry["can_publish"] = True
@@ -415,24 +582,64 @@ def list_known_users() -> list[dict[str, Any]]:
                     "display_name": r.display_name or r.user_id,
                     "is_admin": False,
                     "can_publish": False,
+                    "is_active": bool(r.is_active),
                     "source": "db",
+                    "assigned_article_count": 0,
+                    "active_published_count": 0,
+                    "can_delete": False,
                 },
             )
-            entry["is_admin"] = bool(entry["is_admin"] or r.is_admin)
-            entry["can_publish"] = bool(entry["can_publish"] or r.can_publish)
+            entry["is_active"] = bool(r.is_active) if entry["source"] != "env" else True
+            if entry["is_active"]:
+                entry["is_admin"] = bool(entry["is_admin"] or r.is_admin)
+                entry["can_publish"] = bool(entry["can_publish"] or r.can_publish)
             if r.display_name:
                 entry["display_name"] = r.display_name
 
-        perm_users = session.scalars(select(ArticlePermissionModel.user_id).distinct()).all()
-        for uid in perm_users:
-            if uid and not is_technical_session_user(uid) and uid not in users_map:
-                users_map[uid] = {
+        perm_counts = dict(
+            session.execute(
+                select(ArticlePermissionModel.user_id, func.count(ArticlePermissionModel.id))
+                .group_by(ArticlePermissionModel.user_id)
+            ).all()
+        )
+        for uid, cnt in perm_counts.items():
+            if not uid or is_technical_session_user(uid):
+                continue
+            entry = users_map.setdefault(
+                uid,
+                {
                     "user_id": uid,
                     "display_name": uid,
                     "is_admin": False,
                     "can_publish": False,
+                    "is_active": True,
                     "source": "article_perm",
-                }
+                    "assigned_article_count": 0,
+                    "active_published_count": 0,
+                    "can_delete": False,
+                },
+            )
+            entry["assigned_article_count"] = int(cnt or 0)
+
+        pub_counts = dict(
+            session.execute(
+                select(
+                    func.lower(PublishedSnapshotModel.published_by),
+                    func.count(PublishedSnapshotModel.id),
+                )
+                .where(PublishedSnapshotModel.is_active.is_(True))
+                .group_by(func.lower(PublishedSnapshotModel.published_by))
+            ).all()
+        )
+        for uid, entry in users_map.items():
+            entry["active_published_count"] = int(pub_counts.get(uid, 0) or 0)
+            entry["can_delete"] = (
+                entry["source"] == "db"
+                and entry["assigned_article_count"] == 0
+                and entry["active_published_count"] == 0
+                and uid not in PORTAL_ADMINS
+                and uid not in PORTAL_PUBLISHERS
+            )
 
     return sorted(users_map.values(), key=lambda x: x["user_id"])
 

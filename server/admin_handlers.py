@@ -7,12 +7,13 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from shiny import Inputs, Outputs, Session, reactive, ui
+from shiny import Inputs, Outputs, Session, reactive, render, ui
 
 from config import is_global_admin, normalize_user_id
 from database.permissions import (
     VALID_ARTICLE_ROLES,
     check_article_permission,
+    delete_user_account,
     grant_article_permission,
     list_admin_articles,
     list_article_permissions,
@@ -21,6 +22,7 @@ from database.permissions import (
     list_review_assignments,
     revoke_article_permission,
     set_global_user_role,
+    set_user_active_status,
     transfer_article_ownership,
 )
 from server.collab import broadcast_article_list_to_all, broadcast_article_sync, enforce_article_access_revoked
@@ -53,15 +55,181 @@ def register_admin_handlers(
 ) -> None:
     """Registriert Handler für Artikel-Zuweisungen, Prüfaufträge und das Admin-Dashboard."""
 
+    perm_refresh_tick = reactive.Value(0) if hasattr(reactive, "Value") else None
+
+    def _bump_perm_refresh() -> None:
+        if perm_refresh_tick is not None:
+            perm_refresh_tick.set(perm_refresh_tick.get() + 1)
+
+    def _format_user_label(uid: str, display_name: str | None) -> str:
+        name = (display_name or "").strip()
+        if name and name.lower() != uid.lower():
+            return f"{name} ({uid})"
+        return uid
+
+    def _build_known_users_datalist(users: list[dict], datalist_id: str = "lukb-known-users-datalist") -> ui.Tag:
+        opts = []
+        for u in users:
+            if not u.get("is_active", True):
+                continue
+            uid = u["user_id"]
+            label = _format_user_label(uid, u.get("display_name"))
+            opts.append(ui.tags.option(value=uid, label=label))
+        return ui.tags.datalist(*opts, id=datalist_id)
+
+    async def _render_doc_permissions_panel() -> ui.Tag:
+        aid = state.current_article_id.get()
+        _ = perm_refresh_tick.get() if perm_refresh_tick is not None else 0
+        if not aid:
+            return ui.span()
+
+        def _load_perm_view():
+            can_read = check_article_permission(aid, state.current_user_id, "read", allow_admin_override=True)
+            if not can_read:
+                return None
+            can_assign = check_article_permission(aid, state.current_user_id, "assign", allow_admin_override=True)
+            perms = list_article_permissions(aid)
+            users = list_known_users()
+            return can_assign, perms, users
+
+        data = await asyncio.to_thread(_load_perm_view)
+        if data is None:
+            return ui.span()
+        can_assign, perms, users = data
+
+        chips = []
+        for p in perms:
+            uid = p["user_id"]
+            label = _format_user_label(uid, p.get("display_name"))
+            role_short = {
+                "owner": "Verantwortlich",
+                "editor": "Editor",
+                "reviewer": "Prüfer",
+                "viewer": "Lesen",
+            }.get(p["role"], p["role"])
+            remove_btn = (
+                ui.tags.button(
+                    "×",
+                    type="button",
+                    title=f"Zugriff für {label} entziehen",
+                    style="border:none;background:transparent;color:#991B1B;font-weight:700;cursor:pointer;padding:0 2px;margin-left:4px;line-height:1;",
+                    onclick=f"Shiny.setInputValue('lukb_doc_perm_revoke', {{article_id: {json.dumps(aid)}, user_id: {json.dumps(uid)}, ts: Date.now()}}, {{priority:'event'}});",
+                )
+                if can_assign
+                else ui.span()
+            )
+            chips.append(
+                ui.span(
+                    ui.span(label, style="font-weight:600;color:#002855;"),
+                    ui.span(
+                        role_short,
+                        style="background:#E6EFF7;color:#004B87;border-radius:4px;padding:1px 5px;font-size:11px;margin-left:5px;",
+                    ),
+                    remove_btn,
+                    style="display:inline-flex;align-items:center;background:#FFFFFF;border:1px solid #D6DEE8;border-radius:999px;padding:3px 9px;font-size:12px;",
+                )
+            )
+        if not chips:
+            chips.append(ui.span("Noch keine Zuordnungen.", style="font-size:12px;color:#5A687C;"))
+
+        assign_bar = (
+            ui.div(
+                _build_known_users_datalist(users, "lukb-doc-perm-users-datalist"),
+                ui.div(
+                    ui.input_text(
+                        "doc_perm_target_user",
+                        None,
+                        placeholder="Mitarbeitende hinzufügen (Alias / Connect-ID)…",
+                    ),
+                    style="flex:1;min-width:210px;",
+                ),
+                ui.div(
+                    ui.input_select(
+                        "doc_perm_target_role",
+                        None,
+                        choices={r: ROLE_LABELS[r] for r in VALID_ARTICLE_ROLES},
+                        selected="editor",
+                    ),
+                    style="min-width:175px;",
+                ),
+                ui.input_action_button(
+                    "btn_doc_perm_grant",
+                    "+ Zuweisen",
+                    class_="btn-lukb btn-lukb-primary btn-lukb-sm",
+                ),
+                ui.tags.script(
+                    "setTimeout(function(){var el=document.getElementById('doc_perm_target_user');if(el)el.setAttribute('list','lukb-doc-perm-users-datalist');},0);"
+                ),
+                style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;",
+            )
+            if can_assign
+            else ui.div(
+                "Änderungen an Berechtigungen können durch Verantwortliche (Owner) oder Admins vorgenommen werden.",
+                style="font-size:11.5px;color:#5A687C;margin-top:6px;",
+            )
+        )
+
+        return ui.div(
+            ui.div(
+                ui.tags.label("Berechtigungen & Mitarbeit (Wer darf mitarbeiten?)", class_="field-label", style="margin:0;"),
+                ui.span(f"{len(perms)} Zugewiesen", style="font-size:11.5px;color:#5A687C;"),
+                style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;",
+            ),
+            ui.div(*chips, style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;"),
+            assign_bar,
+            class_="field-group",
+            style="background:#F8FAFC;border:1px solid #E2E8F0;border-radius:8px;padding:10px 12px;",
+        )
+
+    if callable(output):
+        output(id="doc_permissions_panel")(render.ui(_render_doc_permissions_panel))
+
+    @reactive.effect
+    @reactive.event(input.btn_doc_perm_grant)
+    async def _on_doc_perm_grant() -> None:
+        aid = state.current_article_id.get()
+        doc = state.current_doc.get()
+        if not aid or not doc:
+            return
+        target = (input.doc_perm_target_user() or "").strip()
+        role = (input.doc_perm_target_role() or "editor").strip()
+        res = await asyncio.to_thread(grant_article_permission, aid, target, role, state.current_user_id)
+        if not res.get("success"):
+            ui.notification_show(res.get("error", "Fehler beim Zuweisen"), type="warning", duration=5)
+            return
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
+        _bump_perm_refresh()
+        ui.notification_show(f"Zugriff für {res['user_id']} gespeichert ({role}).", type="message", duration=3)
+
+    @reactive.effect
+    @reactive.event(input.lukb_doc_perm_revoke)
+    async def _on_doc_perm_revoke() -> None:
+        payload = input.lukb_doc_perm_revoke()
+        if not isinstance(payload, dict):
+            return
+        aid = str(payload.get("article_id", "")).strip()
+        target_uid = str(payload.get("user_id", "")).strip()
+        if not aid or not target_uid:
+            return
+        res = await asyncio.to_thread(revoke_article_permission, aid, target_uid, state.current_user_id)
+        if not res.get("success"):
+            ui.notification_show(res.get("error", "Fehler beim Entziehen"), type="warning", duration=5)
+            return
+        await enforce_article_access_revoked(aid, target_uid)
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
+        _bump_perm_refresh()
+        _bump_perm_refresh()
+        ui.notification_show(f"Zugriff für {target_uid} entzogen.", type="message", duration=3)
+
     def _build_share_modal(article_id: str, title: str, perms: list[dict], users: list[dict]) -> ui.Tag:
-        user_choices = {u["user_id"]: u["display_name"] for u in users}
         rows = []
         for p in perms:
             uid = p["user_id"]
+            user_label = _format_user_label(uid, p.get("display_name"))
             role_label = ROLE_LABELS.get(p["role"], p["role"])
             rows.append(
                 ui.tags.tr(
-                    ui.tags.td(uid, style="font-weight:600;padding:6px 8px;"),
+                    ui.tags.td(user_label, style="font-weight:600;padding:6px 8px;"),
                     ui.tags.td(role_label, style="padding:6px 8px;"),
                     ui.tags.td(p.get("granted_by") or "—", style="padding:6px 8px;color:#5A687C;font-size:12px;"),
                     ui.tags.td(
@@ -69,7 +237,7 @@ def register_admin_handlers(
                             "Entziehen",
                             type="button",
                             class_="btn-lukb btn-lukb-danger btn-lukb-sm",
-                            onclick=f"Shiny.setInputValue('lukb_perm_revoke', {{article_id: '{article_id}', user_id: '{uid}', ts: Date.now()}}, {{priority:'event'}});",
+                            onclick=f"Shiny.setInputValue('lukb_perm_revoke', {{article_id: {json.dumps(article_id)}, user_id: {json.dumps(uid)}, ts: Date.now()}}, {{priority:'event'}});",
                         ),
                         style="padding:6px 8px;text-align:right;",
                     ),
@@ -81,6 +249,12 @@ def register_admin_handlers(
                     ui.tags.td("Noch keine Zuordnungen vorhanden.", colspan="4", style="padding:10px;color:#5A687C;")
                 )
             )
+
+        known_hints = [
+            _format_user_label(u["user_id"], u.get("display_name"))
+            for u in users
+            if u.get("is_active", True)
+        ][:10]
 
         return ui.modal(
             ui.div(
@@ -102,6 +276,7 @@ def register_admin_handlers(
                 ),
                 ui.div(
                     ui.h6("Benutzer hinzufügen oder Rolle ändern", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
+                    _build_known_users_datalist(users, "lukb-share-users-datalist"),
                     ui.div(
                         ui.input_text(
                             "share_target_user",
@@ -116,12 +291,15 @@ def register_admin_handlers(
                         ),
                         style="display:grid;grid-template-columns:1fr 1fr;gap:10px;",
                     ),
+                    ui.tags.script(
+                        "setTimeout(function(){var el=document.getElementById('share_target_user');if(el)el.setAttribute('list','lukb-share-users-datalist');},0);"
+                    ),
                     (
                         ui.p(
-                            f"Bekannte Benutzer: {', '.join(sorted(user_choices.keys())[:10])}",
+                            f"Bekannte Benutzer: {', '.join(known_hints)}",
                             style="font-size:11.5px;color:#5A687C;margin-top:4px;",
                         )
-                        if user_choices
+                        if known_hints
                         else ui.span()
                     ),
                     ui.input_action_button(
@@ -168,7 +346,8 @@ def register_admin_handlers(
         if not res.get("success"):
             ui.notification_show(res.get("error", "Fehler beim Speichern"), type="warning", duration=5)
             return
-        await broadcast_article_list_to_all()
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
+        _bump_perm_refresh()
         perms = await asyncio.to_thread(list_article_permissions, aid)
         users = await asyncio.to_thread(list_known_users)
         ui.modal_show(_build_share_modal(aid, doc.metadata.title, perms, users))
@@ -189,7 +368,8 @@ def register_admin_handlers(
             ui.notification_show(res.get("error", "Fehler beim Entziehen"), type="warning", duration=5)
             return
         await enforce_article_access_revoked(aid, target_uid)
-        await broadcast_article_list_to_all()
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
+        _bump_perm_refresh()
         doc = state.current_doc.get()
         if doc and doc.id == aid and state.current_user_id != normalize_user_id(target_uid):
             perms = await asyncio.to_thread(list_article_permissions, aid)
@@ -447,12 +627,73 @@ def register_admin_handlers(
 
         user_rows = []
         for u in users:
+            uid = u["user_id"]
+            is_act = bool(u.get("is_active", True))
+            can_del = bool(u.get("can_delete", False))
+            alias_txt = u.get("display_name") or uid
+            status_badge = (
+                ui.span("Aktiv", style="color:#065F46;background:#D1FAE5;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:600;")
+                if is_act
+                else ui.span("Deaktiviert", style="color:#991B1B;background:#FEE2E2;padding:2px 7px;border-radius:999px;font-size:11px;font-weight:600;")
+            )
+            toggle_btn = ui.tags.button(
+                "Deaktivieren" if is_act else "Reaktivieren",
+                type="button",
+                class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                onclick=f"Shiny.setInputValue('lukb_admin_toggle_user_active', {{user_id: {json.dumps(uid)}, is_active: {'false' if is_act else 'true'}, ts: Date.now()}}, {{priority:'event'}});",
+            )
+            del_reason = (
+                "Konto endgültig löschen (nur möglich ohne zugewiesene/publizierte Artikel)"
+                if can_del
+                else (
+                    "Nicht löschbar: Benutzer hat noch publizierte Artikel auf dem Portal (bitte deaktivieren)"
+                    if u.get("active_published_count", 0) > 0
+                    else (
+                        "Nicht löschbar: Benutzer hat noch zugewiesene Artikel (bitte deaktivieren)"
+                        if u.get("assigned_article_count", 0) > 0
+                        else "System-/Env-Konto kann nicht gelöscht werden"
+                    )
+                )
+            )
+            del_btn = (
+                ui.tags.button(
+                    "Löschen",
+                    type="button",
+                    class_="btn-lukb btn-lukb-danger btn-lukb-sm",
+                    title=del_reason,
+                    onclick=f"Shiny.setInputValue('lukb_admin_delete_user', {{user_id: {json.dumps(uid)}, ts: Date.now()}}, {{priority:'event'}});",
+                )
+                if can_del
+                else ui.tags.button(
+                    "Löschen",
+                    type="button",
+                    disabled="disabled",
+                    class_="btn-lukb btn-lukb-ghost btn-lukb-sm",
+                    style="opacity:0.45;cursor:not-allowed;",
+                    title=del_reason,
+                )
+            )
             user_rows.append(
                 ui.tags.tr(
-                    ui.tags.td(u["user_id"], style="font-weight:600;padding:5px 8px;"),
+                    ui.tags.td(
+                        ui.tags.button(
+                            uid,
+                            type="button",
+                            title="Klicken, um Benutzer zum Bearbeiten zu laden",
+                            style="background:none;border:none;padding:0;color:#005A9C;font-weight:600;cursor:pointer;text-decoration:underline;text-align:left;",
+                            onclick=f"Shiny.setInputValue('lukb_admin_select_user_for_role', {{user_id: {json.dumps(uid)}, ts: Date.now()}}, {{priority:'event'}});",
+                        ),
+                        style="padding:5px 8px;",
+                    ),
+                    ui.tags.td(alias_txt, style="padding:5px 8px;"),
                     ui.tags.td("Ja" if u["is_admin"] else "Nein", style="padding:5px 8px;"),
                     ui.tags.td("Ja" if u["can_publish"] else "Nein", style="padding:5px 8px;"),
+                    ui.tags.td(status_badge, style="padding:5px 8px;"),
                     ui.tags.td(u.get("source", ""), style="padding:5px 8px;color:#5A687C;font-size:12px;"),
+                    ui.tags.td(
+                        ui.div(toggle_btn, del_btn, style="display:flex;gap:6px;justify-content:flex-end;"),
+                        style="padding:5px 8px;text-align:right;",
+                    ),
                 )
             )
 
@@ -541,6 +782,7 @@ def register_admin_handlers(
                             ),
                             ui.div(
                                 ui.h6("Artikel zuordnen / Verantwortung übertragen", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
+                                _build_known_users_datalist(users, "lukb-admin-users-datalist"),
                                 ui.div(
                                     ui.input_text("admin_assign_article_id", "Artikel-ID", placeholder="Artikel-ID aus Tabelle wählen…"),
                                     ui.input_text("admin_assign_user_id", "Ziel-Benutzerkennung", placeholder="z. B. autor.a@lukb.ch"),
@@ -555,13 +797,17 @@ def register_admin_handlers(
                                     ),
                                     style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;",
                                 ),
+                                ui.tags.script(
+                                    "setTimeout(function(){var el=document.getElementById('admin_assign_user_id');if(el)el.setAttribute('list','lukb-admin-users-datalist');},0);"
+                                ),
                                 ui.input_action_button("btn_admin_apply_article_perm", "Zuordnung ausführen", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
                                 style="background:#F4F7FA;padding:10px;border-radius:6px;border:1px solid #D6DEE8;margin-bottom:12px;",
                             ),
                             ui.div(
-                                ui.h6("Globale Benutzerrollen (Admin & Publizieren getrennt)", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
+                                ui.h6("Globale Benutzerrollen & Konten (Admin, Publizieren & Alias)", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
                                 ui.div(
                                     ui.input_text("admin_role_user_id", "Benutzerkennung", placeholder="z. B. editor@lukb.ch"),
+                                    ui.input_text("admin_role_display_name", "Alias / Name", placeholder="z. B. Max Muster"),
                                     ui.input_checkbox("admin_role_is_admin", "Admin-Zugriff", value=False),
                                     ui.input_checkbox("admin_role_can_publish", "Darf publizieren", value=False),
                                     ui.input_action_button("btn_admin_save_user_role", "Rolle speichern", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
@@ -571,9 +817,12 @@ def register_admin_handlers(
                                     ui.tags.thead(
                                         ui.tags.tr(
                                             ui.tags.th("Benutzer", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Alias / Name", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
                                             ui.tags.th("Admin", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
                                             ui.tags.th("Publizieren", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Status", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
                                             ui.tags.th("Quelle", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                                            ui.tags.th("Aktionen", style="text-align:right;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
                                         )
                                     ),
                                     ui.tags.tbody(*user_rows),
@@ -688,10 +937,31 @@ def register_admin_handlers(
         if not res.get("success"):
             ui.notification_show(res.get("error", "Aktion fehlgeschlagen"), type="warning", duration=5)
             return
-        await broadcast_article_list_to_all()
+        await broadcast_article_list_to_all(exclude_session_id=state.session_id)
+        _bump_perm_refresh()
         await state.send_article_list(state.current_article_id.get())
         await _show_admin_dashboard("articles")
         ui.notification_show("Artikelzuordnung aktualisiert.", type="message", duration=3)
+
+    @reactive.effect
+    @reactive.event(input.lukb_admin_select_user_for_role)
+    async def _on_admin_select_user_for_role() -> None:
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return
+        payload = input.lukb_admin_select_user_for_role()
+        if not isinstance(payload, dict):
+            return
+        target_uid = normalize_user_id(str(payload.get("user_id", "")))
+        if not target_uid:
+            return
+        users = await asyncio.to_thread(list_known_users)
+        match = next((u for u in users if u["user_id"] == target_uid), None)
+        if not match:
+            return
+        ui.update_text("admin_role_user_id", value=match["user_id"])
+        ui.update_text("admin_role_display_name", value=match.get("display_name") or "")
+        ui.update_checkbox("admin_role_is_admin", value=bool(match.get("is_admin")))
+        ui.update_checkbox("admin_role_can_publish", value=bool(match.get("can_publish")))
 
     @reactive.effect
     @reactive.event(input.btn_admin_save_user_role)
@@ -699,6 +969,7 @@ def register_admin_handlers(
         if not await asyncio.to_thread(is_global_admin, state.current_user_id):
             return
         target_uid = (input.admin_role_user_id() or "").strip()
+        display_name = (input.admin_role_display_name() or "").strip()
         is_adm = bool(input.admin_role_is_admin())
         can_pub = bool(input.admin_role_can_publish())
         res = await asyncio.to_thread(
@@ -707,12 +978,59 @@ def register_admin_handlers(
             is_admin=is_adm,
             can_publish=can_pub,
             actor_user=state.current_user_id,
+            display_name=display_name,
         )
         if not res.get("success"):
             ui.notification_show(res.get("error", "Fehler beim Speichern der Rolle"), type="warning", duration=5)
             return
+        _bump_perm_refresh()
         await _show_admin_dashboard("articles")
         ui.notification_show(f"Globale Rolle für {res['user_id']} gespeichert.", type="message", duration=3)
+
+    @reactive.effect
+    @reactive.event(input.lukb_admin_toggle_user_active)
+    async def _on_admin_toggle_user_active() -> None:
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return
+        payload = input.lukb_admin_toggle_user_active()
+        if not isinstance(payload, dict):
+            return
+        target_uid = str(payload.get("user_id", "")).strip()
+        new_active = bool(payload.get("is_active", False))
+        if not target_uid:
+            return
+        res = await asyncio.to_thread(
+            set_user_active_status,
+            target_uid,
+            is_active=new_active,
+            actor_user=state.current_user_id,
+        )
+        if not res.get("success"):
+            ui.notification_show(res.get("error", "Aktion fehlgeschlagen"), type="warning", duration=5)
+            return
+        _bump_perm_refresh()
+        await _show_admin_dashboard("articles")
+        status_txt = "reaktiviert" if new_active else "deaktiviert"
+        ui.notification_show(f"Benutzer {res['user_id']} {status_txt}.", type="message", duration=3)
+
+    @reactive.effect
+    @reactive.event(input.lukb_admin_delete_user)
+    async def _on_admin_delete_user() -> None:
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return
+        payload = input.lukb_admin_delete_user()
+        if not isinstance(payload, dict):
+            return
+        target_uid = str(payload.get("user_id", "")).strip()
+        if not target_uid:
+            return
+        res = await asyncio.to_thread(delete_user_account, target_uid, state.current_user_id)
+        if not res.get("success"):
+            ui.notification_show(res.get("error", "Löschen nicht möglich"), type="warning", duration=5)
+            return
+        _bump_perm_refresh()
+        await _show_admin_dashboard("articles")
+        ui.notification_show(f"Benutzer {res['user_id']} gelöscht.", type="message", duration=3)
 
     @reactive.effect
     @reactive.event(input.lukb_admin_poll_job)

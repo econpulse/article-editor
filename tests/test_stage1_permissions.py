@@ -223,3 +223,142 @@ def test_local_dev_session_user_fallback_without_connect(monkeypatch: pytest.Mon
     assert list_articles(user_id=st_connect.current_user_id) == []
 
     ACTIVE_PEERS.pop(sess.id, None)
+
+
+def test_broadcast_article_list_does_not_hang_on_stalled_peer(monkeypatch: pytest.MonkeyPatch) -> None:
+    import server.collab as collab_mod
+
+    init_db_and_seed()
+    monkeypatch.setattr(collab_mod, "_PEER_SEND_TIMEOUT_SECONDS", 0.05)
+
+    class _StalledSession(_DummySession):
+        async def send_custom_message(self, name: str, payload: dict) -> None:
+            await asyncio.sleep(10.0)
+
+    sid_stalled = f"sess_stalled_{uuid.uuid4().hex[:6]}"
+    sid_healthy = f"sess_healthy_{uuid.uuid4().hex[:6]}"
+    sess_stalled = _StalledSession(sid_stalled, "stalled.user@lukb.ch")
+    sess_healthy = _DummySession(sid_healthy, "healthy.user@lukb.ch")
+
+    register_peer(sid_stalled, sess_stalled, "stalled.user@lukb.ch", "#009FE3", lambda d: None)
+    register_peer(sid_healthy, sess_healthy, "healthy.user@lukb.ch", "#0D9488", lambda d: None)
+    try:
+        asyncio.run(collab_mod.broadcast_article_list_to_all())
+        assert sid_stalled not in ACTIVE_PEERS
+        assert sid_healthy in ACTIVE_PEERS
+        assert any(name == "lukb_global_article_list" for name, _ in sess_healthy.messages)
+    finally:
+        ACTIVE_PEERS.pop(sid_stalled, None)
+        ACTIVE_PEERS.pop(sid_healthy, None)
+
+
+def test_user_alias_deactivate_and_delete_protection(monkeypatch: pytest.MonkeyPatch) -> None:
+    from database.connection import get_db_session
+    from database.models import PublishedSnapshotModel, UserRoleModel
+    from database.permissions import (
+        delete_user_account,
+        is_user_active,
+        list_article_permissions,
+        list_known_users,
+        set_global_user_role,
+        set_user_active_status,
+    )
+
+    init_db_and_seed()
+    admin_uid = f"admin.ctrl.{uuid.uuid4().hex[:6]}@lukb.ch"
+    typo_uid = f"typo.usr.{uuid.uuid4().hex[:6]}@lukb.ch"
+    assigned_uid = f"assigned.usr.{uuid.uuid4().hex[:6]}@lukb.ch"
+    pub_uid = f"pub.usr.{uuid.uuid4().hex[:6]}@lukb.ch"
+    monkeypatch.setattr(config, "PORTAL_ADMINS", [admin_uid])
+
+    doc = create_new_article(template_id="investment_focus", user=admin_uid)
+    snap_id = None
+    try:
+        # 1. Alias/Name speichern & in list_known_users + list_article_permissions prüfen
+        res_typo = set_global_user_role(
+            typo_uid,
+            is_admin=False,
+            can_publish=True,
+            actor_user=admin_uid,
+            display_name="Max Tippfehler",
+        )
+        assert res_typo["success"] is True
+        assert res_typo["display_name"] == "Max Tippfehler"
+        users = {u["user_id"]: u for u in list_known_users()}
+        assert users[typo_uid]["display_name"] == "Max Tippfehler"
+        assert users[typo_uid]["is_active"] is True
+        assert users[typo_uid]["can_delete"] is True
+
+        # 2. User ohne zugewiesene/publizierte Artikel kann gelöscht werden
+        del_ok = delete_user_account(typo_uid, admin_uid)
+        assert del_ok["success"] is True
+        users_after = {u["user_id"]: u for u in list_known_users()}
+        assert typo_uid not in users_after
+
+        # 3. User mit zugewiesenem Artikel: Deaktivieren möglich & entzieht Zugriff, Löschen blockiert
+        set_global_user_role(
+            assigned_uid,
+            is_admin=False,
+            can_publish=False,
+            actor_user=admin_uid,
+            display_name="Anna Editor",
+        )
+        assert grant_article_permission(doc.id, assigned_uid, "editor", admin_uid)["success"] is True
+        perms = list_article_permissions(doc.id)
+        assert any(p["user_id"] == assigned_uid and p["display_name"] == "Anna Editor" for p in perms)
+
+        del_assigned = delete_user_account(assigned_uid, admin_uid)
+        assert del_assigned["success"] is False
+        assert "zugewiesene Artikel" in del_assigned["error"]
+
+        deact = set_user_active_status(assigned_uid, is_active=False, actor_user=admin_uid)
+        assert deact["success"] is True
+        assert is_user_active(assigned_uid) is False
+        assert check_article_permission(doc.id, assigned_uid, "read") is False
+        assert doc.id not in get_accessible_article_ids(assigned_uid)
+
+        # Reaktivieren stellt aktiven Status wieder her
+        react = set_user_active_status(assigned_uid, is_active=True, actor_user=admin_uid)
+        assert react["success"] is True
+        assert is_user_active(assigned_uid) is True
+        assert check_article_permission(doc.id, assigned_uid, "read") is True
+
+        # 4. User mit aktivem publiziertem Snapshot auf dem Portal: nur deaktivierbar, nicht löschbar
+        set_global_user_role(
+            pub_uid,
+            is_admin=False,
+            can_publish=True,
+            actor_user=admin_uid,
+            display_name="Paul Publizist",
+        )
+        with get_db_session() as s:
+            snap = PublishedSnapshotModel(
+                article_id=doc.id,
+                version=1,
+                is_active=True,
+                slug="delete-guard-test",
+                title="Delete Guard Test",
+                publication_date="2026-11-22",
+                metadata_json="{}",
+                html_content="<p>ok</p>",
+                published_by=pub_uid,
+            )
+            s.add(snap)
+            s.flush()
+            snap_id = snap.id
+
+        del_pub = delete_user_account(pub_uid, admin_uid)
+        assert del_pub["success"] is False
+        assert "publizierte Artikel" in del_pub["error"]
+        assert set_user_active_status(pub_uid, is_active=False, actor_user=admin_uid)["success"] is True
+    finally:
+        with get_db_session() as s:
+            if snap_id is not None:
+                snap_obj = s.get(PublishedSnapshotModel, snap_id)
+                if snap_obj:
+                    s.delete(snap_obj)
+            for uid in (typo_uid, assigned_uid, pub_uid):
+                ur = s.get(UserRoleModel, uid)
+                if ur:
+                    s.delete(ur)
+        delete_article(doc.id, force=True)

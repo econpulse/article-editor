@@ -211,6 +211,8 @@ def document_metadata_card_ui(templates_list: list[dict[str, Any]]) -> ui.Tag:
             ui.div(id="meta-authors-container", class_="authors-list-container"),
             class_="field-group",
         ),
+        # Zeile 6b: Artikel-Berechtigungen (Mitarbeit) direkt im Dokumentkopf
+        ui.output_ui("doc_permissions_panel"),
         # Zeile 7: Themen-Tags / Schlagwörter
         ui.div(
             ui.div(
