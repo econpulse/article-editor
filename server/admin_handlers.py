@@ -56,10 +56,15 @@ def register_admin_handlers(
     """Registriert Handler für Artikel-Zuweisungen, Prüfaufträge und das Admin-Dashboard."""
 
     perm_refresh_tick = reactive.Value(0) if hasattr(reactive, "Value") else None
+    admin_refresh_tick = reactive.Value(0) if hasattr(reactive, "Value") else None
 
     def _bump_perm_refresh() -> None:
         if perm_refresh_tick is not None:
             perm_refresh_tick.set(perm_refresh_tick.get() + 1)
+
+    def _bump_admin_refresh() -> None:
+        if admin_refresh_tick is not None:
+            admin_refresh_tick.set(admin_refresh_tick.get() + 1)
 
     def _format_user_label(uid: str, display_name: str | None) -> str:
         name = (display_name or "").strip()
@@ -221,7 +226,22 @@ def register_admin_handlers(
         _bump_perm_refresh()
         ui.notification_show(f"Zugriff für {target_uid} entzogen.", type="message", duration=3)
 
-    def _build_share_modal(article_id: str, title: str, perms: list[dict], users: list[dict]) -> ui.Tag:
+    async def _render_share_modal_perms() -> ui.Tag:
+        aid = state.current_article_id.get()
+        _ = perm_refresh_tick.get() if perm_refresh_tick is not None else 0
+        if not aid:
+            return ui.span()
+
+        def _load_share_data():
+            if not check_article_permission(aid, state.current_user_id, "assign", allow_admin_override=True):
+                return None
+            return list_article_permissions(aid), list_known_users()
+
+        data = await asyncio.to_thread(_load_share_data)
+        if data is None:
+            return ui.span()
+        perms, users = data
+
         rows = []
         for p in perms:
             uid = p["user_id"]
@@ -237,7 +257,7 @@ def register_admin_handlers(
                             "Entziehen",
                             type="button",
                             class_="btn-lukb btn-lukb-danger btn-lukb-sm",
-                            onclick=f"Shiny.setInputValue('lukb_perm_revoke', {{article_id: {json.dumps(article_id)}, user_id: {json.dumps(uid)}, ts: Date.now()}}, {{priority:'event'}});",
+                            onclick=f"Shiny.setInputValue('lukb_perm_revoke', {{article_id: {json.dumps(aid)}, user_id: {json.dumps(uid)}, ts: Date.now()}}, {{priority:'event'}});",
                         ),
                         style="padding:6px 8px;text-align:right;",
                     ),
@@ -256,27 +276,43 @@ def register_admin_handlers(
             if u.get("is_active", True)
         ][:10]
 
+        return ui.div(
+            _build_known_users_datalist(users, "lukb-share-users-datalist"),
+            ui.tags.table(
+                ui.tags.thead(
+                    ui.tags.tr(
+                        ui.tags.th("Benutzer", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Rolle", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Zugewiesen von", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("", style="padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                    )
+                ),
+                ui.tags.tbody(*rows),
+                style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;",
+            ),
+            (
+                ui.p(
+                    f"Bekannte Benutzer: {', '.join(known_hints)}",
+                    style="font-size:11.5px;color:#5A687C;margin-top:0;margin-bottom:8px;",
+                )
+                if known_hints
+                else ui.span()
+            ),
+        )
+
+    if callable(output):
+        output(id="share_modal_perms_ui")(render.ui(_render_share_modal_perms))
+
+    def _build_share_modal(title: str) -> ui.Tag:
         return ui.modal(
             ui.div(
                 ui.p(
                     f"Artikel: «{title}»",
                     style="font-weight:600;color:#002855;margin-bottom:10px;",
                 ),
-                ui.tags.table(
-                    ui.tags.thead(
-                        ui.tags.tr(
-                            ui.tags.th("Benutzer", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
-                            ui.tags.th("Rolle", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
-                            ui.tags.th("Zugewiesen von", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
-                            ui.tags.th("", style="padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
-                        )
-                    ),
-                    ui.tags.tbody(*rows),
-                    style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:16px;",
-                ),
+                ui.output_ui("share_modal_perms_ui"),
                 ui.div(
                     ui.h6("Benutzer hinzufügen oder Rolle ändern", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
-                    _build_known_users_datalist(users, "lukb-share-users-datalist"),
                     ui.div(
                         ui.input_text(
                             "share_target_user",
@@ -293,14 +329,6 @@ def register_admin_handlers(
                     ),
                     ui.tags.script(
                         "setTimeout(function(){var el=document.getElementById('share_target_user');if(el)el.setAttribute('list','lukb-share-users-datalist');},0);"
-                    ),
-                    (
-                        ui.p(
-                            f"Bekannte Benutzer: {', '.join(known_hints)}",
-                            style="font-size:11.5px;color:#5A687C;margin-top:4px;",
-                        )
-                        if known_hints
-                        else ui.span()
                     ),
                     ui.input_action_button(
                         "btn_share_grant",
@@ -329,9 +357,8 @@ def register_admin_handlers(
         ):
             ui.notification_show("Nur Verantwortliche oder Administratoren dürfen Zugriffsrechte vergeben.", type="warning", duration=4)
             return
-        perms = await asyncio.to_thread(list_article_permissions, aid)
-        users = await asyncio.to_thread(list_known_users)
-        ui.modal_show(_build_share_modal(aid, doc.metadata.title, perms, users))
+        _bump_perm_refresh()
+        ui.modal_show(_build_share_modal(doc.metadata.title))
 
     @reactive.effect
     @reactive.event(input.btn_share_grant)
@@ -348,9 +375,6 @@ def register_admin_handlers(
             return
         await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         _bump_perm_refresh()
-        perms = await asyncio.to_thread(list_article_permissions, aid)
-        users = await asyncio.to_thread(list_known_users)
-        ui.modal_show(_build_share_modal(aid, doc.metadata.title, perms, users))
         ui.notification_show(f"Zugriff für {res['user_id']} gespeichert ({role}).", type="message", duration=3)
 
     @reactive.effect
@@ -371,11 +395,7 @@ def register_admin_handlers(
         await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         _bump_perm_refresh()
         doc = state.current_doc.get()
-        if doc and doc.id == aid and state.current_user_id != normalize_user_id(target_uid):
-            perms = await asyncio.to_thread(list_article_permissions, aid)
-            users = await asyncio.to_thread(list_known_users)
-            ui.modal_show(_build_share_modal(aid, doc.metadata.title, perms, users))
-        else:
+        if not (doc and doc.id == aid and state.current_user_id != normalize_user_id(target_uid)):
             ui.modal_remove()
         ui.notification_show(f"Zugriff für {target_uid} entzogen.", type="message", duration=3)
 
@@ -578,27 +598,30 @@ def register_admin_handlers(
     # ------------------------------------------------------------------
     # Admin-Dashboard (Artikel & Benutzer + Publikationen & Protokoll)
     # ------------------------------------------------------------------
-    async def _show_admin_dashboard(active_tab: str = "articles") -> None:
-        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
-            ui.notification_show("Nur Administratoren haben Zugriff auf das Admin-Dashboard.", type="warning", duration=5)
-            return
-
+    # Admin-Dashboard (Modal einmal öffnen, Inhalte reaktiv per output_ui aktualisieren)
+    # ------------------------------------------------------------------
+    def _read_admin_article_filters() -> tuple[str, bool]:
         search_q = ""
         only_orphans = False
         try:
-            search_q = input.admin_article_search() or ""
+            if hasattr(reactive, "isolate"):
+                with reactive.isolate():
+                    search_q = input.admin_article_search() or ""
+                    only_orphans = bool(input.admin_only_orphans())
+            else:
+                search_q = input.admin_article_search() or ""
+                only_orphans = bool(input.admin_only_orphans())
         except Exception:
             pass
-        try:
-            only_orphans = bool(input.admin_only_orphans())
-        except Exception:
-            pass
+        return search_q, only_orphans
 
+    async def _render_admin_articles_table() -> ui.Tag:
+        _ = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return ui.span()
+
+        search_q, only_orphans = _read_admin_article_filters()
         articles = await asyncio.to_thread(list_admin_articles, search_q, only_orphans=only_orphans)
-        users = await asyncio.to_thread(list_known_users)
-        audit_entries = await asyncio.to_thread(list_audit_log, 60)
-        pub_overview = await asyncio.to_thread(get_admin_publication_overview)
-        pub_jobs = await asyncio.to_thread(list_publication_jobs, 30)
 
         art_rows = []
         for a in articles[:40]:
@@ -625,6 +648,27 @@ def register_admin_handlers(
         if not art_rows:
             art_rows.append(ui.tags.tr(ui.tags.td("Keine passenden Artikel gefunden.", colspan="3", style="padding:10px;color:#5A687C;")))
 
+        return ui.div(
+            ui.tags.table(
+                ui.tags.thead(
+                    ui.tags.tr(
+                        ui.tags.th("Artikel", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Zugewiesene Benutzer", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Aktion", style="text-align:right;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
+                    )
+                ),
+                ui.tags.tbody(*art_rows),
+                style="width:100%;border-collapse:collapse;font-size:13px;",
+            ),
+            style="max-height:220px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
+        )
+
+    async def _render_admin_users_table() -> ui.Tag:
+        _ = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return ui.span()
+
+        users = await asyncio.to_thread(list_known_users)
         user_rows = []
         for u in users:
             uid = u["user_id"]
@@ -697,6 +741,39 @@ def register_admin_handlers(
                 )
             )
 
+        return ui.div(
+            _build_known_users_datalist(users, "lukb-admin-users-datalist"),
+            ui.tags.table(
+                ui.tags.thead(
+                    ui.tags.tr(
+                        ui.tags.th("Benutzer", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Alias / Name", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Admin", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Publizieren", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Status", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Quelle", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        ui.tags.th("Aktionen", style="text-align:right;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                    )
+                ),
+                ui.tags.tbody(*user_rows),
+                style="width:100%;border-collapse:collapse;font-size:12.5px;",
+            ),
+        )
+
+    async def _render_admin_publications_audit() -> ui.Tag:
+        _ = admin_refresh_tick.get() if admin_refresh_tick is not None else 0
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            return ui.span()
+
+        def _load_audit_and_pub():
+            return (
+                list_audit_log(60),
+                get_admin_publication_overview(),
+                list_publication_jobs(30),
+            )
+
+        audit_entries, pub_overview, pub_jobs = await asyncio.to_thread(_load_audit_and_pub)
+
         audit_rows = []
         for log in audit_entries:
             audit_rows.append(
@@ -754,6 +831,71 @@ def register_admin_handlers(
                 )
             )
 
+        return ui.div(
+            ui.h6("Publikationsstand (Entwurf · Freigabe · Live)", style="margin:8px 0 6px 0;color:#002855;font-weight:600;"),
+            ui.div(
+                ui.tags.table(
+                    ui.tags.thead(
+                        ui.tags.tr(
+                            ui.tags.th("Artikel", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Entwurf", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Freigabe", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Live-Fassung", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Jüngster Auftrag", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        )
+                    ),
+                    ui.tags.tbody(*pub_rows),
+                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
+                ),
+                style="max-height:170px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
+            ),
+            ui.h6("Publikationsaufträge & Fehlerdetails", style="margin:0 0 6px 0;color:#002855;font-weight:600;"),
+            ui.div(
+                ui.tags.table(
+                    ui.tags.thead(
+                        ui.tags.tr(
+                            ui.tags.th("Auftrag", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Aktion / Ziel", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Status", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Fehler / Hinweis", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("", style="text-align:right;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        )
+                    ),
+                    ui.tags.tbody(*job_rows),
+                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
+                ),
+                style="max-height:160px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
+            ),
+            ui.h6("Rollen- & Zuweisungsprotokoll", style="margin:0 0 6px 0;color:#002855;font-weight:600;"),
+            ui.div(
+                ui.tags.table(
+                    ui.tags.thead(
+                        ui.tags.tr(
+                            ui.tags.th("Zeitpunkt", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Ausgeführt von", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Aktion", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Ziel-Konto", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                            ui.tags.th("Artikel-ID", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
+                        )
+                    ),
+                    ui.tags.tbody(*audit_rows),
+                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
+                ),
+                style="max-height:170px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;",
+            ),
+        )
+
+    if callable(output):
+        output(id="admin_articles_table_ui")(render.ui(_render_admin_articles_table))
+        output(id="admin_users_table_ui")(render.ui(_render_admin_users_table))
+        output(id="admin_publications_audit_ui")(render.ui(_render_admin_publications_audit))
+
+    async def _show_admin_dashboard(active_tab: str = "articles") -> None:
+        if not await asyncio.to_thread(is_global_admin, state.current_user_id):
+            ui.notification_show("Nur Administratoren haben Zugriff auf das Admin-Dashboard.", type="warning", duration=5)
+            return
+
+        _bump_admin_refresh()
         ui.modal_show(
             ui.modal(
                 ui.navset_tab(
@@ -761,28 +903,14 @@ def register_admin_handlers(
                         "Artikel und Benutzer",
                         ui.div(
                             ui.div(
-                                ui.input_text("admin_article_search", "Artikel suchen", value=search_q, placeholder="Titel, Autor, Kategorie…"),
-                                ui.input_checkbox("admin_only_orphans", "Nur verwaiste Artikel anzeigen", value=only_orphans),
+                                ui.input_text("admin_article_search", "Artikel suchen", value="", placeholder="Titel, Autor, Kategorie…"),
+                                ui.input_checkbox("admin_only_orphans", "Nur verwaiste Artikel anzeigen", value=False),
                                 ui.input_action_button("btn_admin_refresh", "Filter anwenden", class_="btn-lukb btn-lukb-ghost btn-lukb-sm"),
                                 style="display:flex;gap:12px;align-items:flex-end;margin:10px 0;",
                             ),
-                            ui.div(
-                                ui.tags.table(
-                                    ui.tags.thead(
-                                        ui.tags.tr(
-                                            ui.tags.th("Artikel", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Zugewiesene Benutzer", style="text-align:left;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Aktion", style="text-align:right;padding:6px 8px;border-bottom:1px solid #D6DEE8;"),
-                                        )
-                                    ),
-                                    ui.tags.tbody(*art_rows),
-                                    style="width:100%;border-collapse:collapse;font-size:13px;",
-                                ),
-                                style="max-height:220px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
-                            ),
+                            ui.output_ui("admin_articles_table_ui"),
                             ui.div(
                                 ui.h6("Artikel zuordnen / Verantwortung übertragen", style="margin:0 0 8px 0;color:#002855;font-weight:600;"),
-                                _build_known_users_datalist(users, "lukb-admin-users-datalist"),
                                 ui.div(
                                     ui.input_text("admin_assign_article_id", "Artikel-ID", placeholder="Artikel-ID aus Tabelle wählen…"),
                                     ui.input_text("admin_assign_user_id", "Ziel-Benutzerkennung", placeholder="z. B. autor.a@lukb.ch"),
@@ -813,80 +941,14 @@ def register_admin_handlers(
                                     ui.input_action_button("btn_admin_save_user_role", "Rolle speichern", class_="btn-lukb btn-lukb-primary btn-lukb-sm"),
                                     style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px;",
                                 ),
-                                ui.tags.table(
-                                    ui.tags.thead(
-                                        ui.tags.tr(
-                                            ui.tags.th("Benutzer", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Alias / Name", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Admin", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Publizieren", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Status", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Quelle", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Aktionen", style="text-align:right;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                        )
-                                    ),
-                                    ui.tags.tbody(*user_rows),
-                                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
-                                ),
+                                ui.output_ui("admin_users_table_ui"),
                                 style="background:#FFFFFF;padding:10px;border-radius:6px;border:1px solid #D6DEE8;",
                             ),
                         ),
                     ),
                     ui.nav_panel(
                         "Publikationen und Protokoll",
-                        ui.div(
-                            ui.h6("Publikationsstand (Entwurf · Freigabe · Live)", style="margin:8px 0 6px 0;color:#002855;font-weight:600;"),
-                            ui.div(
-                                ui.tags.table(
-                                    ui.tags.thead(
-                                        ui.tags.tr(
-                                            ui.tags.th("Artikel", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Entwurf", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Freigabe", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Live-Fassung", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Jüngster Auftrag", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                        )
-                                    ),
-                                    ui.tags.tbody(*pub_rows),
-                                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
-                                ),
-                                style="max-height:170px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
-                            ),
-                            ui.h6("Publikationsaufträge & Fehlerdetails", style="margin:0 0 6px 0;color:#002855;font-weight:600;"),
-                            ui.div(
-                                ui.tags.table(
-                                    ui.tags.thead(
-                                        ui.tags.tr(
-                                            ui.tags.th("Auftrag", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Aktion / Ziel", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Status", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Fehler / Hinweis", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("", style="text-align:right;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                        )
-                                    ),
-                                    ui.tags.tbody(*job_rows),
-                                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
-                                ),
-                                style="max-height:160px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;margin-bottom:12px;",
-                            ),
-                            ui.h6("Rollen- & Zuweisungsprotokoll", style="margin:0 0 6px 0;color:#002855;font-weight:600;"),
-                            ui.div(
-                                ui.tags.table(
-                                    ui.tags.thead(
-                                        ui.tags.tr(
-                                            ui.tags.th("Zeitpunkt", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Ausgeführt von", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Aktion", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Ziel-Konto", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                            ui.tags.th("Artikel-ID", style="text-align:left;padding:5px 8px;border-bottom:1px solid #D6DEE8;"),
-                                        )
-                                    ),
-                                    ui.tags.tbody(*audit_rows),
-                                    style="width:100%;border-collapse:collapse;font-size:12.5px;",
-                                ),
-                                style="max-height:170px;overflow-y:auto;border:1px solid #D6DEE8;border-radius:6px;",
-                            ),
-                        ),
+                        ui.output_ui("admin_publications_audit_ui"),
                     ),
                     selected="Publikationen und Protokoll" if active_tab == "audit" else "Artikel und Benutzer",
                 ),
@@ -905,7 +967,7 @@ def register_admin_handlers(
     @reactive.effect
     @reactive.event(input.btn_admin_refresh)
     async def _on_refresh_admin_dashboard() -> None:
-        await _show_admin_dashboard("articles")
+        _bump_admin_refresh()
 
     @reactive.effect
     @reactive.event(input.lukb_admin_select_article_for_assign)
@@ -940,7 +1002,7 @@ def register_admin_handlers(
         await broadcast_article_list_to_all(exclude_session_id=state.session_id)
         _bump_perm_refresh()
         await state.send_article_list(state.current_article_id.get())
-        await _show_admin_dashboard("articles")
+        _bump_admin_refresh()
         ui.notification_show("Artikelzuordnung aktualisiert.", type="message", duration=3)
 
     @reactive.effect
@@ -984,7 +1046,7 @@ def register_admin_handlers(
             ui.notification_show(res.get("error", "Fehler beim Speichern der Rolle"), type="warning", duration=5)
             return
         _bump_perm_refresh()
-        await _show_admin_dashboard("articles")
+        _bump_admin_refresh()
         ui.notification_show(f"Globale Rolle für {res['user_id']} gespeichert.", type="message", duration=3)
 
     @reactive.effect
@@ -1009,7 +1071,7 @@ def register_admin_handlers(
             ui.notification_show(res.get("error", "Aktion fehlgeschlagen"), type="warning", duration=5)
             return
         _bump_perm_refresh()
-        await _show_admin_dashboard("articles")
+        _bump_admin_refresh()
         status_txt = "reaktiviert" if new_active else "deaktiviert"
         ui.notification_show(f"Benutzer {res['user_id']} {status_txt}.", type="message", duration=3)
 
@@ -1029,7 +1091,7 @@ def register_admin_handlers(
             ui.notification_show(res.get("error", "Löschen nicht möglich"), type="warning", duration=5)
             return
         _bump_perm_refresh()
-        await _show_admin_dashboard("articles")
+        _bump_admin_refresh()
         ui.notification_show(f"Benutzer {res['user_id']} gelöscht.", type="message", duration=3)
 
     @reactive.effect
@@ -1041,7 +1103,7 @@ def register_admin_handlers(
         if not job_id:
             return
         res = await asyncio.to_thread(poll_publication_job, int(job_id))
-        await _show_admin_dashboard("audit")
+        _bump_admin_refresh()
         if res.get("success"):
             ui.notification_show(f"Auftrag #{job_id} erfolgreich abgeschlossen.", type="message", duration=4)
         else:
@@ -1056,7 +1118,7 @@ def register_admin_handlers(
         if not job_id:
             return
         res = await asyncio.to_thread(retry_publication_job, int(job_id), state.current_user_id)
-        await _show_admin_dashboard("audit")
+        _bump_admin_refresh()
         if res.get("success"):
             ui.notification_show(f"Auftrag #{job_id} erfolgreich wiederholt.", type="message", duration=4)
         else:

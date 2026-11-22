@@ -362,3 +362,124 @@ def test_user_alias_deactivate_and_delete_protection(monkeypatch: pytest.MonkeyP
                 if ur:
                     s.delete(ur)
         delete_article(doc.id, force=True)
+
+
+def test_admin_dashboard_does_not_reopen_modal_on_actions(monkeypatch):
+    """
+    Regressionstest: Aktionen im geöffneten Admin-Dashboard (Artikel zuweisen, Rolle speichern,
+    Filter anwenden) dürfen ui.modal_show nicht erneut aufrufen, um Bootstrap-5-FocusTrap-Leaks
+    und UI-Freezes zu verhindern.
+    """
+    import asyncio
+    from types import SimpleNamespace
+    import server.admin_handlers as admin_handlers
+
+    admin_uid = "modal.admin@lukb.ch"
+    target_uid = "modal.user@lukb.ch"
+    monkeypatch.setenv("LUKB_PORTAL_ADMINS", admin_uid)
+
+    doc = create_new_article("Modal Test Artikel", "autor@lukb.ch")
+    try:
+        effects = {}
+
+        class _FakeReactiveValue:
+            def __init__(self, initial=0):
+                self._val = initial
+
+            def get(self):
+                return self._val
+
+            def set(self, val):
+                self._val = val
+
+        class _FakeReactive:
+            Value = _FakeReactiveValue
+
+            @staticmethod
+            def effect(fn):
+                effects[fn.__name__] = fn
+                return fn
+
+            @staticmethod
+            def event(*_args):
+                return lambda fn: fn
+
+        class _FakeInput:
+            def admin_article_search(self):
+                return ""
+
+            def admin_only_orphans(self):
+                return False
+
+            def admin_assign_article_id(self):
+                return doc.id
+
+            def admin_assign_user_id(self):
+                return target_uid
+
+            def admin_assign_role(self):
+                return "editor"
+
+            def admin_role_user_id(self):
+                return target_uid
+
+            def admin_role_display_name(self):
+                return "Modal User"
+
+            def admin_role_is_admin(self):
+                return False
+
+            def admin_role_can_publish(self):
+                return True
+
+            def __getattr__(self, _name):
+                return lambda: None
+
+        class _FakeState:
+            session_id = "test-modal-sess"
+            current_user_id = admin_uid
+            current_article_id = _FakeReactiveValue(doc.id)
+            current_doc = _FakeReactiveValue(doc)
+
+            async def send_article_list(self, _aid):
+                return None
+
+        shown_modals = []
+        outputs_registered = {}
+
+        def _fake_output(id=None):
+            def _dec(fn):
+                outputs_registered[id] = fn
+                return fn
+            return _dec
+
+        async def _noop_async(*_a, **_kw):
+            return None
+
+        monkeypatch.setattr(admin_handlers, "reactive", _FakeReactive)
+        monkeypatch.setattr(admin_handlers, "render", SimpleNamespace(ui=lambda fn: fn))
+        monkeypatch.setattr(admin_handlers.ui, "modal_show", lambda m: shown_modals.append(m))
+        monkeypatch.setattr(admin_handlers.ui, "notification_show", lambda *_a, **_kw: None)
+        monkeypatch.setattr(admin_handlers, "broadcast_article_list_to_all", _noop_async)
+
+        admin_handlers.register_admin_handlers(_FakeInput(), _fake_output, SimpleNamespace(), _FakeState())
+
+        assert "admin_articles_table_ui" in outputs_registered
+        assert "admin_users_table_ui" in outputs_registered
+        assert "admin_publications_audit_ui" in outputs_registered
+
+        async def _run():
+            await effects["_on_open_admin_dashboard"]()
+            await effects["_on_admin_apply_article_perm"]()
+            await effects["_on_admin_save_user_role"]()
+            await effects["_on_refresh_admin_dashboard"]()
+
+        asyncio.run(_run())
+        assert len(shown_modals) == 1
+    finally:
+        from database.models import UserRoleModel
+        with get_db_session() as s:
+            ur = s.get(UserRoleModel, target_uid)
+            if ur:
+                s.delete(ur)
+        delete_article(doc.id, force=True)
