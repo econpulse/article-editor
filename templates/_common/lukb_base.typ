@@ -7,6 +7,10 @@
 // LUKB Corporate Design Farbpalette
 #let lukb-navy = rgb("#002855")
 #let lukb-blue = rgb("#005A9C")
+#let lukb-blue-50 = rgb("#E4F4FE")
+#let lukb-blue-100 = rgb("#BCE2FE")
+#let lukb-blue-300 = rgb("#64BEFF")
+#let lukb-blue-600 = rgb("#0A94F2")
 #let lukb-cyan = rgb("#009FE3")
 #let lukb-gold = rgb("#C59B27")
 #let lukb-text = rgb("#1A2433")
@@ -156,7 +160,8 @@
         #let raw-header-series = meta.at("header_series", default: none)
         #let header-series-text = if raw-header-series != none and raw-header-series != "" { raw-header-series } else { "Investment Office News" }
         #cms-link-meta("meta-header-series")[
-          #text(font: font-heading, weight: "medium", size: 14pt, fill: rgb("#0093D1"))[
+          // NOTIZ (vorherige Farbe): fill: rgb("#0093D1")
+          #text(font: font-heading, weight: "medium", size: 14pt, fill: lukb-blue-600)[
             #header-series-text
           ]
         ]
@@ -209,7 +214,8 @@
         align(left + bottom)[
           #if sub-line != "" [
             #cms-link-meta(sub-field-id)[
-              #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue)[#sub-line]
+              // NOTIZ (vorherige Farbe): fill: lukb-blue (#005A9C)
+              #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue-600)[#sub-line]
             ]
           ]
         ],
@@ -229,7 +235,8 @@
         #set par(justify: false, leading: 0.42em)
         #set text(hyphenate: false)
         #cms-link-meta("meta-title")[
-          #text(font: font-heading, weight: "medium", size: 22pt, fill: lukb-navy)[#meta.title]
+          // NOTIZ (vorherige Farbe): fill: lukb-navy (#002855)
+          #text(font: font-heading, weight: "medium", size: 22pt, fill: lukb-blue-600)[#meta.title]
         ]
       ]
     ]
@@ -239,7 +246,8 @@
         #align(left)[
           #set par(justify: false, leading: 0.68em)
           #cms-link-meta("meta-lead")[
-            #text(font: font-body, weight: "light", size: 10.8pt, fill: lukb-text)[#meta.lead]
+            // NOTIZ (vorherige Farbe): fill: lukb-text (#1A2433)
+            #text(font: font-body, weight: "light", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
           ]
         ]
       ]
@@ -249,7 +257,8 @@
       #cms-link-meta("meta-authors-container")[
         #block(
           width: 100%,
-          fill: lukb-surface,
+          // NOTIZ (vorherige Farbe): fill: lukb-surface (#F4F7FA)
+          fill: lukb-blue-50,
           inset: (x: 10pt, y: 6pt),
           radius: 2pt
         )[
@@ -287,7 +296,8 @@
       align(left + horizon)[
         #let cat-text = meta.at("category", default: "")
         #cms-link-meta("meta-category")[
-          #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-cyan, tracking: 0.8pt)[
+          // NOTIZ (vorherige Farbe): fill: lukb-cyan (#009FE3)
+          #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-blue-600, tracking: 0.8pt)[
             #if cat-text != "" [LUKB INVESTMENT OFFICE · #upper(cat-text)] else [LUKB INVESTMENT OFFICE]
           ]
         ]
@@ -303,7 +313,8 @@
     #v(6pt)
     #if meta.subtitle != "" [
       #cms-link-meta("meta-subtitle")[
-        #text(font: font-body, weight: "light", size: 10pt, fill: rgb("#B8C7D9"))[#meta.subtitle]
+        // NOTIZ (vorherige Farbe): fill: rgb("#B8C7D9")
+        #text(font: font-body, weight: "light", size: 10pt, fill: lukb-blue-600)[#meta.subtitle]
       ]
       #v(3pt)
     ]
@@ -311,7 +322,8 @@
       #set par(justify: false, leading: 0.42em)
       #set text(hyphenate: false)
       #cms-link-meta("meta-title")[
-        #text(font: font-heading, weight: "medium", size: 20.5pt, fill: white)[#meta.title]
+        // NOTIZ (vorherige Farbe): fill: white (#FFFFFF) auf lukb-navy (#002855)
+        #text(font: font-heading, weight: "medium", size: 20.5pt, fill: lukb-blue-600)[#meta.title]
       ]
     ]
   ]
@@ -327,7 +339,8 @@
       )[
         #align(left)[
           #set par(justify: false, leading: 0.68em)
-          #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-navy)[#meta.lead]
+          // NOTIZ (vorherige Farbe): fill: lukb-navy (#002855)
+          #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
         ]
       ]
     ]
@@ -370,7 +383,8 @@
 ) = {
   let eff-outline-level = if outline-level != none { outline-level } else { level }
   let sz = if level == 1 { h1-size } else if level == 2 { h2-size } else { h3-size }
-  let col = if level == 1 { lukb-navy } else if level == 2 { lukb-blue } else { lukb-text }
+  // NOTIZ (vorherige Farben): H1 = lukb-navy, H2 = lukb-blue, H3 = lukb-text
+  let col = lukb-text
   let lead = if level == 1 { 0.42em } else if level == 2 { 0.38em } else { 0.34em }
   let blw = if level == 1 { h1-below } else { below-space }
   let clean-title = str(content-text).trim()
@@ -420,7 +434,8 @@
   block(
     width: 100%,
     breakable: false,
-    fill: lukb-surface,
+    // NOTIZ (vorherige Farbe): fill: lukb-surface (#F4F7FA)
+    fill: lukb-blue-50,
     stroke: (left: 3pt + accent-color, top: 0.5pt + lukb-border, right: 0.5pt + lukb-border, bottom: 0.5pt + lukb-border),
     inset: (x: 11pt, y: 10pt),
     radius: (right: 3pt),
@@ -588,6 +603,8 @@
   let pad-x = if is-factsheet { 3pt } else if is-margin { 3.5pt } else { 6pt }
   let pad-y = if is-factsheet { 1.8pt } else if is-margin { 3pt } else { 5pt }
   let is-tufte-style = (style-variant == "tufte")
+  let table-design = blk.at("table_design", default: "standard")
+  let is-lukb-design = (table-design == "lukb_design")
 
   let tbl-box = block(
     width: 100%,
@@ -625,7 +642,7 @@
       [
         #set par(justify: cell-justify)
         #(if is-total {
-          text(font: font-heading, weight: "medium", size: cell-sz, fill: lukb-navy)[#cell-val]
+          text(font: font-heading, weight: "medium", size: cell-sz, fill: if is-lukb-design { lukb-text } else { lukb-navy })[#cell-val]
         } else {
           text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
         })
@@ -635,20 +652,46 @@
     #table(
       columns: col-widths,
       align: aligns,
-      stroke: (x, y) => (
-        top: if show-header {
-          if y == 0 { 0.8pt + lukb-navy } else if y == 1 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+      stroke: (x, y) => if is-lukb-design {
+        (
+          top: if show-header {
+            if y == 0 { none } else if y == 1 { 0.7pt + lukb-text } else { 0.45pt + lukb-border }
+          } else {
+            if y == 0 { none } else { 0.45pt + lukb-border }
+          },
+          bottom: if show-header {
+            if y == 0 or y == main-rows-count { 0.7pt + lukb-text } else { 0.45pt + lukb-border }
+          } else {
+            if main-rows-count > 0 and y == main-rows-count - 1 { 0.7pt + lukb-text } else { 0.45pt + lukb-border }
+          },
+          left: none,
+          right: none,
+        )
+      } else {
+        (
+          top: if show-header {
+            if y == 0 { 0.8pt + lukb-navy } else if y == 1 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+          } else {
+            if y == 0 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
+          },
+          bottom: if show-header {
+            if y == main-rows-count { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
+          } else {
+            if main-rows-count > 0 and y == main-rows-count - 1 { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
+          },
+          ..(if is-tufte-style { (left: none, right: none) } else { (:) })
+        )
+      },
+      fill: (x, y) => if is-lukb-design {
+        if show-header {
+          if y == 0 { white }
+          else if highlight-last and y == rows.len() { lukb-blue-100 }
+          else { white }
         } else {
-          if y == 0 { 0.8pt + lukb-navy } else { 0.4pt + lukb-border }
-        },
-        bottom: if show-header {
-          if y == main-rows-count { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
-        } else {
-          if main-rows-count > 0 and y == main-rows-count - 1 { 0.8pt + lukb-navy } else if is-tufte-style { none } else { 0.4pt + lukb-border }
-        },
-        ..(if is-tufte-style { (left: none, right: none) } else { (:) })
-      ),
-      fill: (x, y) => {
+          if rows.len() > 0 and highlight-last and y == rows.len() - 1 { lukb-blue-100 }
+          else { white }
+        }
+      } else {
         if show-header {
           if y == 0 { if is-tufte-style { lukb-surface } else { lukb-navy } }
           else if highlight-last and y == rows.len() { rgb("#E6EEF7") }
@@ -671,7 +714,7 @@
                 font: font-heading,
                 weight: "medium",
                 size: hdr-sz,
-                fill: if is-tufte-style { lukb-navy } else { white }
+                fill: if is-lukb-design { lukb-text } else if is-tufte-style { lukb-navy } else { white }
               )[#c.title]
             ]),
           ),
@@ -687,7 +730,11 @@
         let last-idx = rows.len() - 1
         let last-row = rows.last()
         let is-total = highlight-last
-        let last-bg = if is-total { rgb("#E6EEF7") } else if calc.even(last-idx + (if show-header { 1 } else { 0 })) { if is-tufte-style { rgb("#FAFBFD") } else { lukb-surface } } else { white }
+        let last-bg = if is-lukb-design {
+          if is-total { lukb-blue-100 } else { white }
+        } else {
+          if is-total { rgb("#E6EEF7") } else if calc.even(last-idx + (if show-header { 1 } else { 0 })) { if is-tufte-style { rgb("#FAFBFD") } else { lukb-surface } } else { white }
+        }
         (
           table.cell(
             colspan: col-count,
@@ -700,11 +747,20 @@
                 columns: col-widths,
                 inset: (x: pad-x, y: pad-y),
                 align: aligns,
-                stroke: (x, y) => (
-                  top: 0.4pt + lukb-border,
-                  bottom: 0.8pt + lukb-navy,
-                  ..(if is-tufte-style { (left: none, right: none) } else { (:) })
-                ),
+                stroke: (x, y) => if is-lukb-design {
+                  (
+                    top: 0.45pt + lukb-border,
+                    bottom: 0.7pt + lukb-text,
+                    left: none,
+                    right: none,
+                  )
+                } else {
+                  (
+                    top: 0.4pt + lukb-border,
+                    bottom: 0.8pt + lukb-navy,
+                    ..(if is-tufte-style { (left: none, right: none) } else { (:) })
+                  )
+                },
                 fill: (x, y) => last-bg,
                 ..render-row-cells(last-row, is-total)
               )
@@ -1300,8 +1356,10 @@
 #let render-textbox-container(breakable: true, above: 1.05em, below: 1.05em, body) = block(
   width: 100%,
   breakable: breakable,
-  fill: rgb("#EBF3FA"),
-  stroke: 0.6pt + lukb-navy,
+  // NOTIZ (vorherige Farbe der farblichen Box): rgb("#EBF3FA")
+  fill: lukb-blue-100,
+  // NOTIZ (vorheriger Rand): stroke: 0.6pt + lukb-navy
+  stroke: none,
   inset: (x: 10pt, y: 9pt),
   radius: 2pt,
   above: above,

@@ -8,6 +8,10 @@
     :root {
       --lukb-navy: #002855;
       --lukb-blue: #005A9C;
+      --lukb-blue-50: #E4F4FE;
+      --lukb-blue-100: #BCE2FE;
+      --lukb-blue-300: #64BEFF;
+      --lukb-blue-600: #0A94F2;
       --lukb-cyan: #009FE3;
       --lukb-gold: #C59B27;
       --lukb-text: #1A2433;
@@ -80,7 +84,8 @@
     }
 
     .lukb-header-series {
-      color: #0093D1;
+      /* NOTIZ (vorherige Farbe): #0093D1 */
+      color: var(--lukb-blue-600);
       font-family: var(--font-heading);
       font-weight: 500;
       font-size: 1.2rem;
@@ -91,7 +96,8 @@
     .lukb-subtitle {
       font-family: var(--font-heading);
       font-weight: 500;
-      color: var(--lukb-blue);
+      /* NOTIZ (vorherige Farbe): var(--lukb-blue) (#005A9C) */
+      color: var(--lukb-blue-600);
       font-size: 1rem;
       margin: 0 0 6px 0;
     }
@@ -99,7 +105,8 @@
     .lukb-title {
       font-family: var(--font-heading);
       font-weight: 500;
-      color: var(--lukb-navy);
+      /* NOTIZ (vorherige Farbe): var(--lukb-navy) (#002855) */
+      color: var(--lukb-blue-600);
       font-size: 2.25rem;
       line-height: 1.22;
       margin: 0 0 1.5em 0;
@@ -110,13 +117,15 @@
     .lukb-lead {
       font-size: 1.12rem;
       line-height: 1.6;
-      color: var(--lukb-text);
+      /* NOTIZ (vorherige Farbe): var(--lukb-text) (#1A2433) */
+      color: var(--lukb-blue-600);
       margin: 0 0 1.8em 0;
       text-align: left;
     }
 
     .lukb-authors-bar {
-      background: var(--lukb-surface);
+      /* NOTIZ (vorherige Farbe): var(--lukb-surface) (#F4F7FA) */
+      background: var(--lukb-blue-50);
       padding: 10px 16px;
       border-radius: 4px;
       font-size: 0.86rem;
@@ -197,7 +206,8 @@
 
     h1.blk-h1 {
       font-size: 1.48rem;
-      color: var(--lukb-navy);
+      /* NOTIZ (vorherige Farbe): var(--lukb-navy) (#002855) */
+      color: var(--lukb-text);
       margin-top: 2em;
       border-bottom: 1.5px solid var(--lukb-navy);
       padding-bottom: 0.25rem;
@@ -207,7 +217,8 @@
 
     h2.blk-h2 {
       font-size: 1.1rem;
-      color: var(--lukb-blue);
+      /* NOTIZ (vorherige Farbe): var(--lukb-blue) (#005A9C) */
+      color: var(--lukb-text);
       margin-top: 2em;
       margin-bottom: 0.68rem;
       line-height: 1.38;
@@ -264,8 +275,10 @@
     }
 
     .blk-richtext-textbox {
-      background: #EBF3FA;
-      border: 1px solid var(--lukb-navy);
+      /* NOTIZ (vorherige Farbe der farblichen Box): #EBF3FA */
+      background: var(--lukb-blue-100);
+      /* NOTIZ (vorheriger Rand): 1px solid var(--lukb-navy) */
+      border: none;
       border-radius: 3px;
       padding: 12px 14px;
       margin: 0 0 1em 0;
@@ -278,7 +291,8 @@
 
     .blk-callout {
       break-inside: avoid;
-      background: var(--lukb-surface);
+      /* NOTIZ (vorherige Farbe): var(--lukb-surface) (#F4F7FA) */
+      background: var(--lukb-blue-50);
       border: 1px solid var(--lukb-border);
       border-left: 4px solid var(--callout-accent);
       border-radius: 0 4px 4px 0;
@@ -899,6 +913,39 @@
       border-bottom: 2px solid var(--lukb-navy);
     }
 
+    table.lukb-data-table.table-design-lukb thead th {
+      background: transparent;
+      color: var(--lukb-text);
+      border-top: none;
+      border-left: none;
+      border-right: none;
+      border-bottom: 1px solid #6B7787;
+    }
+
+    table.lukb-data-table.table-design-lukb tbody tr {
+      background: transparent;
+    }
+
+    table.lukb-data-table.table-design-lukb tbody td {
+      border-left: none;
+      border-right: none;
+      border-bottom: 1px solid #B8C2CE;
+      color: var(--lukb-text);
+    }
+
+    table.lukb-data-table.table-design-lukb tbody tr:last-child td {
+      border-bottom: 1px solid #6B7787;
+    }
+
+    table.lukb-data-table.table-design-lukb tbody tr.row-total td {
+      background: var(--lukb-blue-100);
+      font-family: var(--font-heading);
+      font-weight: 500;
+      color: var(--lukb-text);
+      border-top: 1px solid #B8C2CE;
+      border-bottom: 1px solid #6B7787;
+    }
+
     .lukb-footer {
       margin: 0 44px 24px 44px;
       padding: 10px 0 0 0;
@@ -1029,7 +1076,9 @@
         {% endfor %}
         {% set font_step = blk.font_size_step if blk.font_size_step is defined and blk.font_size_step in (-1, -2) else 0 %}
         {% set font_cls = 'table-font-sm-1' if font_step == -1 else ('table-font-sm-2' if font_step == -2 else '') %}
-        <table class="lukb-data-table{% if font_cls %} {{ font_cls }}{% endif %}">
+        {% set tbl_design = blk.table_design if blk.table_design is defined and blk.table_design == 'lukb_design' else 'standard' %}
+        {% set design_cls = 'table-design-lukb' if tbl_design == 'lukb_design' else '' %}
+        <table class="lukb-data-table{% if font_cls %} {{ font_cls }}{% endif %}{% if design_cls %} {{ design_cls }}{% endif %}">
           <colgroup>
             {% for col in blk.columns %}
               {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}

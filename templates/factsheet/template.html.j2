@@ -86,15 +86,18 @@
 
   <div class="lukb-factsheet-header-box" style="margin-bottom: 18px; border-bottom: 2px solid var(--lukb-navy); padding-bottom: 12px;">
     <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px;">
-      <h1 class="lukb-title" style="margin: 0; font-size: 2.1rem; color: var(--lukb-navy);">{{ article.metadata.title }}</h1>
+      <!-- NOTIZ (vorherige Titel-Farbe): var(--lukb-navy) (#002855) -->
+      <h1 class="lukb-title" style="margin: 0; font-size: 2.1rem; color: var(--lukb-blue-600);">{{ article.metadata.title }}</h1>
       {% if article.metadata.category %}
-      <span style="font-family: var(--font-heading); font-weight: 500; color: var(--lukb-cyan); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em;">
+      <!-- NOTIZ (vorherige Farbe): var(--lukb-cyan) -->
+      <span style="font-family: var(--font-heading); font-weight: 500; color: var(--lukb-blue-600); font-size: 0.9rem; text-transform: uppercase; letter-spacing: 0.05em;">
         {{ article.metadata.category }}
       </span>
       {% endif %}
     </div>
     {% if article.metadata.subtitle %}
-    <p class="lukb-subtitle" style="margin: 4px 0 0 0; color: var(--lukb-blue); font-size: 1.05rem;">{{ article.metadata.subtitle }}</p>
+    <!-- NOTIZ (vorherige Farbe): var(--lukb-blue) -->
+    <p class="lukb-subtitle" style="margin: 4px 0 0 0; color: var(--lukb-blue-600); font-size: 1.05rem;">{{ article.metadata.subtitle }}</p>
     {% endif %}
   </div>
 

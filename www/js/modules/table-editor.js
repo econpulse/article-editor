@@ -382,6 +382,40 @@
     });
     fontSizeWrap.appendChild(fontSizeSelect);
 
+    const designWrap = document.createElement("label");
+    designWrap.style.display = "inline-flex";
+    designWrap.style.alignItems = "center";
+    designWrap.style.gap = "5px";
+    designWrap.style.fontSize = "12px";
+    designWrap.style.marginLeft = "8px";
+    designWrap.appendChild(document.createTextNode("Design:"));
+
+    const designSelect = document.createElement("select");
+    designSelect.className = "cms-select";
+    designSelect.style.width = "auto";
+    designSelect.style.minWidth = "135px";
+    designSelect.style.height = "26px";
+    designSelect.style.padding = "2px 6px";
+    designSelect.style.fontSize = "12px";
+    designSelect.title = "Tabellen-Design auswählen";
+    [
+      { value: "standard", label: "Standard (Navy)" },
+      { value: "lukb_design", label: "LUKB Design" },
+    ].forEach(function (opt) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      designSelect.appendChild(o);
+    });
+    const curDesign = blk.table_design === "lukb_design" ? "lukb_design" : "standard";
+    blk.table_design = curDesign;
+    designSelect.value = curDesign;
+    designSelect.addEventListener("change", function () {
+      blk.table_design = designSelect.value === "lukb_design" ? "lukb_design" : "standard";
+      markDirty();
+    });
+    designWrap.appendChild(designSelect);
+
     btnGroup.appendChild(addRowBtn);
     btnGroup.appendChild(addColBtn);
     btnGroup.appendChild(useFirstRowHeaderBtn);
@@ -390,6 +424,7 @@
     btnGroup.appendChild(headerToggleWrap);
     btnGroup.appendChild(totalToggleWrap);
     btnGroup.appendChild(fontSizeWrap);
+    btnGroup.appendChild(designWrap);
 
     const excelHint = document.createElement("span");
     excelHint.style.fontSize = "11.5px";

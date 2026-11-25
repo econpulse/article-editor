@@ -414,6 +414,10 @@ class TableBlock(MarginAnchorBlockBase):
     source: str = Field(default="Quelle: LUKB Investment Office", description="Tabellen-Quelle / Fussnote")
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
     show_header: bool = Field(default=True, description="Tabellen-Kopfzeile anzeigen")
+    table_design: Literal["standard", "lukb_design"] = Field(
+        default="standard",
+        description="Tabellen-Design (standard = LUKB Navy, lukb_design = LUKB Design gemäss CD)",
+    )
     font_size_step: Literal[0, -1, -2] = Field(
         default=0,
         description="Relative Schriftgrösse für Kopfzeile & Body (0 = Standard, -1 = 1 Stufe kleiner, -2 = 2 Stufen kleiner)",
@@ -489,6 +493,12 @@ class TableBlock(MarginAnchorBlockBase):
             out["columns"] = new_cols
             return out
         return data
+
+    @field_validator("table_design", mode="before")
+    @classmethod
+    def validate_table_design(cls, v: Any) -> str:
+        s = str(v or "standard").strip().lower()
+        return "lukb_design" if s == "lukb_design" else "standard"
 
     @field_validator("font_size_step", mode="before")
     @classmethod

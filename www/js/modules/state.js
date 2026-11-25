@@ -1014,6 +1014,7 @@
         full_position: "auto",
         show_header: true,
         highlight_last_row: false,
+        table_design: "standard",
         font_size_step: 0,
         columns: [
           { field: "col_1", title: "Kennzahl / Sektor", align: "left", width: 33.4 },

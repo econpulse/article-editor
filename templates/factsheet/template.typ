@@ -96,7 +96,8 @@
         "Factsheet per " + format-pub-date(meta.publication_date)
       }
       #cms-link-meta(if has-series { "meta-header-series" } else { "meta-pub-date" })[
-        #text(font: font-heading, weight: "medium", size: 8.8pt, fill: lukb-muted)[#pub-str]
+        // NOTIZ (vorherige Farbe): fill: lukb-muted (#5A687C)
+        #text(font: font-heading, weight: "medium", size: 8.8pt, fill: lukb-blue-600)[#pub-str]
       ]
     ]
   )
@@ -166,15 +167,16 @@
 #let p2-right = if sections.len() > 3 { sections.at(3) } else { () }
 
 // PAGE 1
+// NOTIZ (vorherige Farben): title = lukb-navy, subtitle = lukb-blue, kicker = lukb-cyan
 #render-factsheet-header(
   meta,
   meta.title,
   19pt,
-  lukb-navy,
+  lukb-blue-600,
   meta.subtitle,
-  lukb-blue,
+  lukb-blue-600,
   if meta.category != "" { upper(meta.category) } else { "" },
-  lukb-cyan,
+  lukb-blue-600,
   lukb-navy,
 )
 #render-factsheet-columns(p1-left, p1-right, lukb-cyan, lukb-navy)

@@ -2391,6 +2391,71 @@ def test_empty_category_and_verfasst_von_in_pdf():
     assert "LUKB INVESTMENT OFFICE ·" not in flash_pdf_text
 
 
+def test_lukb_table_design_and_template_colors():
+    """Prüft LUKB Design bei Tabellen (inkl. Blue 100 Summary-Zeile) sowie Blue 300 / Blue 100 Template-Farben."""
+    from io import BytesIO
+    from docx import Document as DocxDoc
+    from schemas.article import ArticleDocument, ArticleMetadata, TableBlock
+    from services.renderer import render_docx_bytes, render_preview_svg_pages, render_web_html
+
+    assert TableBlock().table_design == "standard"
+    assert TableBlock(table_design="lukb_design").table_design == "lukb_design"
+    assert TableBlock(table_design=None).table_design == "standard"
+    assert TableBlock(table_design="unknown").table_design == "standard"
+
+    tbl_lukb = TableBlock(
+        id="tbl-lukb-1",
+        title="Kennzahlen LUKB Design",
+        table_design="lukb_design",
+        highlight_last_row=True,
+        columns=[
+            {"field": "c1", "title": "Position", "align": "left", "width": 50.0},
+            {"field": "c2", "title": "2025", "align": "right", "width": 25.0},
+            {"field": "c3", "title": "2026", "align": "right", "width": 25.0},
+        ],
+        rows=[
+            {"c1": "Ertrag", "c2": "615.3", "c3": "651.1"},
+            {"c1": "Total", "c2": "903.8", "c3": "949.9"},
+        ],
+    ).model_dump()
+
+    for tpl_id in ("investment_focus", "market_flash"):
+        doc = ArticleDocument(
+            id=f"art-lukb-design-{tpl_id}",
+            template_id=tpl_id,
+            metadata=ArticleMetadata(title="Titel in Blue 300", lead="Lead in Blue 300"),
+            blocks=[
+                {"id": "b_start", "type": "box_start"},
+                {"id": "p_box", "type": "richtext", "html": "<p>Inhalt in farblicher Box</p>"},
+                {"id": "b_end", "type": "box_end"},
+                tbl_lukb,
+            ],
+        )
+        html = render_web_html(doc)
+        assert "--lukb-blue-100: #BCE2FE;" in html
+        assert "--lukb-blue-600: #0A94F2;" in html
+        assert "table-design-lukb" in html
+        assert "row-total" in html
+
+        svgs = render_preview_svg_pages(doc)
+        assert len(svgs) >= 1
+        svg_lower = svgs[0].lower()
+        assert "#0a94f2" in svg_lower, f"Blue 600 (#0A94F2) fehlt in {tpl_id} SVG"
+        assert "#bce2fe" in svg_lower, f"Blue 100 (#BCE2FE) fehlt in {tpl_id} SVG"
+
+    docx_bytes = render_docx_bytes(
+        ArticleDocument(
+            id="art-lukb-design-docx",
+            template_id="investment_focus",
+            metadata=ArticleMetadata(title="DOCX Test", lead="Lead"),
+            blocks=[tbl_lukb],
+        )
+    )
+    docx_doc = DocxDoc(BytesIO(docx_bytes))
+    assert len(docx_doc.tables) == 1
+    assert len(docx_doc.tables[0].rows) == 3
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
