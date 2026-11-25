@@ -11,6 +11,8 @@
 #let lukb-blue-100 = rgb("#BCE2FE")
 #let lukb-blue-300 = rgb("#64BEFF")
 #let lukb-blue-600 = rgb("#0A94F2")
+#let lukb-berry-600 = rgb("#70024C")
+#let lukb-berry-800 = rgb("#480C34")
 #let lukb-cyan = rgb("#009FE3")
 #let lukb-gold = rgb("#C59B27")
 #let lukb-text = rgb("#1A2433")
@@ -238,7 +240,7 @@
         #set text(hyphenate: false)
         #cms-link-meta("meta-title")[
           // NOTIZ (vorherige Farbe): fill: lukb-navy (#002855)
-          #text(font: font-heading, weight: "medium", size: 22pt, fill: lukb-blue-600)[#meta.title]
+          #text(font: font-heading, weight: "medium", size: 22pt, fill: lukb-blue-600, tracking: -0.015em)[#meta.title]
         ]
       ]
     ]
@@ -287,9 +289,10 @@
   render-brand-top-row(meta)
   v(12pt)
 
+  // NOTIZ (vorherige Hintergrundfarbe): fill: lukb-navy (#002855)
   block(
     width: 100%,
-    fill: lukb-navy,
+    fill: lukb-berry-800,
     inset: (x: 16pt, y: 14pt),
     radius: 3pt
   )[
@@ -298,16 +301,16 @@
       align(left + horizon)[
         #let cat-text = meta.at("category", default: "")
         #cms-link-meta("meta-category")[
-          // NOTIZ (vorherige Farbe): fill: lukb-cyan (#009FE3)
-          #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-blue-600, tracking: 0.8pt)[
+          // NOTIZ (vorherige Farbe): fill: lukb-blue-600 / lukb-cyan
+          #text(font: font-heading, weight: "medium", size: 9pt, fill: lukb-blue-300, tracking: 0.8pt)[
             #if cat-text != "" [LUKB INVESTMENT OFFICE · #upper(cat-text)] else [LUKB INVESTMENT OFFICE]
           ]
         ]
       ],
       align(right + horizon)[
         #cms-link-meta("meta-pub-date")[
-          // NOTIZ (vorherige Farbe): fill: rgb("#D6DEE8")
-          #text(font: font-body, weight: "light", size: 10.5pt, fill: lukb-blue-600)[
+          // NOTIZ (vorherige Farbe): fill: lukb-blue-600 / rgb("#D6DEE8")
+          #text(font: font-body, weight: "light", size: 10.5pt, fill: lukb-blue-300)[
             #format-pub-date(meta.publication_date)
           ]
         ]
@@ -316,8 +319,8 @@
     #v(6pt)
     #if meta.subtitle != "" [
       #cms-link-meta("meta-subtitle")[
-        // NOTIZ (vorherige Farbe): fill: rgb("#B8C7D9")
-        #text(font: font-body, weight: "light", size: 10pt, fill: lukb-blue-600)[#meta.subtitle]
+        // NOTIZ (vorherige Farbe): fill: lukb-blue-600 / rgb("#B8C7D9")
+        #text(font: font-body, weight: "light", size: 10pt, fill: lukb-blue-300)[#meta.subtitle]
       ]
       #v(3pt)
     ]
@@ -325,13 +328,13 @@
       #set par(justify: false, leading: 0.42em)
       #set text(hyphenate: false)
       #cms-link-meta("meta-title")[
-        // NOTIZ (vorherige Farbe): fill: white (#FFFFFF) auf lukb-navy (#002855)
-        #text(font: font-heading, weight: "medium", size: 20.5pt, fill: lukb-blue-600)[#meta.title]
+        // NOTIZ (vorherige Farbe): fill: white (#FFFFFF) / lukb-blue-600
+        #text(font: font-heading, weight: "medium", size: 20.5pt, fill: lukb-blue-300, tracking: -0.015em)[#meta.title]
       ]
     ]
   ]
 
-  v(2.5em)
+  v(0.85em)
 
   if meta.lead != "" [
     #cms-link-meta("meta-lead")[
@@ -347,7 +350,7 @@
         ]
       ]
     ]
-    #v(2.5em)
+    #v(0.85em)
   ]
 
   if meta.authors.len() > 0 [
@@ -406,7 +409,8 @@
         block(width: 100%)[
           #set text(hyphenate: false)
           #set par(leading: lead, justify: false)
-          #heading(level: eff-outline-level, outlined: do-outline)[#text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]]
+          // NOTIZ (vorherige Schrift): font: font-heading, weight: "medium"
+          #heading(level: eff-outline-level, outlined: do-outline)[#text(font: font-bold, weight: "bold", size: sz, fill: col)[#content-text]]
         ],
         line(length: 100%, stroke: 0.75pt + lukb-navy)
       )
@@ -422,7 +426,8 @@
       #show heading: it => it.body
       #set text(hyphenate: false)
       #set par(leading: lead, justify: false)
-      #heading(level: eff-outline-level, outlined: do-outline)[#text(font: font-heading, weight: "medium", size: sz, fill: col)[#content-text]]
+      // NOTIZ (vorherige Schrift): font: font-heading, weight: "medium"
+      #heading(level: eff-outline-level, outlined: do-outline)[#text(font: font-bold, weight: "bold", size: sz, fill: col)[#content-text]]
     ]
   }
 }

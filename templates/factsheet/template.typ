@@ -112,7 +112,7 @@
       align: (left + bottom, right + bottom),
       [
         #cms-link-meta("meta-title")[
-          #text(font: font-heading, weight: "medium", size: title-size, fill: title-color)[#title-text]
+          #text(font: font-heading, weight: "medium", size: title-size, fill: title-color, tracking: -0.015em)[#title-text]
         ]
         #if subtitle-text != "" [
           #v(2pt)

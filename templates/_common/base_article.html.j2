@@ -12,6 +12,8 @@
       --lukb-blue-100: #BCE2FE;
       --lukb-blue-300: #64BEFF;
       --lukb-blue-600: #0A94F2;
+      --lukb-berry-600: #70024C;
+      --lukb-berry-800: #480C34;
       --lukb-cyan: #009FE3;
       --lukb-gold: #C59B27;
       --lukb-text: #1A2433;
@@ -110,6 +112,7 @@
       color: var(--lukb-blue-600);
       font-size: 2.25rem;
       line-height: 1.22;
+      letter-spacing: -0.015em;
       margin: 0 0 1.5em 0;
       text-align: left;
       hyphens: none;
@@ -194,8 +197,9 @@
     }
 
     h1.blk-h1, h2.blk-h2, h3.blk-h3 {
-      font-family: var(--font-heading);
-      font-weight: 500;
+      /* NOTIZ (vorherige Schrift): var(--font-heading), weight 500 */
+      font-family: var(--font-bold);
+      font-weight: 700;
       line-height: 1.15;
       break-after: avoid;
       break-inside: avoid;

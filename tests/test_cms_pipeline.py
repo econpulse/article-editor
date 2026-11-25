@@ -2442,6 +2442,9 @@ def test_lukb_table_design_and_template_colors():
         svg_lower = svgs[0].lower()
         assert "#0a94f2" in svg_lower, f"Blue 600 (#0A94F2) fehlt in {tpl_id} SVG"
         assert "#bce2fe" in svg_lower, f"Blue 100 (#BCE2FE) fehlt in {tpl_id} SVG"
+        if tpl_id == "market_flash":
+            assert "#480c34" in svg_lower, "Berry 800 (#480C34) fehlt in market_flash SVG"
+            assert "#64beff" in svg_lower, "Blue 300 (#64BEFF) fehlt in market_flash SVG"
 
     docx_bytes = render_docx_bytes(
         ArticleDocument(
