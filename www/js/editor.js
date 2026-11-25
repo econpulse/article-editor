@@ -443,8 +443,9 @@
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "inserter-btn";
-    btn.innerHTML = "+ Block hier einfügen";
+    btn.textContent = "+";
     btn.title = "Neuen Block an dieser Stelle einfügen";
+    btn.setAttribute("aria-label", "Block hier einfügen");
     btn.addEventListener("click", function (e) {
       e.stopPropagation();
       let idx = parseInt(wrap.dataset.targetIndex, 10);
