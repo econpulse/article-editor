@@ -556,7 +556,16 @@
       sticky-blocks: true,
     )
     #if img-path != "" [
-      #if scale-pct < 100 and scale-mode == "squeeze_y" [
+      #if scale-mode == "original" [
+        #layout(avail => context {
+          let orig = measure(image(img-path))
+          if orig.width < avail.width {
+            align(left)[#image(img-path, width: orig.width)]
+          } else {
+            align(center)[#image(img-path, width: 100%)]
+          }
+        })
+      ] else if scale-pct < 100 and scale-mode == "squeeze_y" [
         #layout(avail => context {
           let probe = measure(image(img-path, width: avail.width))
           let target-h = probe.height * (scale-pct / 100.0)

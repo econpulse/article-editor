@@ -246,9 +246,9 @@ class FigureBlock(MarginAnchorBlockBase):
     source: str = Field(default="Quelle: Luzerner Kantonalbank, LSEG", description="Quellenangabe")
     asset_id: str = Field(default="", description="UUID des hochgeladenen Grafik-Assets in der DB")
     scale_pct: int = Field(default=100, description="Skalierung in 5%-Schritten (75 bis 100 %)")
-    scale_mode: Literal["proportional", "squeeze_y"] = Field(
+    scale_mode: Literal["proportional", "squeeze_y", "original"] = Field(
         default="proportional",
-        description="Skalierungsmodus ('proportional' = linksbündig mit Luft rechts, 'squeeze_y' = vertikal stauchen)",
+        description="Skalierungsmodus ('proportional' = linksbündig mit Luft rechts, 'squeeze_y' = vertikal stauchen, 'original' = Originalgrösse falls kleiner)",
     )
 
     @field_validator("scale_pct", mode="before")
@@ -266,7 +266,9 @@ class FigureBlock(MarginAnchorBlockBase):
     @classmethod
     def validate_scale_mode(cls, v: Any) -> str:
         s = str(v or "proportional").strip().lower()
-        return "squeeze_y" if s == "squeeze_y" else "proportional"
+        if s in ("squeeze_y", "original"):
+            return s
+        return "proportional"
 
 
 ChartSeriesType = Literal["line", "step", "dot", "area", "bar", "stacked_bar"]

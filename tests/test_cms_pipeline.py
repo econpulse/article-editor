@@ -2416,6 +2416,7 @@ def test_lukb_table_design_and_template_colors():
     assert FigureBlock(scale_pct=50).scale_pct == 75
     assert FigureBlock(scale_pct=120).scale_pct == 100
     assert FigureBlock(scale_mode="squeeze_y").scale_mode == "squeeze_y"
+    assert FigureBlock(scale_mode="original").scale_mode == "original"
     assert FigureBlock(scale_mode="invalid").scale_mode == "proportional"
 
     tbl_lukb = TableBlock(

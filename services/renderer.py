@@ -1328,7 +1328,14 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                     r_pic = p_pic.add_run()
                     scale_pct = max(75, min(100, int(blk.get("scale_pct") or 100)))
                     scale_mode = blk.get("scale_mode") or "proportional"
-                    if btype == "figure" and scale_pct < 100 and scale_mode == "squeeze_y":
+                    if btype == "figure" and scale_mode == "original":
+                        pic = r_pic.add_picture(io.BytesIO(img_bytes))
+                        max_w = Inches(6.0)
+                        if pic.width > max_w:
+                            ratio = max_w / pic.width
+                            pic.width = max_w
+                            pic.height = int(pic.height * ratio)
+                    elif btype == "figure" and scale_pct < 100 and scale_mode == "squeeze_y":
                         pic = r_pic.add_picture(io.BytesIO(img_bytes), width=Inches(6.0))
                         pic.height = int(pic.height * (scale_pct / 100.0))
                     elif btype == "figure" and scale_pct < 100:

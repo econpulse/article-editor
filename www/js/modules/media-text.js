@@ -346,17 +346,21 @@
     [
       { val: "proportional", label: "Proportional verkleinern (linksbündig, Luft rechts)" },
       { val: "squeeze_y", label: "Vertikal stauchen (100 % Breite beibehalten)" },
+      { val: "original", label: "Originalgrösse (falls kleiner als Spalte)" },
     ].forEach(function (opt) {
       const o = document.createElement("option");
       o.value = opt.val;
       o.textContent = opt.label;
       scaleModeSel.appendChild(o);
     });
-    const curScaleMode = blk.scale_mode === "squeeze_y" ? "squeeze_y" : "proportional";
+    const curScaleMode = (blk.scale_mode === "squeeze_y" || blk.scale_mode === "original") ? blk.scale_mode : "proportional";
     blk.scale_mode = curScaleMode;
     scaleModeSel.value = curScaleMode;
+    scalePctSel.disabled = (curScaleMode === "original");
     scaleModeSel.addEventListener("change", function () {
-      blk.scale_mode = scaleModeSel.value === "squeeze_y" ? "squeeze_y" : "proportional";
+      const val = scaleModeSel.value;
+      blk.scale_mode = (val === "squeeze_y" || val === "original") ? val : "proportional";
+      scalePctSel.disabled = (blk.scale_mode === "original");
       markDirty();
     });
     scaleModeWrap.appendChild(scaleModeLbl);
