@@ -2415,7 +2415,12 @@
     container.appendChild(dropzone);
     container.appendChild(fileInput);
 
-    // Zeile 4: Quellenangabe
+    // Zeile 4: Grafik-Höhe / Skalierung (5%-Schritte bis 75%, Proportional oder Vertikal stauchen)
+    if (typeof E.createFigureScaleControls === "function") {
+      container.appendChild(E.createFigureScaleControls(blk));
+    }
+
+    // Zeile 5: Quellenangabe
     const srcWrap = document.createElement("div");
     const srcLbl = document.createElement("label");
     srcLbl.className = "field-label";
@@ -2423,7 +2428,7 @@
     const srcInp = document.createElement("input");
     srcInp.type = "text";
     srcInp.className = "cms-input";
-    srcInp.placeholder = "Quelle: Bloomberg, LUKB Investment Office";
+    srcInp.placeholder = "Quelle: Luzerner Kantonalbank, LSEG";
     srcInp.value = blk.source || "";
     srcInp.addEventListener("input", function () {
       blk.source = srcInp.value;

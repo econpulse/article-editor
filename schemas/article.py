@@ -243,8 +243,30 @@ class FigureBlock(MarginAnchorBlockBase):
     type: Literal["figure"] = "figure"
     title: str = Field(default="", description="Grafik-Titel")
     subtitle: str = Field(default="", description="Grafik-Untertitel (z.B. Einheit, Zeitraum)")
-    source: str = Field(default="Quelle: Bloomberg, LUKB Investment Office", description="Quellenangabe")
+    source: str = Field(default="Quelle: Luzerner Kantonalbank, LSEG", description="Quellenangabe")
     asset_id: str = Field(default="", description="UUID des hochgeladenen Grafik-Assets in der DB")
+    scale_pct: int = Field(default=100, description="Skalierung in 5%-Schritten (75 bis 100 %)")
+    scale_mode: Literal["proportional", "squeeze_y"] = Field(
+        default="proportional",
+        description="Skalierungsmodus ('proportional' = linksbündig mit Luft rechts, 'squeeze_y' = vertikal stauchen)",
+    )
+
+    @field_validator("scale_pct", mode="before")
+    @classmethod
+    def validate_scale_pct(cls, v: Any) -> int:
+        if v is None or v == "":
+            return 100
+        try:
+            num = int(round(float(v) / 5.0) * 5)
+        except (TypeError, ValueError):
+            return 100
+        return max(75, min(100, num))
+
+    @field_validator("scale_mode", mode="before")
+    @classmethod
+    def validate_scale_mode(cls, v: Any) -> str:
+        s = str(v or "proportional").strip().lower()
+        return "squeeze_y" if s == "squeeze_y" else "proportional"
 
 
 ChartSeriesType = Literal["line", "step", "dot", "area", "bar", "stacked_bar"]
@@ -290,7 +312,7 @@ class TimeSeriesItem(BaseModel):
 class DbChartBlock(ChartBlockBase):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["db_chart"] = "db_chart"
-    source: str = Field(default="Quelle: Bloomberg, LUKB Investment Office", description="Quellenangabe")
+    source: str = Field(default="Quelle: Luzerner Kantonalbank, LSEG", description="Quellenangabe")
     start_date: str = Field(default="2022-01-01", description="Startdatum im Chart (YYYY-MM-DD)")
     rebasing: Literal["none", "index_100"] = Field(
         default="none",
@@ -323,7 +345,7 @@ class CustomChartSeriesItem(BaseModel):
 class CustomChartBlock(ChartBlockBase):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["custom_chart"] = "custom_chart"
-    source: str = Field(default="Quelle: LUKB Investment Office", description="Quellenangabe")
+    source: str = Field(default="Quelle: Luzerner Kantonalbank, LSEG", description="Quellenangabe")
     chart_type: Literal["timeseries", "category_bar", "doughnut", "pie"] = Field(
         default="category_bar",
         description="Art des Diagramms: timeseries, category_bar, doughnut, pie",
@@ -411,11 +433,11 @@ class TableBlock(MarginAnchorBlockBase):
     type: Literal["table"] = "table"
     title: str = Field(default="", description="Tabellen-Titel")
     subtitle: str = Field(default="", description="Tabellen-Untertitel")
-    source: str = Field(default="Quelle: LUKB Investment Office", description="Tabellen-Quelle / Fussnote")
+    source: str = Field(default="Quelle: Luzerner Kantonalbank, LSEG", description="Tabellen-Quelle / Fussnote")
     highlight_last_row: bool = Field(default=False, description="Letzte Zeile als Total/Summe hervorheben")
     show_header: bool = Field(default=True, description="Tabellen-Kopfzeile anzeigen")
     table_design: Literal["standard", "lukb_design"] = Field(
-        default="standard",
+        default="lukb_design",
         description="Tabellen-Design (standard = LUKB Navy, lukb_design = LUKB Design gemäss CD)",
     )
     font_size_step: Literal[0, -1, -2] = Field(
@@ -497,8 +519,8 @@ class TableBlock(MarginAnchorBlockBase):
     @field_validator("table_design", mode="before")
     @classmethod
     def validate_table_design(cls, v: Any) -> str:
-        s = str(v or "standard").strip().lower()
-        return "lukb_design" if s == "lukb_design" else "standard"
+        s = str(v or "lukb_design").strip().lower()
+        return "standard" if s == "standard" else "lukb_design"
 
     @field_validator("font_size_step", mode="before")
     @classmethod

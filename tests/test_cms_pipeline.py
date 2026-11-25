@@ -1224,7 +1224,7 @@ def test_hybrid_full_width_float_and_overflow_fallback():
             )
             svgs = render_preview_svg_pages(doc)
             assert len(svgs) == 2, f"2-spaltige Tabelle ({tpl_id}/{pos_mode}) muss über 2 Seiten umbrechen"
-            assert "#002855" in svgs[0] and "#002855" in svgs[1], (
+            assert ("#002855" in svgs[0] or "#1a2433" in svgs[0].lower()) and ("#002855" in svgs[1] or "#1a2433" in svgs[1].lower()), (
                 f"2-spaltige Tabelle ({tpl_id}/{pos_mode}) muss auf Seite 1 beginnen und auf Seite 2 mit Kopfzeile fortfahren"
             )
 
@@ -2322,9 +2322,9 @@ def test_table_font_size_step_schema_and_rendering():
     )
 
     html = render_web_html(doc)
-    assert 'class="lukb-data-table"' in html
-    assert 'class="lukb-data-table table-font-sm-1"' in html
-    assert 'class="lukb-data-table table-font-sm-2"' in html
+    assert 'class="lukb-data-table table-design-lukb"' in html
+    assert 'class="lukb-data-table table-font-sm-1 table-design-lukb"' in html
+    assert 'class="lukb-data-table table-font-sm-2 table-design-lukb"' in html
 
     pdf = render_pdf_bytes(doc)
     assert pdf.startswith(b"%PDF-")
@@ -2398,10 +2398,25 @@ def test_lukb_table_design_and_template_colors():
     from schemas.article import ArticleDocument, ArticleMetadata, TableBlock
     from services.renderer import render_docx_bytes, render_preview_svg_pages, render_web_html
 
-    assert TableBlock().table_design == "standard"
+    assert TableBlock().table_design == "lukb_design"
+    assert TableBlock(table_design="standard").table_design == "standard"
     assert TableBlock(table_design="lukb_design").table_design == "lukb_design"
-    assert TableBlock(table_design=None).table_design == "standard"
-    assert TableBlock(table_design="unknown").table_design == "standard"
+    assert TableBlock(table_design=None).table_design == "lukb_design"
+    assert TableBlock(table_design="unknown").table_design == "lukb_design"
+
+    from schemas.article import CustomChartBlock, DbChartBlock, FigureBlock
+    assert FigureBlock().source == "Quelle: Luzerner Kantonalbank, LSEG"
+    assert DbChartBlock().source == "Quelle: Luzerner Kantonalbank, LSEG"
+    assert CustomChartBlock().source == "Quelle: Luzerner Kantonalbank, LSEG"
+    assert TableBlock().source == "Quelle: Luzerner Kantonalbank, LSEG"
+
+    assert FigureBlock().scale_pct == 100
+    assert FigureBlock().scale_mode == "proportional"
+    assert FigureBlock(scale_pct=83).scale_pct == 85
+    assert FigureBlock(scale_pct=50).scale_pct == 75
+    assert FigureBlock(scale_pct=120).scale_pct == 100
+    assert FigureBlock(scale_mode="squeeze_y").scale_mode == "squeeze_y"
+    assert FigureBlock(scale_mode="invalid").scale_mode == "proportional"
 
     tbl_lukb = TableBlock(
         id="tbl-lukb-1",

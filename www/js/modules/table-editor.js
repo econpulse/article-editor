@@ -407,11 +407,11 @@
       o.textContent = opt.label;
       designSelect.appendChild(o);
     });
-    const curDesign = blk.table_design === "lukb_design" ? "lukb_design" : "standard";
+    const curDesign = blk.table_design === "standard" ? "standard" : "lukb_design";
     blk.table_design = curDesign;
     designSelect.value = curDesign;
     designSelect.addEventListener("change", function () {
-      blk.table_design = designSelect.value === "lukb_design" ? "lukb_design" : "standard";
+      blk.table_design = designSelect.value === "standard" ? "standard" : "lukb_design";
       markDirty();
     });
     designWrap.appendChild(designSelect);

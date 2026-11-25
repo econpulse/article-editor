@@ -1054,9 +1054,21 @@
           <div class="blk-box-subtitle">{{ blk.subtitle }}</div>
         {% endif %}
         {% if blk.data_uri %}
+          {% set fig_scale_pct = blk.scale_pct if blk.scale_pct is defined and blk.scale_pct else 100 %}
+          {% set fig_scale_mode = blk.scale_mode if blk.scale_mode is defined and blk.scale_mode else 'proportional' %}
+          {% if fig_scale_pct < 100 and fig_scale_mode == 'squeeze_y' %}
+          <div class="blk-figure-img-container" style="text-align: left;">
+            <img src="{{ blk.data_uri }}" alt="{{ blk.title }}" style="width: 100%; height: auto; object-fit: fill;" onload="if(this.naturalWidth&&this.naturalHeight){var r={{ fig_scale_pct }}/100;this.style.aspectRatio=(this.naturalWidth/(this.naturalHeight*r)).toFixed(4);this.style.height='auto';}" />
+          </div>
+          {% elif fig_scale_pct < 100 %}
+          <div class="blk-figure-img-container" style="text-align: left;">
+            <img src="{{ blk.data_uri }}" alt="{{ blk.title }}" style="width: {{ fig_scale_pct }}%; height: auto;" />
+          </div>
+          {% else %}
           <div class="blk-figure-img-container">
             <img src="{{ blk.data_uri }}" alt="{{ blk.title }}" />
           </div>
+          {% endif %}
         {% else %}
           <div class="blk-figure-placeholder">
             Grafik-Platzhalter (Bitte SVG oder PNG im Grafik-Block hochladen)
@@ -1084,7 +1096,7 @@
         {% endfor %}
         {% set font_step = blk.font_size_step if blk.font_size_step is defined and blk.font_size_step in (-1, -2) else 0 %}
         {% set font_cls = 'table-font-sm-1' if font_step == -1 else ('table-font-sm-2' if font_step == -2 else '') %}
-        {% set tbl_design = blk.table_design if blk.table_design is defined and blk.table_design == 'lukb_design' else 'standard' %}
+        {% set tbl_design = blk.table_design if blk.table_design is defined and blk.table_design == 'standard' else 'lukb_design' %}
         {% set design_cls = 'table-design-lukb' if tbl_design == 'lukb_design' else '' %}
         <table class="lukb-data-table{% if font_cls %} {{ font_cls }}{% endif %}{% if design_cls %} {{ design_cls }}{% endif %}">
           <colgroup>

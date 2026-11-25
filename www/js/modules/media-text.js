@@ -305,7 +305,70 @@
     });
   }
 
+  function createFigureScaleControls(blk) {
+    const scaleGrid = document.createElement("div");
+    scaleGrid.style.display = "grid";
+    scaleGrid.style.gridTemplateColumns = "1fr 1fr";
+    scaleGrid.style.gap = "10px";
+    scaleGrid.style.marginBottom = "10px";
+
+    const scalePctWrap = document.createElement("div");
+    const scalePctLbl = document.createElement("label");
+    scalePctLbl.className = "field-label";
+    scalePctLbl.textContent = "Grafik-Höhe / Grösse (5 %-Schritte)";
+    const scalePctSel = document.createElement("select");
+    scalePctSel.className = "cms-select";
+    [100, 95, 90, 85, 80, 75].forEach(function (pct) {
+      const o = document.createElement("option");
+      o.value = String(pct);
+      o.textContent = pct === 100 ? "100 % (Original)" : pct + " % (-" + (100 - pct) + " %)";
+      scalePctSel.appendChild(o);
+    });
+    const rawScalePct = parseInt(blk.scale_pct, 10);
+    const curScalePct = (!isNaN(rawScalePct) && rawScalePct >= 75 && rawScalePct <= 100)
+      ? Math.round(rawScalePct / 5) * 5
+      : 100;
+    blk.scale_pct = curScalePct;
+    scalePctSel.value = String(curScalePct);
+    scalePctSel.addEventListener("change", function () {
+      blk.scale_pct = parseInt(scalePctSel.value, 10) || 100;
+      markDirty();
+    });
+    scalePctWrap.appendChild(scalePctLbl);
+    scalePctWrap.appendChild(scalePctSel);
+
+    const scaleModeWrap = document.createElement("div");
+    const scaleModeLbl = document.createElement("label");
+    scaleModeLbl.className = "field-label";
+    scaleModeLbl.textContent = "Skalierungsmodus";
+    const scaleModeSel = document.createElement("select");
+    scaleModeSel.className = "cms-select";
+    [
+      { val: "proportional", label: "Proportional verkleinern (linksbündig, Luft rechts)" },
+      { val: "squeeze_y", label: "Vertikal stauchen (100 % Breite beibehalten)" },
+    ].forEach(function (opt) {
+      const o = document.createElement("option");
+      o.value = opt.val;
+      o.textContent = opt.label;
+      scaleModeSel.appendChild(o);
+    });
+    const curScaleMode = blk.scale_mode === "squeeze_y" ? "squeeze_y" : "proportional";
+    blk.scale_mode = curScaleMode;
+    scaleModeSel.value = curScaleMode;
+    scaleModeSel.addEventListener("change", function () {
+      blk.scale_mode = scaleModeSel.value === "squeeze_y" ? "squeeze_y" : "proportional";
+      markDirty();
+    });
+    scaleModeWrap.appendChild(scaleModeLbl);
+    scaleModeWrap.appendChild(scaleModeSel);
+
+    scaleGrid.appendChild(scalePctWrap);
+    scaleGrid.appendChild(scaleModeWrap);
+    return scaleGrid;
+  }
+
   Object.assign(E, {
     buildMediaTextBlockBody: buildMediaTextBlockBody,
+    createFigureScaleControls: createFigureScaleControls,
   });
 })();

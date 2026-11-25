@@ -534,6 +534,8 @@
   let title-sz = if is-margin { 8.8pt } else { 10pt }
   let sub-sz = if is-margin { 7.6pt } else { 8.3pt }
   let img-path = resolve-asset-path(blk.at("resolved_image", default: ""))
+  let scale-pct = calc.max(75, calc.min(100, int(blk.at("scale_pct", default: 100))))
+  let scale-mode = blk.at("scale_mode", default: "proportional")
 
   let fig-box = block(
     width: 100%,
@@ -554,8 +556,22 @@
       sticky-blocks: true,
     )
     #if img-path != "" [
-      #align(center)[
-        #image(img-path, width: 100%)
+      #if scale-pct < 100 and scale-mode == "squeeze_y" [
+        #layout(avail => context {
+          let probe = measure(image(img-path, width: avail.width))
+          let target-h = probe.height * (scale-pct / 100.0)
+          align(left)[
+            #image(img-path, width: 100%, height: target-h, fit: "stretch")
+          ]
+        })
+      ] else if scale-pct < 100 [
+        #align(left)[
+          #image(img-path, width: scale-pct * 1%)
+        ]
+      ] else [
+        #align(center)[
+          #image(img-path, width: 100%)
+        ]
       ]
     ] else [
       #rect(
@@ -613,7 +629,7 @@
   let pad-x = if is-factsheet { 3pt } else if is-margin { 3.5pt } else { 6pt }
   let pad-y = if is-factsheet { 1.8pt } else if is-margin { 3pt } else { 5pt }
   let is-tufte-style = (style-variant == "tufte")
-  let table-design = blk.at("table_design", default: "standard")
+  let table-design = blk.at("table_design", default: "lukb_design")
   let is-lukb-design = (table-design == "lukb_design")
 
   let tbl-box = block(

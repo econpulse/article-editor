@@ -1326,7 +1326,15 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                     if src:
                         p_pic.paragraph_format.keep_with_next = True
                     r_pic = p_pic.add_run()
-                    r_pic.add_picture(io.BytesIO(img_bytes), width=Inches(6.0))
+                    scale_pct = max(75, min(100, int(blk.get("scale_pct") or 100)))
+                    scale_mode = blk.get("scale_mode") or "proportional"
+                    if btype == "figure" and scale_pct < 100 and scale_mode == "squeeze_y":
+                        pic = r_pic.add_picture(io.BytesIO(img_bytes), width=Inches(6.0))
+                        pic.height = int(pic.height * (scale_pct / 100.0))
+                    elif btype == "figure" and scale_pct < 100:
+                        r_pic.add_picture(io.BytesIO(img_bytes), width=Inches(6.0 * (scale_pct / 100.0)))
+                    else:
+                        r_pic.add_picture(io.BytesIO(img_bytes), width=Inches(6.0))
                 except Exception:
                     pass
 
@@ -1376,7 +1384,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                 total_weight = sum(weights) or 100.0
                 total_table_inches = 6.5
 
-                is_lukb_design = blk.get("table_design") == "lukb_design"
+                is_lukb_design = blk.get("table_design", "lukb_design") != "standard"
                 if show_header:
                     hdr_cells = t.rows[0].cells
                     for c_idx, col in enumerate(cols):
