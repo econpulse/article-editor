@@ -784,7 +784,7 @@ class MediaTextBlock(MarginAnchorBlockBase):
         return out
 
 
-KpiCardTone = Literal["navy", "blue", "cyan", "gold", "positive", "negative", "neutral"]
+KpiCardTone = Literal["navy", "blue", "cyan", "gold", "positive", "negative", "berry", "neutral"]
 KpiCardsStylePreset = Literal["tint", "card_accent_top", "card_accent_left", "clean"]
 
 

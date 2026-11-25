@@ -29,6 +29,7 @@
         { id: "gold", label: "LUKB Gold", accent: "#C59B27", tint: "#FBF7EC", badge: "#F4E9CA", border: "#E5D29A" },
         { id: "positive", label: "Positiv (Grün)", accent: "#1E7E48", tint: "#EFF8F3", badge: "#D8EFE2", border: "#B4DEC6" },
         { id: "negative", label: "Risiko / Negativ (Rot)", accent: "#B83227", tint: "#FDF1F0", badge: "#F9DCD9", border: "#ECC0BC" },
+        { id: "berry", label: "LUKB Berry 800", accent: "#480C34", tint: "#F8EEF5", badge: "#EED8E7", border: "#D9B2CD" },
         { id: "neutral", label: "Neutral (Grau)", accent: "#5A687C", tint: "#F4F7FA", badge: "#E3E9F0", border: "#D6DEE8" },
       ],
     };

@@ -58,6 +58,14 @@ KPI_TONES: dict[str, dict[str, str]] = {
         "badge": "#F9DCD9",
         "border": "#ECC0BC",
     },
+    "berry": {
+        "id": "berry",
+        "label": "LUKB Berry 800",
+        "accent": "#480C34",
+        "tint": "#F8EEF5",
+        "badge": "#EED8E7",
+        "border": "#D9B2CD",
+    },
     "neutral": {
         "id": "neutral",
         "label": "Neutral (Grau)",

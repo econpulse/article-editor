@@ -30,7 +30,10 @@ from ui.editor import TOOLBAR_BLOCKS
 def test_kpi_icons_catalog_and_svg_generation():
     assert len(KPI_ICONS) >= 20
     assert len(VALID_KPI_ICON_IDS) == len(KPI_ICONS)
-    assert set(KPI_TONES.keys()) == {"navy", "blue", "cyan", "gold", "positive", "negative", "neutral"}
+    assert set(KPI_TONES.keys()) == {"navy", "blue", "cyan", "gold", "positive", "negative", "berry", "neutral"}
+    tone_keys = list(KPI_TONES.keys())
+    assert tone_keys.index("negative") < tone_keys.index("berry") < tone_keys.index("neutral")
+    assert get_kpi_tone_palette("berry")["accent"] == "#480C34"
 
     for icon in KPI_ICONS:
         svg = render_kpi_icon_svg(icon["id"], stroke_color="#005A9C", size_px=24)

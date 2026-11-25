@@ -249,6 +249,7 @@
       #block(above: 0pt, below: lead-below)[
         #align(left)[
           #set par(justify: false, leading: 0.68em)
+          #set text(hyphenate: true)
           #cms-link-meta("meta-lead")[
             // NOTIZ (vorherige Farbe/Schrift): fill: lukb-text (#1A2433), font: font-body, weight: "light"
             #text(font: font-bold, weight: "bold", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
@@ -345,6 +346,7 @@
       )[
         #align(left)[
           #set par(justify: false, leading: 0.68em)
+          #set text(hyphenate: true)
           // NOTIZ (vorherige Farbe/Schrift): fill: lukb-navy (#002855), font: font-heading, weight: "medium"
           #text(font: font-bold, weight: "bold", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
         ]
