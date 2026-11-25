@@ -23,6 +23,7 @@
       --shell-max-width: 960px;
       --font-body: "Yoga Sans for LUKB Light", "Yoga Sans for LUKB", "Calibri Light", "Segoe UI", Arial, sans-serif;
       --font-heading: "Yoga Sans for LUKB Medium", "Yoga Sans for LUKB", "Calibri", "Segoe UI Semibold", Arial, sans-serif;
+      --font-bold: "Yoga Sans for LUKB Bold", "Yoga Sans for LUKB", "Calibri", "Segoe UI Bold", Arial, sans-serif;
     }
 
     * {
@@ -115,9 +116,11 @@
     }
 
     .lukb-lead {
+      font-family: var(--font-bold);
+      font-weight: 700;
       font-size: 1.12rem;
       line-height: 1.6;
-      /* NOTIZ (vorherige Farbe): var(--lukb-text) (#1A2433) */
+      /* NOTIZ (vorherige Farbe/Schrift): var(--lukb-text) (#1A2433), var(--font-body), weight 300 */
       color: var(--lukb-blue-600);
       margin: 0 0 1.8em 0;
       text-align: left;
@@ -1297,7 +1300,8 @@
           <div></div>
           {% endif %}
           {% if pub_date %}
-          <span class="lukb-pub-date" style="font-size: 1.05rem; color: var(--lukb-muted);">{{ pub_date }}</span>
+          <!-- NOTIZ (vorherige Farbe): var(--lukb-muted) -->
+          <span class="lukb-pub-date" style="font-size: 1.05rem; color: var(--lukb-blue-600);">{{ pub_date }}</span>
           {% endif %}
         </div>
         {% endif %}

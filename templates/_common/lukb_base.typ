@@ -21,6 +21,7 @@
 // Schriftfamilien gemäss LUKB Corporate Design Vorgabe
 #let font-body = ("Yoga Sans for LUKB Light", "Yoga Sans for LUKB", "Calibri Light", "Calibri", "Arial")
 #let font-heading = ("Yoga Sans for LUKB Medium", "Yoga Sans for LUKB", "Calibri", "Arial")
+#let font-bold = ("Yoga Sans for LUKB Bold", "Yoga Sans for LUKB", "Calibri", "Arial")
 
 // A4 Seitengeometrie-Konstanten
 #let page-w = 595.28pt
@@ -222,7 +223,8 @@
         align(right + bottom)[
           #if display-date != "" [
             #cms-link-meta("meta-pub-date")[
-              #text(font: font-body, weight: "light", size: 11pt, fill: lukb-muted)[#display-date]
+              // NOTIZ (vorherige Farbe): fill: lukb-muted (#5A687C)
+              #text(font: font-body, weight: "light", size: 11pt, fill: lukb-blue-600)[#display-date]
             ]
           ]
         ]
@@ -246,8 +248,8 @@
         #align(left)[
           #set par(justify: false, leading: 0.68em)
           #cms-link-meta("meta-lead")[
-            // NOTIZ (vorherige Farbe): fill: lukb-text (#1A2433)
-            #text(font: font-body, weight: "light", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
+            // NOTIZ (vorherige Farbe/Schrift): fill: lukb-text (#1A2433), font: font-body, weight: "light"
+            #text(font: font-bold, weight: "bold", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
           ]
         ]
       ]
@@ -304,7 +306,8 @@
       ],
       align(right + horizon)[
         #cms-link-meta("meta-pub-date")[
-          #text(font: font-body, weight: "light", size: 10.5pt, fill: rgb("#D6DEE8"))[
+          // NOTIZ (vorherige Farbe): fill: rgb("#D6DEE8")
+          #text(font: font-body, weight: "light", size: 10.5pt, fill: lukb-blue-600)[
             #format-pub-date(meta.publication_date)
           ]
         ]
@@ -339,8 +342,8 @@
       )[
         #align(left)[
           #set par(justify: false, leading: 0.68em)
-          // NOTIZ (vorherige Farbe): fill: lukb-navy (#002855)
-          #text(font: font-heading, weight: "medium", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
+          // NOTIZ (vorherige Farbe/Schrift): fill: lukb-navy (#002855), font: font-heading, weight: "medium"
+          #text(font: font-bold, weight: "bold", size: 10.8pt, fill: lukb-blue-600)[#meta.lead]
         ]
       ]
     ]
