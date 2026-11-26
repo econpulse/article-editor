@@ -2229,8 +2229,89 @@
       reader.readAsDataURL(file);
     };
 
-    const pasteFromClipboard = () => E.pasteFigureFromClipboard(handleFileUpload, dropzone);
-    const handlePasteEvent = (e) => E.handleFigurePasteEvent(e, handleFileUpload, dropzone);
+    const pasteFromClipboard = async () => {
+      if (navigator.clipboard && navigator.clipboard.read) {
+        try {
+          const items = await navigator.clipboard.read();
+          for (const item of items) {
+            const imgType = item.types.find(function (t) { return t.startsWith("image/"); });
+            if (imgType) {
+              const blob = await item.getType(imgType);
+              handleFileUpload(blob);
+              return true;
+            }
+          }
+          if (navigator.clipboard.readText) {
+            const txt = await navigator.clipboard.readText();
+            const trimmed = (txt || "").trim();
+            if (trimmed.startsWith("<svg") && trimmed.includes("</svg>")) {
+              const blob = new Blob([trimmed], { type: "image/svg+xml" });
+              handleFileUpload(blob);
+              return true;
+            }
+          }
+          alert("Keine Bilddaten oder SVG-Grafik in der Zwischenablage gefunden.");
+          return false;
+        } catch (err) {
+          console.warn("navigator.clipboard.read fehlgeschlagen oder Berechtigung abgelehnt:", err);
+        }
+      }
+      alert("Direktes Lesen der Zwischenablage erfordert Browser-Freigabe oder Tastenkürzel.\nBitte klicken Sie auf die Box und drücken Sie Strg+V (Cmd+V).");
+      dropzone.focus();
+      return false;
+    };
+
+    const handlePasteEvent = function (e) {
+      if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
+        const hasImage = e.clipboardData && e.clipboardData.items && Array.from(e.clipboardData.items).some(function (item) {
+          return item.type.indexOf("image") !== -1;
+        });
+        const hasText = e.clipboardData && e.clipboardData.getData("text/plain");
+        if (hasText && !hasImage) return;
+      }
+
+      const cd = e.clipboardData || window.clipboardData;
+      if (!cd) return;
+
+      if (cd.items && cd.items.length > 0) {
+        for (let i = 0; i < cd.items.length; i++) {
+          const item = cd.items[i];
+          if (item.type.indexOf("image") !== -1) {
+            e.preventDefault();
+            e.stopPropagation();
+            const blob = item.getAsFile();
+            if (blob) {
+              handleFileUpload(blob);
+              return;
+            }
+          }
+        }
+      }
+
+      if (cd.files && cd.files.length > 0) {
+        for (let i = 0; i < cd.files.length; i++) {
+          const f = cd.files[i];
+          if (f.type.startsWith("image/") || /\.(svg|png|jpe?g)$/i.test(f.name)) {
+            e.preventDefault();
+            e.stopPropagation();
+            handleFileUpload(f);
+            return;
+          }
+        }
+      }
+
+      const textData = cd.getData("text/plain");
+      if (textData) {
+        const trimmed = textData.trim();
+        if (trimmed.startsWith("<svg") && trimmed.includes("</svg>")) {
+          e.preventDefault();
+          e.stopPropagation();
+          const blob = new Blob([trimmed], { type: "image/svg+xml" });
+          handleFileUpload(blob);
+          return;
+        }
+      }
+    };
 
     dropzone.addEventListener("paste", handlePasteEvent);
     container.addEventListener("paste", handlePasteEvent);
