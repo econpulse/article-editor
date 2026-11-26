@@ -5,6 +5,7 @@ Einstiegspunkt für Shiny for Python & Posit Connect Deployment.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import logging
 from shiny import App, Inputs, Outputs, Session
@@ -85,16 +86,34 @@ app = App(app_ui, server, static_assets=WWW_DIR)
 try:
     from starlette.staticfiles import StaticFiles
     from starlette.routing import Mount, Route
-    from starlette.responses import RedirectResponse
+    from starlette.responses import JSONResponse, RedirectResponse
     from config import STATIC_PORTAL_DIR
+    from services.excel_html_to_svg import convert_excel_html_to_svg
 
     STATIC_PORTAL_DIR.mkdir(parents=True, exist_ok=True)
 
     async def _portal_redirect(request):
         return RedirectResponse(url="/portal/")
 
-    # Am Anfang der Starlette-Routenliste einfügen, damit /portal und /portal/ vor dem WWW_DIR-Catch-All greifen
-    app.starlette_app.routes.insert(0, Route("/portal", _portal_redirect))
-    app.starlette_app.routes.insert(1, Mount("/portal", StaticFiles(directory=str(STATIC_PORTAL_DIR), html=True), name="portal"))
+    async def _excel_html_to_svg_endpoint(request):
+        try:
+            payload = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "invalid_json"}, status_code=400)
+        html_str = payload.get("html", "") if isinstance(payload, dict) else ""
+        if not isinstance(html_str, str) or not html_str.strip():
+            return JSONResponse({"ok": False, "error": "empty_html"})
+        try:
+            svg_markup = await asyncio.to_thread(convert_excel_html_to_svg, html_str)
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        if not svg_markup:
+            return JSONResponse({"ok": False, "error": "no_table"})
+        return JSONResponse({"ok": True, "svg": svg_markup})
+
+    # Am Anfang der Starlette-Routenliste einfügen, damit /portal und /api vor dem WWW_DIR-Catch-All greifen
+    app.starlette_app.routes.insert(0, Route("/api/excel-html-to-svg", _excel_html_to_svg_endpoint, methods=["POST"]))
+    app.starlette_app.routes.insert(1, Route("/portal", _portal_redirect))
+    app.starlette_app.routes.insert(2, Mount("/portal", StaticFiles(directory=str(STATIC_PORTAL_DIR), html=True), name="portal"))
 except Exception:
     pass

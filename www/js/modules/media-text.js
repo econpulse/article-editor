@@ -371,8 +371,126 @@
     return scaleGrid;
   }
 
+  async function tryUploadExcelHtml(htmlText, onFileReady) {
+    if (!htmlText || htmlText.toLowerCase().indexOf("<table") === -1) return false;
+    try {
+      const resp = await fetch("api/excel-html-to-svg", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ html: htmlText }),
+      });
+      if (!resp.ok) return false;
+      const data = await resp.json();
+      if (data && data.ok && data.svg) {
+        onFileReady(new Blob([data.svg], { type: "image/svg+xml" }));
+        return true;
+      }
+    } catch (err) {
+      console.warn("Excel-HTML zu SVG Konvertierung fehlgeschlagen, Fallback auf Bild:", err);
+    }
+    return false;
+  }
+
+  async function pasteFigureFromClipboard(onFileReady, dropzone) {
+    if (navigator.clipboard && navigator.clipboard.read) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          if (item.types.includes("text/html")) {
+            const htmlBlob = await item.getType("text/html");
+            if (await tryUploadExcelHtml(await htmlBlob.text(), onFileReady)) return true;
+          }
+        }
+        for (const item of items) {
+          const imgType = item.types.find(function (t) { return t.startsWith("image/"); });
+          if (imgType) {
+            onFileReady(await item.getType(imgType));
+            return true;
+          }
+        }
+        if (navigator.clipboard.readText) {
+          const trimmed = ((await navigator.clipboard.readText()) || "").trim();
+          if (trimmed.startsWith("<svg") && trimmed.includes("</svg>")) {
+            onFileReady(new Blob([trimmed], { type: "image/svg+xml" }));
+            return true;
+          }
+        }
+        alert("Keine Bilddaten oder SVG-Grafik in der Zwischenablage gefunden.");
+        return false;
+      } catch (err) {
+        console.warn("navigator.clipboard.read fehlgeschlagen oder Berechtigung abgelehnt:", err);
+      }
+    }
+    alert("Direktes Lesen der Zwischenablage erfordert Browser-Freigabe oder Tastenkürzel.\nBitte klicken Sie auf die Box und drücken Sie Strg+V (Cmd+V).");
+    if (dropzone) dropzone.focus();
+    return false;
+  }
+
+  function handleFigurePasteEvent(e, onFileReady) {
+    if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
+      const hasImage = e.clipboardData && e.clipboardData.items && Array.from(e.clipboardData.items).some(function (item) {
+        return item.type.indexOf("image") !== -1;
+      });
+      const hasText = e.clipboardData && e.clipboardData.getData("text/plain");
+      if (hasText && !hasImage) return;
+    }
+
+    const cd = e.clipboardData || window.clipboardData;
+    if (!cd) return;
+
+    const htmlData = cd.getData ? (cd.getData("text/html") || "") : "";
+    let fallbackImageFile = null;
+
+    if (cd.items && cd.items.length > 0) {
+      for (let i = 0; i < cd.items.length; i++) {
+        if (cd.items[i].type.indexOf("image") !== -1) {
+          fallbackImageFile = cd.items[i].getAsFile();
+          if (fallbackImageFile) break;
+        }
+      }
+    }
+    if (!fallbackImageFile && cd.files && cd.files.length > 0) {
+      for (let i = 0; i < cd.files.length; i++) {
+        const f = cd.files[i];
+        if (f.type.startsWith("image/") || /\.(svg|png|jpe?g)$/i.test(f.name)) {
+          fallbackImageFile = f;
+          break;
+        }
+      }
+    }
+
+    if (htmlData && htmlData.toLowerCase().indexOf("<table") !== -1) {
+      e.preventDefault();
+      e.stopPropagation();
+      (async () => {
+        const converted = await tryUploadExcelHtml(htmlData, onFileReady);
+        if (!converted && fallbackImageFile) onFileReady(fallbackImageFile);
+      })();
+      return;
+    }
+
+    if (fallbackImageFile) {
+      e.preventDefault();
+      e.stopPropagation();
+      onFileReady(fallbackImageFile);
+      return;
+    }
+
+    const textData = cd.getData("text/plain");
+    if (textData) {
+      const trimmed = textData.trim();
+      if (trimmed.startsWith("<svg") && trimmed.includes("</svg>")) {
+        e.preventDefault();
+        e.stopPropagation();
+        onFileReady(new Blob([trimmed], { type: "image/svg+xml" }));
+      }
+    }
+  }
+
   Object.assign(E, {
     buildMediaTextBlockBody: buildMediaTextBlockBody,
     createFigureScaleControls: createFigureScaleControls,
+    pasteFigureFromClipboard: pasteFigureFromClipboard,
+    handleFigurePasteEvent: handleFigurePasteEvent,
   });
 })();
