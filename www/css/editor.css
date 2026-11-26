@@ -955,7 +955,7 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   background: #FFFFFF;
   border: 1px solid #CBD5E1;
   border-radius: 6px;
-  box-shadow: 0 10px 25px rgba(0, 40, 85, 0.22);
+  box-shadow: 0 4px 12px rgba(0, 40, 85, 0.16);
   padding: 12px 14px;
   width: 320px;
   font-family: var(--font-heading);

@@ -436,6 +436,11 @@
       }
       const linkText = (textInp.value || "").trim() || href;
 
+      closeActivePopover();
+      if (editable && editable.isConnected && typeof editable.focus === "function") {
+        editable.focus({ preventScroll: true });
+      }
+
       if (anchorEl) {
         anchorEl.setAttribute("href", href);
         anchorEl.setAttribute("target", "_blank");
@@ -448,18 +453,25 @@
         a.setAttribute("rel", "noopener noreferrer");
         a.textContent = linkText;
 
-        if (savedRange) {
+        if (savedRange && editable && editable.contains(savedRange.commonAncestorContainer)) {
           savedRange.deleteContents();
           savedRange.insertNode(a);
           const spaceNode = document.createTextNode("\u00A0");
           if (a.parentNode) {
             a.parentNode.insertBefore(spaceNode, a.nextSibling);
+            const sel = window.getSelection();
+            if (sel) {
+              const afterRange = document.createRange();
+              afterRange.setStartAfter(spaceNode);
+              afterRange.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(afterRange);
+            }
           }
         } else {
           editable.appendChild(a);
         }
       }
-      closeActivePopover();
       onChange(editable.innerHTML);
       markDirty();
     };

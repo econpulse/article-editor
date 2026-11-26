@@ -19,8 +19,17 @@
     let s = sanitizeRichTextHtml(String(htmlStr));
     s = s.replace(/<\/p>\s*<p>/gi, "<br>");
     s = s.replace(/<p\b[^>]*>/gi, "").replace(/<\/p>/gi, "<br>");
-    s = s.replace(/^(?:<br\s*\/?>|\s|&nbsp;)+/i, "");
-    s = s.replace(/(?:<br\s*\/?>|\s|&nbsp;)+$/i, "");
+    s = s.trim();
+    while (true) {
+      const next = s.replace(/^(?:<br\s*\/?>|&nbsp;|\s)/i, "");
+      if (next === s) break;
+      s = next;
+    }
+    while (true) {
+      const next = s.replace(/(?:<br\s*\/?>|&nbsp;|\s)$/i, "");
+      if (next === s) break;
+      s = next;
+    }
     const plainCheck = s.replace(/<br\s*\/?>/gi, "").replace(/&nbsp;/gi, "").trim();
     if (!plainCheck) return "";
     return s.trim();
@@ -601,6 +610,10 @@
         }
         openLinkPopover(range, cellEl, onCellChange);
       }
+    });
+    cellLinkBtn.addEventListener("click", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
     });
     fmtBtnGroup.appendChild(cellLinkBtn);
 
