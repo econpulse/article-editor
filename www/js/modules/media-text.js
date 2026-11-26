@@ -371,40 +371,77 @@
     return scaleGrid;
   }
 
+  function showFigureNotice(dropzone, msg, isError) {
+    if (!msg) return;
+    if (!dropzone || !dropzone.parentElement) {
+      alert(msg);
+      return;
+    }
+    const existing = dropzone.parentElement.querySelector(".figure-paste-notice");
+    if (existing) existing.remove();
+    const banner = document.createElement("div");
+    banner.className = "figure-paste-notice";
+    banner.style.cssText = [
+      "margin: 6px 0 0 0",
+      "padding: 6px 10px",
+      "border-radius: 4px",
+      "font-size: 12px",
+      "line-height: 1.35",
+      isError
+        ? "background:#FEF2F2;color:#991B1B;border:1px solid #FECACA;"
+        : "background:#FFFBEB;color:#92400E;border:1px solid #FDE68A;",
+    ].join(";");
+    banner.textContent = msg;
+    dropzone.insertAdjacentElement("afterend", banner);
+    setTimeout(function () {
+      if (banner.parentElement) banner.remove();
+    }, 6000);
+  }
+
   async function tryUploadExcelHtml(htmlText, onFileReady) {
-    if (!htmlText || htmlText.toLowerCase().indexOf("<table") === -1) return false;
+    if (!htmlText || htmlText.toLowerCase().indexOf("<table") === -1) {
+      return { ok: false, attempted: false, reason: "" };
+    }
     try {
       const resp = await fetch("api/excel-html-to-svg", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ html: htmlText }),
       });
-      if (!resp.ok) return false;
+      if (!resp.ok) {
+        return { ok: false, attempted: true, reason: "HTTP " + resp.status };
+      }
       const data = await resp.json();
       if (data && data.ok && data.svg) {
         onFileReady(new Blob([data.svg], { type: "image/svg+xml" }));
-        return true;
+        return { ok: true, attempted: true, reason: "" };
       }
+      return { ok: false, attempted: true, reason: (data && data.error) || "no_table" };
     } catch (err) {
       console.warn("Excel-HTML zu SVG Konvertierung fehlgeschlagen, Fallback auf Bild:", err);
+      return { ok: false, attempted: true, reason: "network_error" };
     }
-    return false;
   }
 
   async function pasteFigureFromClipboard(onFileReady, dropzone) {
     if (navigator.clipboard && navigator.clipboard.read) {
       try {
         const items = await navigator.clipboard.read();
+        let htmlResult = { ok: false, attempted: false, reason: "" };
         for (const item of items) {
           if (item.types.includes("text/html")) {
             const htmlBlob = await item.getType("text/html");
-            if (await tryUploadExcelHtml(await htmlBlob.text(), onFileReady)) return true;
+            htmlResult = await tryUploadExcelHtml(await htmlBlob.text(), onFileReady);
+            if (htmlResult.ok) return true;
           }
         }
         for (const item of items) {
           const imgType = item.types.find(function (t) { return t.startsWith("image/"); });
           if (imgType) {
             onFileReady(await item.getType(imgType));
+            if (htmlResult.attempted) {
+              showFigureNotice(dropzone, "Vektor-Konvertierung nicht möglich (" + htmlResult.reason + ") – stattdessen als Rasterbild eingefügt.", false);
+            }
             return true;
           }
         }
@@ -415,7 +452,11 @@
             return true;
           }
         }
-        alert("Keine Bilddaten oder SVG-Grafik in der Zwischenablage gefunden.");
+        if (htmlResult.attempted) {
+          showFigureNotice(dropzone, "Excel-Tabelle konnte nicht als Vektor-SVG konvertiert werden (" + htmlResult.reason + ") und kein Ersatzbild gefunden.", true);
+        } else {
+          alert("Keine Bilddaten oder SVG-Grafik in der Zwischenablage gefunden.");
+        }
         return false;
       } catch (err) {
         console.warn("navigator.clipboard.read fehlgeschlagen oder Berechtigung abgelehnt:", err);
@@ -426,7 +467,7 @@
     return false;
   }
 
-  function handleFigurePasteEvent(e, onFileReady) {
+  function handleFigurePasteEvent(e, onFileReady, dropzone) {
     if (e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")) {
       const hasImage = e.clipboardData && e.clipboardData.items && Array.from(e.clipboardData.items).some(function (item) {
         return item.type.indexOf("image") !== -1;
@@ -463,8 +504,15 @@
       e.preventDefault();
       e.stopPropagation();
       (async () => {
-        const converted = await tryUploadExcelHtml(htmlData, onFileReady);
-        if (!converted && fallbackImageFile) onFileReady(fallbackImageFile);
+        const res = await tryUploadExcelHtml(htmlData, onFileReady);
+        if (!res.ok) {
+          if (fallbackImageFile) {
+            onFileReady(fallbackImageFile);
+            showFigureNotice(dropzone, "Vektor-Konvertierung nicht möglich (" + res.reason + ") – stattdessen als Rasterbild eingefügt.", false);
+          } else {
+            showFigureNotice(dropzone, "Excel-Tabelle konnte nicht als Vektor-SVG konvertiert werden (" + res.reason + ").", true);
+          }
+        }
       })();
       return;
     }

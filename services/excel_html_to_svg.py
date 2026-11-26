@@ -262,8 +262,37 @@ def _is_italic(style: dict[str, str]) -> bool:
     return fs in ("italic", "oblique")
 
 
+_NUMERIC_CELL_RE = re.compile(
+    r"^[+\-−]?\s*(?:CHF|EUR|USD|GBP|JPY|%)?\s*\d[\d\s'.,]*\s*(?:%|bp|bps|CHF|EUR|USD)?$"
+)
+
+
+def _parse_dimension_pt(style_val: str | None, attr_val: str | None, min_pt: float, max_pt: float) -> float | None:
+    raw = style_val or attr_val
+    if not raw:
+        return None
+    val_pt = _parse_pt(raw)
+    if val_pt is None:
+        return None
+    # HTML width/height-Attribute ohne Einheit sind Pixel -> in pt umrechnen
+    if not style_val and attr_val and not re.search(r"[a-zA-Z]", attr_val):
+        val_pt *= 0.75
+    return max(min_pt, min(max_pt, val_pt))
+
+
+def _extract_font_families(raw_ff: str | None) -> list[str]:
+    if not raw_ff:
+        return []
+    out: list[str] = []
+    for part in raw_ff.split(","):
+        cleaned = part.strip().strip('"').strip("'").strip()
+        if cleaned and cleaned.lower() not in ("sans-serif", "serif", "monospace", "inherit", "initial"):
+            out.append(cleaned)
+    return out
+
+
 def _find_excel_table(doc: lxml.html.HtmlElement) -> lxml.html.HtmlElement | None:
-    tables = doc.xpath(".//table")
+    tables = doc.xpath("descendant-or-self::table")
     if not tables:
         return None
     table = tables[0]
@@ -310,16 +339,34 @@ def convert_excel_html_to_svg(html_str: str) -> str | None:
         return None
 
     css_rules = _extract_css_rules(html_str)
+    table_style = _resolve_element_style(table_el, css_rules)
     tr_elements = table_el.xpath(".//tr")
+
+    # Spaltenbreiten aus <col> (inkl. span) auslesen
+    col_widths_pt: list[float | None] = []
+    for col_el in table_el.xpath("./colgroup/col | ./col"):
+        try:
+            span = max(1, int(col_el.get("span") or 1))
+        except ValueError:
+            span = 1
+        col_style = _resolve_element_style(col_el, css_rules)
+        w_pt = _parse_dimension_pt(col_style.get("width"), col_el.get("width"), 12.0, 600.0)
+        for _ in range(span):
+            col_widths_pt.append(w_pt)
 
     # Raster-Belegung wegen colspan/rowspan berechnen, um die exakte Spaltenzahl zu ermitteln
     occupied: set[tuple[int, int]] = set()
     parsed_cells: list[dict[str, Any]] = []
+    row_heights_pt: list[float | None] = []
+    detected_fonts: list[str] = _extract_font_families(table_style.get("font-family"))
+    if not detected_fonts and "td" in css_rules:
+        detected_fonts = _extract_font_families(css_rules["td"].get("font-family"))
     max_cols = 0
     any_explicit_border = False
 
     for r_idx, tr in enumerate(tr_elements):
-        tr_style = _resolve_element_style(tr, css_rules)
+        tr_style = _resolve_element_style(tr, css_rules, table_style)
+        row_heights_pt.append(_parse_dimension_pt(tr_style.get("height"), tr.get("height"), 10.0, 200.0))
         c_idx = 0
         for cell_el in tr.xpath("./td | ./th"):
             while (r_idx, c_idx) in occupied:
@@ -341,6 +388,17 @@ def convert_excel_html_to_svg(html_str: str) -> str | None:
             max_cols = max(max_cols, c_idx + colspan)
 
             cell_style = _resolve_element_style(cell_el, css_rules, tr_style)
+            if not detected_fonts:
+                detected_fonts = _extract_font_families(cell_style.get("font-family"))
+
+            if colspan == 1:
+                while len(col_widths_pt) <= c_idx:
+                    col_widths_pt.append(None)
+                if col_widths_pt[c_idx] is None:
+                    col_widths_pt[c_idx] = _parse_dimension_pt(
+                        cell_style.get("width"), cell_el.get("width"), 12.0, 600.0
+                    )
+
             is_th = str(cell_el.tag).lower() == "th"
             bg = _parse_color(cell_style.get("background-color") or cell_style.get("background"))
             fg = _parse_color(cell_style.get("color")) or "#1A2433"
@@ -351,7 +409,11 @@ def convert_excel_html_to_svg(html_str: str) -> str | None:
             font_pt = max(6.0, min(20.0, font_pt))
 
             h_align_raw = cell_style.get("text-align", "").strip().lower()
-            h_align = h_align_raw if h_align_raw in ("left", "center", "right") else "left"
+            if h_align_raw in ("left", "center", "right"):
+                h_align = h_align_raw
+            else:
+                raw_txt = (cell_el.text_content() or "").strip()
+                h_align = "right" if (raw_txt and _NUMERIC_CELL_RE.match(raw_txt)) else "left"
             v_align_raw = cell_style.get("vertical-align", "").strip().lower()
             v_align = "top" if v_align_raw == "top" else ("bottom" if v_align_raw == "bottom" else "horizon")
 
@@ -415,12 +477,26 @@ def convert_excel_html_to_svg(html_str: str) -> str | None:
 
         typst_cells.append(f"  table.cell({', '.join(cell_args)})[{body}],")
 
-    cols_spec = "(" + ", ".join(["auto"] * max_cols) + ")"
+    col_specs = [
+        f"{col_widths_pt[i]:.1f}pt" if (i < len(col_widths_pt) and col_widths_pt[i] is not None) else "auto"
+        for i in range(max_cols)
+    ]
+    cols_spec = "(" + ", ".join(col_specs) + ")"
+
+    table_extra_args: list[str] = []
+    if any(h is not None for h in row_heights_pt):
+        row_specs = [f"{h:.1f}pt" if h is not None else "auto" for h in row_heights_pt]
+        table_extra_args.append(f"  rows: ({', '.join(row_specs)}),")
+
+    font_chain = list(dict.fromkeys([*detected_fonts, "Yoga Sans for LUKB", "Calibri", "Arial"]))
+    font_tuple = "(" + ", ".join(f'"{f.replace(chr(34), "")}"' for f in font_chain) + ")"
+
     typst_src = "\n".join([
         "#set page(width: auto, height: auto, margin: 1pt)",
-        '#set text(font: ("Yoga Sans for LUKB", "Calibri", "Arial"), size: 9pt, fill: rgb("#1A2433"))',
+        f'#set text(font: {font_tuple}, size: 9pt, fill: rgb("#1A2433"))',
         "#table(",
         f"  columns: {cols_spec},",
+        *table_extra_args,
         "  inset: (x: 5pt, y: 3.5pt),",
         f"  stroke: {default_stroke},",
         *typst_cells,

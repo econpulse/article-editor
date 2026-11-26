@@ -47,8 +47,30 @@ td { font-family: Calibri, sans-serif; font-size: 10.0pt; }
 
 def test_is_excel_html_table_detection() -> None:
     assert is_excel_html_table(SAMPLE_EXCEL_HTML) is True
+    assert is_excel_html_table("<table><tr><td>Nur Fragment</td><td>123.4</td></tr></table>") is True
     assert is_excel_html_table("<div>Kein Tabelleninhalt</div>") is False
     assert is_excel_html_table('<table><tr><td><img src="file:///tmp/chart.png"/></td></tr></table>') is False
+
+
+def test_convert_excel_html_fragment_with_dimensions_and_numeric_align() -> None:
+    fragment = """
+    <table style="font-family: 'Calibri', sans-serif;">
+      <col width="120" />
+      <col style="width: 80pt" />
+      <tr height="24">
+        <td style="font-weight:bold;">Titel</td>
+        <td>12'450.50</td>
+      </tr>
+      <tr style="height: 18pt;">
+        <td>Veränderung</td>
+        <td>-3.2%</td>
+      </tr>
+    </table>
+    """
+    svg = convert_excel_html_to_svg(fragment)
+    assert svg is not None
+    assert "<svg" in svg
+    assert "</svg>" in svg
 
 
 def test_convert_excel_html_to_svg_produces_valid_svg() -> None:

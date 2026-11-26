@@ -2230,7 +2230,7 @@
     };
 
     const pasteFromClipboard = () => E.pasteFigureFromClipboard(handleFileUpload, dropzone);
-    const handlePasteEvent = (e) => E.handleFigurePasteEvent(e, handleFileUpload);
+    const handlePasteEvent = (e) => E.handleFigurePasteEvent(e, handleFileUpload, dropzone);
 
     dropzone.addEventListener("paste", handlePasteEvent);
     container.addEventListener("paste", handlePasteEvent);
