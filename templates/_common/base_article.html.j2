@@ -908,6 +908,26 @@
       font-size: 0.70rem;
     }
 
+    table.lukb-data-table.table-row-tight-1 thead th {
+      padding-top: 5px;
+      padding-bottom: 5px;
+    }
+
+    table.lukb-data-table.table-row-tight-1 tbody td {
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+
+    table.lukb-data-table.table-row-tight-2 thead th {
+      padding-top: 3px;
+      padding-bottom: 3px;
+    }
+
+    table.lukb-data-table.table-row-tight-2 tbody td {
+      padding-top: 2px;
+      padding-bottom: 2px;
+    }
+
     table.lukb-data-table th,
     table.lukb-data-table td {
       overflow-wrap: break-word;
@@ -1123,9 +1143,11 @@
         {% endfor %}
         {% set font_step = blk.font_size_step if blk.font_size_step is defined and blk.font_size_step in (-1, -2) else 0 %}
         {% set font_cls = 'table-font-sm-1' if font_step == -1 else ('table-font-sm-2' if font_step == -2 else '') %}
+        {% set row_step = blk.row_spacing_step if blk.row_spacing_step is defined and blk.row_spacing_step in (-1, -2) else 0 %}
+        {% set row_cls = 'table-row-tight-1' if row_step == -1 else ('table-row-tight-2' if row_step == -2 else '') %}
         {% set tbl_design = blk.table_design if blk.table_design is defined and blk.table_design == 'standard' else 'lukb_design' %}
         {% set design_cls = 'table-design-lukb' if tbl_design == 'lukb_design' else '' %}
-        <table class="lukb-data-table{% if font_cls %} {{ font_cls }}{% endif %}{% if design_cls %} {{ design_cls }}{% endif %}">
+        <table class="lukb-data-table{% if font_cls %} {{ font_cls }}{% endif %}{% if row_cls %} {{ row_cls }}{% endif %}{% if design_cls %} {{ design_cls }}{% endif %}">
           <colgroup>
             {% for col in blk.columns %}
               {% set cw = (col.width if col.width is defined and col.width else fallback_w) | float %}

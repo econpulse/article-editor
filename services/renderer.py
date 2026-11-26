@@ -1400,6 +1400,13 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             except (TypeError, ValueError):
                 font_step = 0
             table_font_pt = max(5.0, 8.5 + font_step * 0.7)
+            raw_row_step = blk.get("row_spacing_step", 0)
+            try:
+                row_step = max(-2, min(0, int(raw_row_step or 0)))
+            except (TypeError, ValueError):
+                row_step = 0
+            hdr_pad_y = 45 if row_step == -2 else (85 if row_step == -1 else 130)
+            body_pad_y = 25 if row_step == -2 else (55 if row_step == -1 else 90)
             if cols:
                 total_rows = len(rows) + (1 if show_header else 0)
                 t = container.add_table(rows=total_rows, cols=len(cols))
@@ -1427,7 +1434,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         cell.width = col_w
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
                         _set_docx_cell_background(cell, "FFFFFF" if is_lukb_design else "002855")
-                        _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
+                        _set_docx_cell_margins(cell, top=hdr_pad_y, bottom=hdr_pad_y, left=150, right=150)
                         p = cell.paragraphs[0]
                         c_align = col.get("align")
                         p.alignment = (
@@ -1459,7 +1466,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         cell.width = col_w
                         cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
                         _set_docx_cell_background(cell, bg_hex)
-                        _set_docx_cell_margins(cell, top=90, bottom=90, left=150, right=150)
+                        _set_docx_cell_margins(cell, top=body_pad_y, bottom=body_pad_y, left=150, right=150)
                         p = cell.paragraphs[0]
                         c_align = col.get("align")
                         p.alignment = (
@@ -1722,7 +1729,7 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                             top_b = left_b = right_b = bot_b = 'w:val="single" w:sz="4" w:color="D6DEE8"'
 
                         _set_docx_cell_background(cell, bg_hex)
-                        _set_docx_cell_margins(cell, top=130, bottom=130, left=150, right=150)
+                        _set_docx_cell_margins(cell, top=hdr_pad_y, bottom=hdr_pad_y, left=150, right=150)
                         tcPr = cell._tc.get_or_add_tcPr()
                         tcPr.append(parse_xml(
                             f'<w:tcBorders {nsdecls("w")}>'

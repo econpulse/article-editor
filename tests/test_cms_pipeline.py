@@ -2500,6 +2500,80 @@ def test_lukb_table_design_and_template_colors():
     assert len(docx_doc.tables[0].rows) == 3
 
 
+def test_figure_not_clipped_after_pagebreak():
+    """
+    Stellt sicher, dass eine quadratische Grafik nach einem manuellen Seitenumbruch
+    (colbreak mit mode='page') nicht durch block(height: target-h) in
+    render-balanced-col-run unten abgeschnitten wird.
+    """
+    from schemas.article import ArticleDocument
+
+    sq_svg = (
+        b'<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400" '
+        b'viewBox="0 0 400 400"><rect width="400" height="400" fill="#002855"/></svg>'
+    )
+    asset_id = save_asset("sq_pagebreak_test.svg", "image/svg+xml", sq_svg)
+    doc = ArticleDocument(
+        id="art-fig-pagebreak-clip",
+        template_id="investment_focus",
+        blocks=[
+            {"id": "p1", "type": "richtext", "html": "<p>Einleitung auf Seite 1.</p>"},
+            {"id": "pb1", "type": "colbreak", "mode": "page"},
+            {
+                "id": "fig1",
+                "type": "figure",
+                "title": "Quadratische Grafik",
+                "asset_id": asset_id,
+                "layout": "column",
+            },
+        ],
+    )
+    svgs = render_preview_svg_pages(doc)
+    assert len(svgs) >= 2
+    page2_svg = svgs[1].decode("utf-8", errors="ignore") if isinstance(svgs[1], bytes) else svgs[1]
+    assert "<clipPath" not in page2_svg, "Quadratische Grafik darf nach Seitenumbruch nicht geclippt werden"
+
+
+def test_table_row_spacing_step_schema_and_rendering():
+    """
+    Testet die Tabellen-Option row_spacing_step (0, -1, -2) im Schema sowie
+    im Typst-, HTML- und DOCX-Rendering.
+    """
+    from docx import Document as DocxDoc
+    from io import BytesIO
+    from schemas.article import ArticleDocument, TableBlock
+
+    assert TableBlock().row_spacing_step == 0
+    assert TableBlock(row_spacing_step=-1).row_spacing_step == -1
+    assert TableBlock(row_spacing_step=-2).row_spacing_step == -2
+    assert TableBlock(row_spacing_step=1).row_spacing_step == 0
+    assert TableBlock(row_spacing_step=-5).row_spacing_step == -2
+    assert TableBlock(row_spacing_step=None).row_spacing_step == 0
+    assert TableBlock(row_spacing_step="invalid").row_spacing_step == 0
+
+    t0 = TableBlock(id="rs0", title="Standard", row_spacing_step=0).model_dump()
+    t1 = TableBlock(id="rs1", title="Enger", row_spacing_step=-1).model_dump()
+    t2 = TableBlock(id="rs2", title="Sehr eng", row_spacing_step=-2).model_dump()
+
+    doc = ArticleDocument(
+        id="art-row-spacing-test",
+        template_id="investment_focus",
+        blocks=[t0, t1, t2],
+    )
+    html = render_web_html(doc)
+    assert "table-row-tight-1" in html
+    assert "table-row-tight-2" in html
+
+    pdf_bytes = render_pdf_bytes(doc)
+    assert pdf_bytes.startswith(b"%PDF-")
+    svgs = render_preview_svg_pages(doc)
+    assert len(svgs) >= 1
+
+    docx_bytes = render_docx_bytes(doc)
+    docx_doc = DocxDoc(BytesIO(docx_bytes))
+    assert len(docx_doc.tables) == 3
+
+
 if __name__ == "__main__":
     test_mssql_url_builder()
     test_html_to_typst_escaping()
@@ -2529,6 +2603,8 @@ if __name__ == "__main__":
     test_pdfjs_preview_pipeline()
     test_richtext_empty_lines_and_template_spacing()
     test_empty_category_and_verfasst_von_in_pdf()
+    test_figure_not_clipped_after_pagebreak()
+    test_table_row_spacing_step_schema_and_rendering()
     test_full_cms_workflow()
     import tests.test_custom_chart as tcc
     tcc.test_parsing_helpers()

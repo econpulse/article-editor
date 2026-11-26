@@ -634,7 +634,16 @@
   let hdr-sz = calc.max(5.0, (if is-factsheet { 7.2 } else if is-margin { 7.4 } else { 8.2 }) + font-delta-pt) * 1pt
   let cell-sz = calc.max(5.0, (if is-factsheet { 7.0 } else if is-margin { 7.4 } else { 8.3 }) + font-delta-pt) * 1pt
   let pad-x = if is-factsheet { 3pt } else if is-margin { 3.5pt } else { 6pt }
-  let pad-y = if is-factsheet { 1.8pt } else if is-margin { 3pt } else { 5pt }
+  let raw-row-step = int(blk.at("row_spacing_step", default: 0))
+  let row-step = if raw-row-step <= -2 { -2 } else if raw-row-step >= 0 { 0 } else { -1 }
+  let base-pad-y = if is-factsheet { 1.8pt } else if is-margin { 3pt } else { 5pt }
+  let pad-y = if row-step == -2 {
+    calc.max(1.0pt, base-pad-y * 0.4)
+  } else if row-step == -1 {
+    calc.max(1.2pt, base-pad-y * 0.65)
+  } else {
+    base-pad-y
+  }
   let is-tufte-style = (style-variant == "tufte")
   let table-design = blk.at("table_design", default: "lukb_design")
   let is-lukb-design = (table-design == "lukb_design")
@@ -1681,7 +1690,7 @@
         let ideal-half = total-h / 2 + 16pt
         let target-h = if best-max-h < 900000pt { calc.max(ideal-half, best-max-h + 6pt) } else { ideal-half }
 
-        if not has-table and avail-h > 100pt and target-h <= (avail-h - 6pt) {
+        if not has-table and best-max-h < 900000pt and avail-h > 100pt and target-h <= (avail-h - 6pt) {
           block(
             width: 100%,
             height: target-h,

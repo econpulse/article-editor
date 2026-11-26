@@ -453,6 +453,10 @@ class TableBlock(MarginAnchorBlockBase):
         default=0,
         description="Relative Schriftgrösse für Kopfzeile & Body (0 = Standard, -1 = 1 Stufe kleiner, -2 = 2 Stufen kleiner)",
     )
+    row_spacing_step: Literal[0, -1, -2] = Field(
+        default=0,
+        description="Vertikaler Zeilenabstand / Zellen-Padding oben & unten (0 = Standard, -1 = Enger, -2 = Sehr eng)",
+    )
     columns: list[TableColumn] = Field(
         default_factory=lambda: [
             TableColumn(field="col_1", title="Anlageklasse", align="left", width=33.4),
@@ -565,7 +569,7 @@ class TableBlock(MarginAnchorBlockBase):
         s = str(v or "lukb_design").strip().lower()
         return "standard" if s == "standard" else "lukb_design"
 
-    @field_validator("font_size_step", mode="before")
+    @field_validator("font_size_step", "row_spacing_step", mode="before")
     @classmethod
     def validate_font_size_step(cls, v: Any) -> int:
         if v is None or v == "":

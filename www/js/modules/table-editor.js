@@ -599,6 +599,42 @@
     });
     fontSizeWrap.appendChild(fontSizeSelect);
 
+    const rowSpacingWrap = document.createElement("label");
+    rowSpacingWrap.style.display = "inline-flex";
+    rowSpacingWrap.style.alignItems = "center";
+    rowSpacingWrap.style.gap = "5px";
+    rowSpacingWrap.style.fontSize = "12px";
+    rowSpacingWrap.style.marginLeft = "8px";
+    rowSpacingWrap.appendChild(document.createTextNode("Zeilenabstand:"));
+
+    const rowSpacingSelect = document.createElement("select");
+    rowSpacingSelect.className = "cms-select";
+    rowSpacingSelect.style.width = "auto";
+    rowSpacingSelect.style.minWidth = "125px";
+    rowSpacingSelect.style.height = "26px";
+    rowSpacingSelect.style.padding = "2px 6px";
+    rowSpacingSelect.style.fontSize = "12px";
+    rowSpacingSelect.title = "Vertikaler Zeilenabstand (Margin oben/unten innerhalb der Zellen)";
+    [
+      { value: "0", label: "Standard" },
+      { value: "-1", label: "-1 (Enger)" },
+      { value: "-2", label: "-2 (Sehr eng)" },
+    ].forEach(function (opt) {
+      const o = document.createElement("option");
+      o.value = opt.value;
+      o.textContent = opt.label;
+      rowSpacingSelect.appendChild(o);
+    });
+    const curRowStep = (blk.row_spacing_step === -1 || blk.row_spacing_step === -2) ? blk.row_spacing_step : 0;
+    blk.row_spacing_step = curRowStep;
+    rowSpacingSelect.value = String(curRowStep);
+    rowSpacingSelect.addEventListener("change", function () {
+      const parsed = parseInt(rowSpacingSelect.value, 10);
+      blk.row_spacing_step = (parsed === -1 || parsed === -2) ? parsed : 0;
+      markDirty();
+    });
+    rowSpacingWrap.appendChild(rowSpacingSelect);
+
     const designWrap = document.createElement("label");
     designWrap.style.display = "inline-flex";
     designWrap.style.alignItems = "center";
@@ -641,6 +677,7 @@
     btnGroup.appendChild(headerToggleWrap);
     btnGroup.appendChild(totalToggleWrap);
     btnGroup.appendChild(fontSizeWrap);
+    btnGroup.appendChild(rowSpacingWrap);
     btnGroup.appendChild(designWrap);
 
     const excelHint = document.createElement("span");

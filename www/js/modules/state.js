@@ -1018,6 +1018,7 @@
         highlight_last_row: false,
         table_design: "lukb_design",
         font_size_step: 0,
+        row_spacing_step: 0,
         columns: [
           { field: "col_1", title: "Kennzahl / Sektor", align: "left", width: 33.4 },
           { field: "col_2", title: "Aktuell", align: "right", width: 33.3 },
