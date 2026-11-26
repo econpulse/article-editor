@@ -34,6 +34,9 @@
   spacing: 1.0em
 )
 
+#set list(spacing: 0.5em)
+#set enum(spacing: 0.5em)
+
 #let render-factsheet-footer(meta) = context {
   let page-num = counter(page).get().first()
   let total-pages = counter(page).final().first()

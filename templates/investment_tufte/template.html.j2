@@ -102,8 +102,33 @@
       margin-top: 1.4em;
     }
 
-    .blk-richtext p {
+    .blk-richtext p,
+    .blk-callout p,
+    .blk-richtext ul,
+    .blk-richtext ol,
+    .blk-callout ul,
+    .blk-callout ol {
       margin: 0 0 1.4em 0;
+    }
+
+    .blk-richtext li,
+    .blk-callout li {
+      margin-bottom: 0.7em;
+    }
+
+    .blk-richtext li > ul,
+    .blk-richtext li > ol,
+    .blk-callout li > ul,
+    .blk-callout li > ol {
+      margin: 0.7em 0 0 0;
+    }
+
+    .blk-richtext li:last-child,
+    .blk-callout li:last-child,
+    .blk-callout p:last-child,
+    .blk-callout ul:last-child,
+    .blk-callout ol:last-child {
+      margin-bottom: 0;
     }
 
     .blk-richtext-textbox {

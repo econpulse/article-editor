@@ -34,6 +34,9 @@
   spacing: 2.0em
 )
 
+#set list(spacing: 1.0em)
+#set enum(spacing: 1.0em)
+
 #set page(
   paper: "a4",
   margin: (top: page-top-margin, bottom: page-bottom-margin, left: page-side-margin, right: page-side-margin),

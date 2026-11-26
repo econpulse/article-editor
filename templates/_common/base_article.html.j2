@@ -240,11 +240,43 @@
       line-height: 1.34;
     }
 
-    .blk-richtext p {
+    .blk-richtext p,
+    .blk-callout p {
       margin: 0 0 2em 0;
       text-align: justify;
       orphans: 2;
       widows: 2;
+    }
+
+    .blk-richtext ul,
+    .blk-richtext ol,
+    .blk-callout ul,
+    .blk-callout ol {
+      margin: 0 0 2em 0;
+      padding-left: 20px;
+    }
+
+    .blk-richtext li,
+    .blk-callout li {
+      margin-bottom: 1em;
+    }
+
+    .blk-richtext li:last-child,
+    .blk-callout li:last-child {
+      margin-bottom: 0;
+    }
+
+    .blk-richtext li > ul,
+    .blk-richtext li > ol,
+    .blk-callout li > ul,
+    .blk-callout li > ol {
+      margin: 1em 0 0 0;
+    }
+
+    .blk-callout p:last-child,
+    .blk-callout ul:last-child,
+    .blk-callout ol:last-child {
+      margin-bottom: 0;
     }
 
     .blk-richtext a,
@@ -305,7 +337,7 @@
       border-left: 4px solid var(--callout-accent);
       border-radius: 0 4px 4px 0;
       padding: 16px 18px;
-      margin: 1.2em 0;
+      margin: 2em 0 1.2em 0;
     }
 
     .blk-callout-title {
@@ -314,15 +346,6 @@
       color: var(--lukb-navy);
       font-size: 1.02rem;
       margin: 0 0 1em 0;
-    }
-
-    .blk-callout ul, .blk-callout ol {
-      margin: 0;
-      padding-left: 20px;
-    }
-
-    .blk-callout li {
-      margin-bottom: 6px;
     }
 
     .blk-quote {

@@ -449,7 +449,7 @@
     stroke: (left: 3pt + accent-color, top: 0.5pt + lukb-border, right: 0.5pt + lukb-border, bottom: 0.5pt + lukb-border),
     inset: (x: 11pt, y: 10pt),
     radius: (right: 3pt),
-    above: 1em,
+    above: 2.0em,
     below: 1.1em
   )[
     #if title != "" [
@@ -458,8 +458,6 @@
       ]
     ]
     #set text(size: body-size)
-    #set par(spacing: 1.0em)
-    #set list(spacing: 0.65em)
     #if markup-str != none and markup-str.trim() != "" [
       #eval(markup-str, mode: "markup")
     ]
