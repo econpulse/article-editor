@@ -57,6 +57,80 @@
     return (tmp.textContent || tmp.innerText || "").replace(/\u00A0/g, " ").replace(/\n+$/, "");
   }
 
+  const CELL_FORMAT_SPECS = {
+    bold: { tag: "b", selector: "b, strong", aliases: ["B", "STRONG"] },
+    italic: { tag: "i", selector: "i, em", aliases: ["I", "EM"] },
+    underline: { tag: "u", selector: "u", aliases: ["U"] },
+  };
+
+  function unwrapTagSelector(root, selector) {
+    root.querySelectorAll(selector).forEach(function (el) {
+      const parent = el.parentNode;
+      if (!parent) return;
+      while (el.firstChild) {
+        parent.insertBefore(el.firstChild, el);
+      }
+      parent.removeChild(el);
+    });
+  }
+
+  function hasAncestorTag(node, root, aliases) {
+    let cur = node && node.parentNode;
+    while (cur && cur !== root) {
+      if (cur.nodeType === 1 && aliases.indexOf(cur.tagName.toUpperCase()) !== -1) {
+        return true;
+      }
+      cur = cur.parentNode;
+    }
+    return false;
+  }
+
+  function isCellHtmlFullyFormatted(val, cmd) {
+    const spec = CELL_FORMAT_SPECS[cmd];
+    if (!spec) return false;
+    const html = normalizeTableCellForEditor(val);
+    if (!html) return false;
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    const walker = document.createTreeWalker(tmp, NodeFilter.SHOW_TEXT, null);
+    let hasText = false;
+    let node;
+    while ((node = walker.nextNode())) {
+      const txt = (node.nodeValue || "").replace(/\u00A0/g, " ").trim();
+      if (!txt) continue;
+      hasText = true;
+      if (!hasAncestorTag(node, tmp, spec.aliases)) {
+        return false;
+      }
+    }
+    return hasText;
+  }
+
+  function applyFormatToCellHtml(val, cmd, shouldEnable) {
+    const html = normalizeTableCellForEditor(val);
+    if (!html) return "";
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html;
+    if (!(tmp.textContent || "").replace(/\u00A0/g, " ").trim()) {
+      return sanitizeTableCellHtml(tmp.innerHTML);
+    }
+    if (cmd === "removeFormat") {
+      unwrapTagSelector(tmp, "b, strong, i, em, u, sub, sup, span");
+      return sanitizeTableCellHtml(tmp.innerHTML);
+    }
+    const spec = CELL_FORMAT_SPECS[cmd];
+    if (!spec) return sanitizeTableCellHtml(tmp.innerHTML);
+    unwrapTagSelector(tmp, spec.selector);
+    if (shouldEnable) {
+      const wrapper = document.createElement(spec.tag);
+      while (tmp.firstChild) {
+        wrapper.appendChild(tmp.firstChild);
+      }
+      tmp.appendChild(wrapper);
+    }
+    return sanitizeTableCellHtml(tmp.innerHTML);
+  }
+
   function isCellInputEl(el) {
     return !!(el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || (el.classList && el.classList.contains("grid-cell-input"))));
   }
@@ -653,6 +727,69 @@
       { cmd: "removeFormat", label: "Tx", title: "Formatierung entfernen" },
     ];
 
+    function applyFormatToSelectedRange(cmd) {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return false;
+      const range = active.range;
+      const minR = Math.max(0, range.minRow);
+      const maxR = Math.min(blk.rows.length - 1, range.maxRow);
+      const minC = Math.max(0, range.minCol);
+      const maxC = Math.min(blk.columns.length - 1, range.maxCol);
+      if (maxR < minR || maxC < minC) return false;
+
+      const targets = [];
+      for (let r = minR; r <= maxR; r++) {
+        for (let c = minC; c <= maxC; c++) {
+          const mInfo = findMergeAtCell(blk, r, c);
+          if (mInfo && !mInfo.isOrigin) continue;
+          targets.push({ r: r, c: c, field: blk.columns[c].field });
+        }
+      }
+      if (!targets.length) return false;
+
+      let shouldEnable = true;
+      if (cmd !== "removeFormat") {
+        let hasNonEmpty = false;
+        let allFormatted = true;
+        for (let i = 0; i < targets.length; i++) {
+          const t = targets[i];
+          const val = blk.rows[t.r][t.field];
+          if (tableCellToPlainText(val).trim()) {
+            hasNonEmpty = true;
+            if (!isCellHtmlFullyFormatted(val, cmd)) {
+              allFormatted = false;
+              break;
+            }
+          }
+        }
+        shouldEnable = !(hasNonEmpty && allFormatted);
+      }
+
+      let changed = false;
+      targets.forEach(function (t) {
+        const prev = blk.rows[t.r][t.field] != null ? String(blk.rows[t.r][t.field]) : "";
+        const next = applyFormatToCellHtml(prev, cmd, shouldEnable);
+        if (prev !== next) {
+          blk.rows[t.r][t.field] = next;
+          changed = true;
+        }
+        if (tblRef) {
+          const td = tblRef.querySelector('td[data-row-idx="' + t.r + '"][data-col-idx="' + t.c + '"]');
+          if (td) {
+            const cellEl = td.querySelector(".grid-cell-input");
+            if (cellEl) {
+              cellEl.innerHTML = normalizeTableCellForEditor(next);
+            }
+          }
+        }
+      });
+
+      if (changed) {
+        markDirty();
+      }
+      return true;
+    }
+
     cellFmtCommands.forEach(function (c) {
       const btn = document.createElement("button");
       btn.type = "button";
@@ -661,6 +798,25 @@
       btn.title = c.title;
       btn.addEventListener("mousedown", function (e) {
         e.preventDefault();
+        const active = tableEditorState.active;
+        const hasRange = !!(active && active.blockId === blk.id && active.range);
+        const hasSingleCellInnerSel = !!(
+          focusedCellCtx &&
+          focusedCellCtx.cellEl &&
+          focusedCellCtx.cellEl.isConnected &&
+          hasInnerTextSelection(focusedCellCtx.cellEl)
+        );
+        if (hasSingleCellInnerSel && (!hasRange || (active.range.minRow === active.range.maxRow && active.range.minCol === active.range.maxCol))) {
+          focusedCellCtx.cellEl.focus();
+          document.execCommand(c.cmd, false, null);
+          focusedCellCtx.onChange();
+          return;
+        }
+        if (hasRange) {
+          applyFormatToSelectedRange(c.cmd);
+          gridScroll.focus({ preventScroll: true });
+          return;
+        }
         if (!focusedCellCtx || !focusedCellCtx.cellEl || !focusedCellCtx.cellEl.isConnected) return;
         focusedCellCtx.cellEl.focus();
         document.execCommand(c.cmd, false, null);
@@ -715,7 +871,7 @@
 
     const fmtHint = document.createElement("span");
     fmtHint.className = "table-format-hint";
-    fmtHint.textContent = "Zelle anklicken & Text markieren für Fett / Kursiv / Link";
+    fmtHint.textContent = "Zelle(n) markieren oder Text in Zelle markieren für Fett / Kursiv / Unterstrichen / Link";
 
     formatBar.appendChild(fmtBtnGroup);
     formatBar.appendChild(fmtHint);
@@ -1689,6 +1845,16 @@
       const active = tableEditorState.active;
       if (!active || active.blockId !== blk.id || !active.range) return;
       if (isCellInputEl(e.target)) return;
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === "b" || k === "i" || k === "u") {
+          e.preventDefault();
+          const cmd = k === "b" ? "bold" : k === "i" ? "italic" : "underline";
+          applyFormatToSelectedRange(cmd);
+          return;
+        }
+      }
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         if (!blk.rows.length || !blk.columns.length) return;
