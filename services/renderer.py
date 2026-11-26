@@ -1578,10 +1578,13 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
             p.paragraph_format.space_after = Pt(round(h_mm * 2.83465))
 
         elif btype == "colbreak":
-            # Im linearen Word-Dokument dient der Spaltenumbruch als dezenter Abschnittstrenner
-            p = container.add_paragraph()
-            p.paragraph_format.space_before = Pt(10)
-            p.paragraph_format.space_after = Pt(10)
+            if blk.get("mode", "column") == "page" and hasattr(container, "add_page_break"):
+                container.add_page_break()
+            else:
+                # Im linearen Word-Dokument dient der Spaltenumbruch als dezenter Abschnittstrenner
+                p = container.add_paragraph()
+                p.paragraph_format.space_before = Pt(10)
+                p.paragraph_format.space_after = Pt(10)
 
         elif btype == "kpi_cards":
             kpi_title = str(blk.get("title", "") or "").strip()

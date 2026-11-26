@@ -1238,7 +1238,7 @@
       <div class="blk-spacer" style="height: {{ blk.height_mm or 8 }}mm; width: 100%;"></div>
 
     {% elif blk.type == "colbreak" %}
-      <div class="blk-colbreak" style="display: none;"></div>
+      <div class="blk-colbreak{% if blk.mode == 'page' %} blk-pagebreak{% endif %}" style="display: none;"></div>
 
     {% elif blk.type == "quote" %}
       <blockquote class="blk-quote {% if blk.layout == 'full' and not in_box %}blk-full-span{% endif %}">

@@ -581,6 +581,10 @@ class SpacerBlock(BaseModel):
 class ColbreakBlock(BaseModel):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["colbreak"] = "colbreak"
+    mode: Literal["column", "page"] = Field(
+        default="column",
+        description="Umbruch-Art: 'column' (Spaltenumbruch) oder 'page' (Seitenumbruch)",
+    )
 
 
 class QuoteBlock(BaseModel):

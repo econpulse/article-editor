@@ -1415,7 +1415,11 @@
 ) = {
   let can-float = allow-float and (not in-box) and (not inline-full)
   if blk.type == "colbreak" {
-    colbreak()
+    if blk.at("mode", default: "column") == "page" and not in-box {
+      pagebreak(weak: true)
+    } else {
+      colbreak()
+    }
   } else {
     let rendered = if blk.type == "heading" {
       let out-lvl = blk.at("outline_level", default: none)
@@ -1817,7 +1821,13 @@
         }
       }
 
-      if is-inline-full {
+      if blk.type == "colbreak" and blk.at("mode", default: "column") == "page" {
+        if curr-cols.len() > 0 {
+          runs.push((kind: "cols", items: curr-cols))
+          curr-cols = ()
+        }
+        runs.push((kind: "pagebreak"))
+      } else if is-inline-full {
         if curr-cols.len() > 0 {
           runs.push((kind: "cols", items: curr-cols))
           curr-cols = ()
@@ -1832,7 +1842,9 @@
     }
 
     for run in runs {
-      if run.kind == "full" {
+      if run.kind == "pagebreak" {
+        pagebreak(weak: true)
+      } else if run.kind == "full" {
         render-single-block(
           run.item,
           in-box: false,

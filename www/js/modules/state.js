@@ -1122,6 +1122,7 @@
       return {
         id: uid("blk"),
         type: "colbreak",
+        mode: "column",
       };
     }
     if (type === "quote") {
@@ -1205,7 +1206,7 @@
       case "spacer":
         return "Vertikaler Abstand (Spacer)";
       case "colbreak":
-        return "Manueller Spaltenumbruch";
+        return "Spalten- / Seitenumbruch";
       case "quote":
         return "Zitat / Pull-Quote";
       case "divider":
@@ -1251,7 +1252,7 @@
       items: [
         { type: "textbox_pair", label: "Farbliche Textbox", icon: "📦" },
         { type: "spacer", label: "Abstand (Spacer)", icon: "↕" },
-        { type: "colbreak", label: "Spaltenumbruch", icon: "⇥" },
+        { type: "colbreak", label: "Spalten- / Seitenumbruch", icon: "⇥" },
         { type: "divider", label: "Trennlinie", icon: "➖" },
       ],
     },

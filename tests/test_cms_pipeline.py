@@ -467,6 +467,31 @@ def test_layout_elements_spacer_and_colbreak():
     assert docx_bytes.startswith(b"PK\x03\x04"), "DOCX muss valides ZIP/OpenXML-Archiv sein"
     assert len(docx_bytes) > 8000
 
+    # Manueller Seitenumbruch (colbreak mit mode='page') testen
+    pb = ColbreakBlock(mode="page")
+    assert pb.mode == "page"
+    assert cb.mode == "column"
+
+    doc_pagebreak = ArticleDocument(
+        id="art-pagebreak-test",
+        template_id="investment_focus",
+        blocks=[
+            {"id": "h1", "type": "heading", "level": 1, "text": "Seite 1"},
+            {"id": "rt1", "type": "richtext", "html": "<p>Kurzer Absatz auf Seite 1.</p>"},
+            {"id": "pb1", "type": "colbreak", "mode": "page"},
+            {"id": "h2", "type": "heading", "level": 1, "text": "Seite 2"},
+            {"id": "rt2", "type": "richtext", "html": "<p>Dieser Inhalt muss auf Seite 2 beginnen.</p>"},
+        ],
+    )
+    pb_pdf = render_pdf_bytes(doc_pagebreak)
+    assert pb_pdf.startswith(b"%PDF-")
+    pb_svgs = render_preview_svg_pages(doc_pagebreak)
+    assert len(pb_svgs) >= 2, "Seitenumbruch muss mindestens 2 Seiten erzeugen"
+    pb_html = render_web_html(doc_pagebreak)
+    assert "blk-pagebreak" in pb_html
+    pb_docx = render_docx_bytes(doc_pagebreak)
+    assert pb_docx.startswith(b"PK\x03\x04")
+
 
 def test_smart_cms_features_3a_and_3b():
     """

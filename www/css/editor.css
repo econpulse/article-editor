@@ -1056,7 +1056,7 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   transition: height 0.15s ease;
 }
 
-/* Manueller Spaltenumbruch Block */
+/* Manueller Spalten- / Seitenumbruch Block */
 .db-colbreak-editor-box {
   background: #FFFBEB;
   border: 1px dashed #F59E0B;
@@ -1064,7 +1064,18 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   padding: 10px 14px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.db-colbreak-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 220px;
 }
 
 .db-colbreak-icon {
@@ -1084,6 +1095,23 @@ h1, h2, h3, h4, h5, h6, strong, b, label, .font-medium {
   font-size: 11.5px;
   color: #78350F;
   margin-top: 2px;
+}
+
+.db-colbreak-editor-box.is-pagebreak {
+  background: #EFF6FF;
+  border-color: #3B82F6;
+}
+
+.db-colbreak-editor-box.is-pagebreak .db-colbreak-icon {
+  color: #1D4ED8;
+}
+
+.db-colbreak-editor-box.is-pagebreak .db-colbreak-title {
+  color: #1E40AF;
+}
+
+.db-colbreak-editor-box.is-pagebreak .db-colbreak-desc {
+  color: #1E3A8A;
 }
 
 /* Farbliche Textbox Start-/End-Marken & eingerückte Blöcke im Editor */

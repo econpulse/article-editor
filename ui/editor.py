@@ -60,8 +60,8 @@ TOOLBAR_BLOCKS: list[BlockButtonDef] = [
     ),
     BlockButtonDef(
         "colbreak",
-        "+ Spaltenumbruch",
-        title="Erzwingt an dieser Position den Umbruch in die nächste Spalte (colbreak)",
+        "+ Spalten-/Seitenumbruch",
+        title="Fügt einen manuellen Spalten- oder Seitenumbruch ein (umschaltbar)",
         style="border-color:#C59B27;background:#FFFBEB;color:#78350F;",
     ),
     BlockButtonDef(

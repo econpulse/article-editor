@@ -1178,28 +1178,75 @@
   }
 
   function buildColbreakBlockBody(container, blk) {
+    if (!blk.mode || (blk.mode !== "column" && blk.mode !== "page")) {
+      blk.mode = "column";
+    }
+
     const wrap = document.createElement("div");
     wrap.className = "db-colbreak-editor-box";
 
+    const infoWrap = document.createElement("div");
+    infoWrap.className = "db-colbreak-info";
+
     const icon = document.createElement("span");
     icon.className = "db-colbreak-icon";
-    icon.textContent = "⇥";
 
     const textWrap = document.createElement("div");
     const title = document.createElement("div");
     title.className = "db-colbreak-title";
-    title.textContent = "Manueller Spaltenumbruch";
 
     const desc = document.createElement("div");
     desc.className = "db-colbreak-desc";
-    desc.textContent = "Erzwingt an dieser Position den Wechsel in Spalte 2 (bzw. auf die Folgeseite in Spalte 1).";
 
     textWrap.appendChild(title);
     textWrap.appendChild(desc);
+    infoWrap.appendChild(icon);
+    infoWrap.appendChild(textWrap);
 
-    wrap.appendChild(icon);
-    wrap.appendChild(textWrap);
+    const btnGroup = document.createElement("div");
+    btnGroup.className = "db-colbreak-mode-group";
+    btnGroup.style.display = "inline-flex";
+    btnGroup.style.gap = "6px";
+    btnGroup.style.flexShrink = "0";
+
+    const modeButtons = [];
+
+    function updateView() {
+      const isPage = blk.mode === "page";
+      wrap.classList.toggle("is-pagebreak", isPage);
+      icon.textContent = isPage ? "⤓" : "⇥";
+      title.textContent = isPage ? "Manueller Seitenumbruch" : "Manueller Spaltenumbruch";
+      desc.textContent = isPage
+        ? "Erzwingt an dieser Position einen sofortigen Umbruch auf eine neue Seite."
+        : "Erzwingt im 2-Spalten-Layout den Wechsel in Spalte 2 (bzw. auf die Folgeseite in Spalte 1).";
+      modeButtons.forEach(function (item) {
+        item.btn.className =
+          "btn-lukb btn-lukb-sm " +
+          (blk.mode === item.mode ? "btn-lukb-navy" : "btn-lukb-ghost");
+      });
+    }
+
+    [
+      { mode: "column", label: "⇥ Spaltenumbruch" },
+      { mode: "page", label: "⤓ Seitenumbruch" },
+    ].forEach(function (opt) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = opt.label;
+      btn.addEventListener("click", function () {
+        if (blk.mode === opt.mode) return;
+        blk.mode = opt.mode;
+        updateView();
+        markDirty();
+      });
+      btnGroup.appendChild(btn);
+      modeButtons.push({ mode: opt.mode, btn: btn });
+    });
+
+    wrap.appendChild(infoWrap);
+    wrap.appendChild(btnGroup);
     container.appendChild(wrap);
+    updateView();
   }
 
 
