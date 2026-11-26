@@ -87,8 +87,88 @@
     };
   }
 
-  function isTableCellInRange(r, c, range) {
-    return !!range && r >= range.minRow && r <= range.maxRow && c >= range.minCol && c <= range.maxCol;
+  function getTableMerges(blk) {
+    if (!blk || !Array.isArray(blk.merges)) return [];
+    const rowCount = Array.isArray(blk.rows) ? blk.rows.length : 0;
+    const colCount = Array.isArray(blk.columns) ? blk.columns.length : 0;
+    return blk.merges.filter(function (m) {
+      return (
+        m &&
+        typeof m.row === "number" &&
+        typeof m.col === "number" &&
+        m.row >= 0 &&
+        m.col >= 0 &&
+        m.row < rowCount &&
+        m.col < colCount &&
+        ((m.rowspan || 1) > 1 || (m.colspan || 1) > 1)
+      );
+    }).map(function (m) {
+      return {
+        row: m.row,
+        col: m.col,
+        rowspan: Math.min(m.rowspan || 1, rowCount - m.row),
+        colspan: Math.min(m.colspan || 1, colCount - m.col),
+      };
+    }).filter(function (m) {
+      return m.rowspan > 1 || m.colspan > 1;
+    });
+  }
+
+  function findMergeAtCell(blk, r, c) {
+    const merges = getTableMerges(blk);
+    for (let i = 0; i < merges.length; i++) {
+      const m = merges[i];
+      if (r >= m.row && r < m.row + m.rowspan && c >= m.col && c < m.col + m.colspan) {
+        return {
+          merge: m,
+          isOrigin: r === m.row && c === m.col,
+        };
+      }
+    }
+    return null;
+  }
+
+  function rangesIntersect(a, b) {
+    return !(a.maxRow < b.minRow || a.minRow > b.maxRow || a.maxCol < b.minCol || a.minCol > b.maxCol);
+  }
+
+  function expandRangeToMerges(blk, range) {
+    if (!range) return null;
+    const merges = getTableMerges(blk);
+    if (!merges.length) return range;
+    const res = {
+      minRow: range.minRow,
+      maxRow: range.maxRow,
+      minCol: range.minCol,
+      maxCol: range.maxCol,
+    };
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let i = 0; i < merges.length; i++) {
+        const m = merges[i];
+        const mRange = {
+          minRow: m.row,
+          maxRow: m.row + m.rowspan - 1,
+          minCol: m.col,
+          maxCol: m.col + m.colspan - 1,
+        };
+        if (rangesIntersect(res, mRange)) {
+          if (mRange.minRow < res.minRow) { res.minRow = mRange.minRow; changed = true; }
+          if (mRange.maxRow > res.maxRow) { res.maxRow = mRange.maxRow; changed = true; }
+          if (mRange.minCol < res.minCol) { res.minCol = mRange.minCol; changed = true; }
+          if (mRange.maxCol > res.maxCol) { res.maxCol = mRange.maxCol; changed = true; }
+        }
+      }
+    }
+    return res;
+  }
+
+  function isTableCellInRange(r, c, range, rowspan, colspan) {
+    if (!range) return false;
+    const rEnd = r + (rowspan || 1) - 1;
+    const cEnd = c + (colspan || 1) - 1;
+    return !(rEnd < range.minRow || r > range.maxRow || cEnd < range.minCol || c > range.maxCol);
   }
 
   function closeTableContextMenu() {
@@ -236,7 +316,7 @@
 
     if (drag.movedOut) {
       active.lead = { row: r, col: c };
-      active.range = normalizeTableCellRange(drag.anchor, active.lead);
+      active.range = expandRangeToMerges(active.blk, normalizeTableCellRange(drag.anchor, active.lead));
       active.applySelectionStyles();
       active.updateSelectionUI();
     }
@@ -514,6 +594,20 @@
     copySelBtn.textContent = "📋 Kopieren (Ctrl+C)";
     copySelBtn.title = "Markierte Zellen als Tabelle in die Zwischenablage kopieren";
 
+    const mergeSelBtn = document.createElement("button");
+    mergeSelBtn.type = "button";
+    mergeSelBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    mergeSelBtn.textContent = "⊞ Zellen verbinden";
+    mergeSelBtn.title = "Markierte Zellen zu einer Zelle verbinden";
+    mergeSelBtn.style.display = "none";
+
+    const unmergeSelBtn = document.createElement("button");
+    unmergeSelBtn.type = "button";
+    unmergeSelBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+    unmergeSelBtn.textContent = "⊟ Zellen teilen";
+    unmergeSelBtn.title = "Zellverbindung im markierten Bereich aufheben";
+    unmergeSelBtn.style.display = "none";
+
     const clearSelValuesBtn = document.createElement("button");
     clearSelValuesBtn.type = "button";
     clearSelValuesBtn.className = "btn-lukb btn-lukb-danger-ghost btn-lukb-sm";
@@ -528,6 +622,8 @@
 
     selLeft.appendChild(selBadge);
     selLeft.appendChild(copySelBtn);
+    selLeft.appendChild(mergeSelBtn);
+    selLeft.appendChild(unmergeSelBtn);
     selLeft.appendChild(clearSelValuesBtn);
     selLeft.appendChild(deselectBtn);
 
@@ -677,6 +773,40 @@
       // contentEditable div wächst automatisch mit dem Inhalt
     }
 
+    function getSelectionMergeInfo(range) {
+      if (!range || !blk.rows.length || !blk.columns.length) {
+        return { canMerge: false, canUnmerge: false };
+      }
+      const minR = Math.max(0, range.minRow);
+      const maxR = Math.min(blk.rows.length - 1, range.maxRow);
+      const minC = Math.max(0, range.minCol);
+      const maxC = Math.min(blk.columns.length - 1, range.maxCol);
+      if (maxR < minR || maxC < minC) {
+        return { canMerge: false, canUnmerge: false };
+      }
+      const merges = getTableMerges(blk);
+      const normRange = { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC };
+      const overlapping = merges.filter(function (m) {
+        return rangesIntersect(normRange, {
+          minRow: m.row,
+          maxRow: m.row + m.rowspan - 1,
+          minCol: m.col,
+          maxCol: m.col + m.colspan - 1,
+        });
+      });
+      const isSingleExistingMerge =
+        overlapping.length === 1 &&
+        overlapping[0].row === minR &&
+        overlapping[0].col === minC &&
+        overlapping[0].row + overlapping[0].rowspan - 1 === maxR &&
+        overlapping[0].col + overlapping[0].colspan - 1 === maxC;
+      const isMultiCell = maxR > minR || maxC > minC;
+      return {
+        canMerge: isMultiCell && !isSingleExistingMerge,
+        canUnmerge: overlapping.length > 0,
+      };
+    }
+
     function applySelectionStyles() {
       if (!tblRef) return;
       const active = tableEditorState.active;
@@ -684,12 +814,14 @@
       tblRef.querySelectorAll("td[data-row-idx][data-col-idx]").forEach(function (td) {
         const r = parseInt(td.dataset.rowIdx, 10);
         const c = parseInt(td.dataset.colIdx, 10);
-        const selected = isTableCellInRange(r, c, range);
+        const rspan = td.rowSpan || 1;
+        const cspan = td.colSpan || 1;
+        const selected = isTableCellInRange(r, c, range, rspan, cspan);
         td.classList.toggle("is-cell-selected", selected);
         td.classList.toggle("sel-top", selected && r === range.minRow);
-        td.classList.toggle("sel-bottom", selected && r === range.maxRow);
+        td.classList.toggle("sel-bottom", selected && (r + rspan - 1) === range.maxRow);
         td.classList.toggle("sel-left", selected && c === range.minCol);
-        td.classList.toggle("sel-right", selected && c === range.maxCol);
+        td.classList.toggle("sel-right", selected && (c + cspan - 1) === range.maxCol);
       });
     }
 
@@ -698,14 +830,21 @@
       const range = active && active.blockId === blk.id ? active.range : null;
       if (!range || !blk.rows.length || !blk.columns.length) {
         selectionBar.classList.remove("is-visible");
+        mergeSelBtn.style.display = "none";
+        unmergeSelBtn.style.display = "none";
         return;
       }
       const rowCount = Math.min(range.maxRow, blk.rows.length - 1) - range.minRow + 1;
       const colCount = Math.min(range.maxCol, blk.columns.length - 1) - range.minCol + 1;
       if (rowCount <= 0 || colCount <= 0) {
         selectionBar.classList.remove("is-visible");
+        mergeSelBtn.style.display = "none";
+        unmergeSelBtn.style.display = "none";
         return;
       }
+      const mergeInfo = getSelectionMergeInfo(range);
+      mergeSelBtn.style.display = mergeInfo.canMerge ? "" : "none";
+      unmergeSelBtn.style.display = mergeInfo.canUnmerge ? "" : "none";
       const cellTotal = rowCount * colCount;
       selBadge.textContent =
         cellTotal === 1
@@ -799,12 +938,150 @@
       gridScroll.focus({ preventScroll: true });
     }
 
+    function mergeSelectedRange() {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      const expanded = expandRangeToMerges(blk, active.range);
+      const minR = Math.max(0, expanded.minRow);
+      const maxR = Math.min(blk.rows.length - 1, expanded.maxRow);
+      const minC = Math.max(0, expanded.minCol);
+      const maxC = Math.min(blk.columns.length - 1, expanded.maxCol);
+      if (maxR < minR || maxC < minC || (maxR === minR && maxC === minC)) return;
+
+      const normRange = { minRow: minR, maxRow: maxR, minCol: minC, maxCol: maxC };
+      const existingMerges = getTableMerges(blk);
+      const remainingMerges = existingMerges.filter(function (m) {
+        return !rangesIntersect(normRange, {
+          minRow: m.row,
+          maxRow: m.row + m.rowspan - 1,
+          minCol: m.col,
+          maxCol: m.col + m.colspan - 1,
+        });
+      });
+
+      const parts = [];
+      for (let r = minR; r <= maxR; r++) {
+        for (let c = minC; c <= maxC; c++) {
+          const field = blk.columns[c].field;
+          const val = blk.rows[r][field] != null ? String(blk.rows[r][field]).trim() : "";
+          if (val) parts.push(val);
+          blk.rows[r][field] = "";
+        }
+      }
+      const originField = blk.columns[minC].field;
+      blk.rows[minR][originField] = parts.join(" ");
+
+      remainingMerges.push({
+        row: minR,
+        col: minC,
+        rowspan: maxR - minR + 1,
+        colspan: maxC - minC + 1,
+      });
+      blk.merges = remainingMerges;
+
+      active.anchor = { row: minR, col: minC };
+      active.lead = { row: maxR, col: maxC };
+      active.range = normRange;
+      renderGrid();
+      markDirty();
+      gridScroll.focus({ preventScroll: true });
+    }
+
+    function unmergeSelectedRange() {
+      const active = tableEditorState.active;
+      if (!active || active.blockId !== blk.id || !active.range) return;
+      const range = active.range;
+      const existingMerges = getTableMerges(blk);
+      const nextMerges = existingMerges.filter(function (m) {
+        return !rangesIntersect(range, {
+          minRow: m.row,
+          maxRow: m.row + m.rowspan - 1,
+          minCol: m.col,
+          maxCol: m.col + m.colspan - 1,
+        });
+      });
+      if (nextMerges.length === existingMerges.length) return;
+      blk.merges = nextMerges;
+      renderGrid();
+      markDirty();
+      gridScroll.focus({ preventScroll: true });
+    }
+
+    function adjustMergesOnRowInsert(insertIdx) {
+      const merges = getTableMerges(blk);
+      if (!merges.length) return;
+      blk.merges = merges.map(function (m) {
+        if (m.row >= insertIdx) {
+          return { row: m.row + 1, col: m.col, rowspan: m.rowspan, colspan: m.colspan };
+        }
+        if (m.row < insertIdx && m.row + m.rowspan > insertIdx) {
+          return { row: m.row, col: m.col, rowspan: m.rowspan + 1, colspan: m.colspan };
+        }
+        return m;
+      });
+    }
+
+    function adjustMergesOnRowsDelete(from, to) {
+      const merges = getTableMerges(blk);
+      if (!merges.length) return;
+      const removeCount = to - from + 1;
+      blk.merges = merges.map(function (m) {
+        const mEnd = m.row + m.rowspan - 1;
+        if (mEnd < from) return m;
+        if (m.row > to) {
+          return { row: m.row - removeCount, col: m.col, rowspan: m.rowspan, colspan: m.colspan };
+        }
+        const overlapStart = Math.max(m.row, from);
+        const overlapEnd = Math.min(mEnd, to);
+        const overlapCount = Math.max(0, overlapEnd - overlapStart + 1);
+        const newRow = m.row < from ? m.row : from;
+        const newRowspan = m.rowspan - overlapCount;
+        if (newRowspan < 1 || (newRowspan === 1 && m.colspan === 1)) return null;
+        return { row: newRow, col: m.col, rowspan: newRowspan, colspan: m.colspan };
+      }).filter(Boolean);
+    }
+
+    function adjustMergesOnColInsert(insertIdx) {
+      const merges = getTableMerges(blk);
+      if (!merges.length) return;
+      blk.merges = merges.map(function (m) {
+        if (m.col >= insertIdx) {
+          return { row: m.row, col: m.col + 1, rowspan: m.rowspan, colspan: m.colspan };
+        }
+        if (m.col < insertIdx && m.col + m.colspan > insertIdx) {
+          return { row: m.row, col: m.col, rowspan: m.rowspan, colspan: m.colspan + 1 };
+        }
+        return m;
+      });
+    }
+
+    function adjustMergesOnColsDelete(from, to) {
+      const merges = getTableMerges(blk);
+      if (!merges.length) return;
+      const removeCount = to - from + 1;
+      blk.merges = merges.map(function (m) {
+        const mEnd = m.col + m.colspan - 1;
+        if (mEnd < from) return m;
+        if (m.col > to) {
+          return { row: m.row, col: m.col - removeCount, rowspan: m.rowspan, colspan: m.colspan };
+        }
+        const overlapStart = Math.max(m.col, from);
+        const overlapEnd = Math.min(mEnd, to);
+        const overlapCount = Math.max(0, overlapEnd - overlapStart + 1);
+        const newCol = m.col < from ? m.col : from;
+        const newColspan = m.colspan - overlapCount;
+        if (newColspan < 1 || (m.rowspan === 1 && newColspan === 1)) return null;
+        return { row: m.row, col: newCol, rowspan: m.rowspan, colspan: newColspan };
+      }).filter(Boolean);
+    }
+
     function insertRowAt(insertIdx) {
       const newRow = {};
       blk.columns.forEach(function (c) {
         newRow[c.field] = "";
       });
       blk.rows.splice(insertIdx, 0, newRow);
+      adjustMergesOnRowInsert(insertIdx);
       resetTableSelectionForStructuralChange();
       renderGrid();
       markDirty();
@@ -822,6 +1099,7 @@
       blk.rows.forEach(function (r) {
         r[newField] = "";
       });
+      adjustMergesOnColInsert(insertIdx);
       resetTableSelectionForStructuralChange();
       renderGrid();
       markDirty();
@@ -842,6 +1120,7 @@
           delete r[col.field];
         });
       });
+      adjustMergesOnColsDelete(from, to);
       distributeEqualColumnWidths(blk.columns);
       resetTableSelectionForStructuralChange();
       renderGrid();
@@ -857,6 +1136,7 @@
       const to = Math.min(blk.rows.length - 1, endRow);
       if (to < from) return;
       blk.rows.splice(from, to - from + 1);
+      adjustMergesOnRowsDelete(from, to);
       resetTableSelectionForStructuralChange();
       renderGrid();
       markDirty();
@@ -878,6 +1158,7 @@
         col.title = val != null ? tableCellToPlainText(val).replace(/\n+/g, " ").trim() : "";
       });
       blk.rows.shift();
+      adjustMergesOnRowsDelete(0, 0);
       resetTableSelectionForStructuralChange();
       renderGrid();
       markDirty();
@@ -954,16 +1235,27 @@
         menu.appendChild(div);
       }
 
+      const active = tableEditorState.active;
+      const range = active && active.blockId === blk.id ? active.range : null;
+      const mergeInfo = getSelectionMergeInfo(range);
+
       addMenuItem("📋", "Markierte Zellen kopieren", "Ctrl+C", false, copySelectedRange);
       addMenuItem("🧹", "Werte entfernen", "Entf", true, clearSelectedRangeValues);
+      if (mergeInfo.canMerge || mergeInfo.canUnmerge) {
+        addDivider();
+        if (mergeInfo.canMerge) {
+          addMenuItem("⊞", "Zellen verbinden", "", false, mergeSelectedRange);
+        }
+        if (mergeInfo.canUnmerge) {
+          addMenuItem("⊟", "Zellverbindung aufheben", "", false, unmergeSelectedRange);
+        }
+      }
       addDivider();
       addMenuItem("↑", "Zeile oberhalb einfügen", "", false, function () { insertRowAt(rIdx); });
       addMenuItem("↓", "Zeile unterhalb einfügen", "", false, function () { insertRowAt(rIdx + 1); });
       addMenuItem("←", "Spalte links einfügen", "", false, function () { insertColumnAt(cIdx); });
       addMenuItem("→", "Spalte rechts einfügen", "", false, function () { insertColumnAt(cIdx + 1); });
       addDivider();
-      const active = tableEditorState.active;
-      const range = active && active.blockId === blk.id ? active.range : null;
       const hasMultiRowSel = !!(range && range.maxRow > range.minRow && rIdx >= range.minRow && rIdx <= range.maxRow);
       if (hasMultiRowSel) {
         const rowCount = Math.min(range.maxRow, blk.rows.length - 1) - Math.max(0, range.minRow) + 1;
@@ -1161,9 +1453,19 @@
         const tr = document.createElement("tr");
 
         blk.columns.forEach(function (col, cIdx) {
+          const mergeInfo = findMergeAtCell(blk, rIdx, cIdx);
+          if (mergeInfo && !mergeInfo.isOrigin) {
+            return;
+          }
+
           const td = document.createElement("td");
           td.dataset.rowIdx = String(rIdx);
           td.dataset.colIdx = String(cIdx);
+          if (mergeInfo && mergeInfo.isOrigin) {
+            if (mergeInfo.merge.rowspan > 1) td.rowSpan = mergeInfo.merge.rowspan;
+            if (mergeInfo.merge.colspan > 1) td.colSpan = mergeInfo.merge.colspan;
+            td.classList.add("is-merged-cell");
+          }
 
           const cellInp = document.createElement("div");
           cellInp.className = "grid-cell-input";
@@ -1267,7 +1569,7 @@
         if (e.shiftKey && active.anchor) {
           e.preventDefault();
           active.lead = { row: rIdx, col: cIdx };
-          active.range = normalizeTableCellRange(active.anchor, active.lead);
+          active.range = expandRangeToMerges(blk, normalizeTableCellRange(active.anchor, active.lead));
           applySelectionStyles();
           updateSelectionUI();
           gridScroll.focus({ preventScroll: true });
@@ -1300,10 +1602,10 @@
 
         e.preventDefault();
         const active = ensureActiveTableState();
-        if (!active.range || !isTableCellInRange(rIdx, cIdx, active.range)) {
+        if (!active.range || !isTableCellInRange(rIdx, cIdx, active.range, td.rowSpan || 1, td.colSpan || 1)) {
           active.anchor = { row: rIdx, col: cIdx };
           active.lead = { row: rIdx, col: cIdx };
-          active.range = { minRow: rIdx, maxRow: rIdx, minCol: cIdx, maxCol: cIdx };
+          active.range = expandRangeToMerges(blk, { minRow: rIdx, maxRow: rIdx, minCol: cIdx, maxCol: cIdx });
           applySelectionStyles();
           updateSelectionUI();
           gridScroll.focus({ preventScroll: true });
@@ -1416,13 +1718,15 @@
         if (e.key === "ArrowLeft") nextCol = Math.max(0, nextCol - 1);
         if (e.key === "ArrowRight") nextCol = Math.min(blk.columns.length - 1, nextCol + 1);
         active.lead = { row: nextRow, col: nextCol };
-        active.range = normalizeTableCellRange(active.anchor || lead, active.lead);
+        active.range = expandRangeToMerges(blk, normalizeTableCellRange(active.anchor || lead, active.lead));
         applySelectionStyles();
         updateSelectionUI();
       }
     });
 
     copySelBtn.addEventListener("click", copySelectedRange);
+    mergeSelBtn.addEventListener("click", mergeSelectedRange);
+    unmergeSelBtn.addEventListener("click", unmergeSelectedRange);
     clearSelValuesBtn.addEventListener("click", clearSelectedRangeValues);
     deselectBtn.addEventListener("click", clearTableSelection);
 

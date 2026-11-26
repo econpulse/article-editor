@@ -1492,6 +1492,26 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                             run.font.color.rgb = cell_color
                             run.font.size = Pt(table_font_pt)
 
+                for m in blk.get("merges") or []:
+                    try:
+                        r0 = int(m.get("row", 0))
+                        c0 = int(m.get("col", 0))
+                        rspan = int(m.get("rowspan", 1))
+                        cspan = int(m.get("colspan", 1))
+                    except (TypeError, ValueError):
+                        continue
+                    if r0 < 0 or c0 < 0 or r0 >= len(rows) or c0 >= len(cols):
+                        continue
+                    r1 = min(len(rows) - 1, r0 + max(1, rspan) - 1)
+                    c1 = min(len(cols) - 1, c0 + max(1, cspan) - 1)
+                    if r1 == r0 and c1 == c0:
+                        continue
+                    for rr in range(r0, r1 + 1):
+                        for cc in range(c0, c1 + 1):
+                            if rr != r0 or cc != c0:
+                                t.cell(rr + row_offset, cc).text = ""
+                    t.cell(r0 + row_offset, c0).merge(t.cell(r1 + row_offset, c1))
+
             if src:
                 psrc = container.add_paragraph()
                 psrc.paragraph_format.space_before = Pt(3)

@@ -430,6 +430,13 @@ class TableColumn(BaseModel):
         return max(0.1, min(100.0, round(val, 1)))
 
 
+class TableMerge(BaseModel):
+    row: int = Field(ge=0, description="Startzeile (0-basiert, Tabellen-Body)")
+    col: int = Field(ge=0, description="Startspalte (0-basiert)")
+    rowspan: int = Field(default=1, ge=1, description="Anzahl verbundener Zeilen")
+    colspan: int = Field(default=1, ge=1, description="Anzahl verbundener Spalten")
+
+
 class TableBlock(MarginAnchorBlockBase):
     id: str = Field(default_factory=_new_block_id)
     type: Literal["table"] = "table"
@@ -460,6 +467,40 @@ class TableBlock(MarginAnchorBlockBase):
             {"col_1": "Aktien Schweiz", "col_2": "22.0 %", "col_3": "+1.5 %"},
         ]
     )
+    merges: list[TableMerge] = Field(
+        default_factory=list,
+        description="Verbundene Zellbereiche im Tabellen-Body",
+    )
+
+    @model_validator(mode="after")
+    def normalize_table_merges(self) -> "TableBlock":
+        if not self.merges:
+            return self
+        row_count = len(self.rows)
+        col_count = len(self.columns)
+        if row_count == 0 or col_count == 0:
+            self.merges = []
+            return self
+        occupied: set[tuple[int, int]] = set()
+        cleaned: list[TableMerge] = []
+        for m in self.merges:
+            if m.row < 0 or m.row >= row_count or m.col < 0 or m.col >= col_count:
+                continue
+            rspan = min(m.rowspan, row_count - m.row)
+            cspan = min(m.colspan, col_count - m.col)
+            if rspan <= 1 and cspan <= 1:
+                continue
+            cells = [
+                (r, c)
+                for r in range(m.row, m.row + rspan)
+                for c in range(m.col, m.col + cspan)
+            ]
+            if any(pos in occupied for pos in cells):
+                continue
+            occupied.update(cells)
+            cleaned.append(TableMerge(row=m.row, col=m.col, rowspan=rspan, colspan=cspan))
+        self.merges = cleaned
+        return self
 
     @model_validator(mode="before")
     @classmethod

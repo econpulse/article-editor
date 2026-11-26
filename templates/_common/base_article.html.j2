@@ -1143,10 +1143,32 @@
           </thead>
           {% endif %}
           <tbody>
+            {% set merges = blk.merges if blk.merges is defined and blk.merges else [] %}
+            {% set merge_ns = namespace(skip={}, origins={}) %}
+            {% for m in merges %}
+              {% set m_row = m.row|int %}
+              {% set m_col = m.col|int %}
+              {% set m_rspan = m.rowspan|default(1)|int %}
+              {% set m_cspan = m.colspan|default(1)|int %}
+              {% set _ = merge_ns.origins.update({(m_row ~ ':' ~ m_col): {'rowspan': m_rspan, 'colspan': m_cspan}}) %}
+              {% for rr in range(m_row, m_row + m_rspan) %}
+                {% for cc in range(m_col, m_col + m_cspan) %}
+                  {% if not (rr == m_row and cc == m_col) %}
+                    {% set _ = merge_ns.skip.update({(rr ~ ':' ~ cc): true}) %}
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            {% endfor %}
             {% for row in blk.rows %}
+            {% set r_idx = loop.index0 %}
             <tr class="{% if blk.highlight_last_row and loop.last %}row-total{% endif %}">
               {% for col in blk.columns %}
-              <td style="text-align: {{ col.align }};">{{ row.get(col.field, "") }}</td>
+              {% set c_idx = loop.index0 %}
+              {% set key = r_idx ~ ':' ~ c_idx %}
+              {% if key not in merge_ns.skip %}
+                {% set orig = merge_ns.origins.get(key) %}
+                <td style="text-align: {{ col.align }};"{% if orig and orig.rowspan > 1 %} rowspan="{{ orig.rowspan }}"{% endif %}{% if orig and orig.colspan > 1 %} colspan="{{ orig.colspan }}"{% endif %}>{{ row.get(col.field, "") }}</td>
+              {% endif %}
               {% endfor %}
             </tr>
             {% endfor %}

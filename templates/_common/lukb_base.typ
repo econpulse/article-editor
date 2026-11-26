@@ -669,27 +669,49 @@
     #let show-header = blk.at("show_header", default: true)
     #let highlight-last = blk.at("highlight_last_row", default: false)
     #let rows-typst = blk.at("rows_typst", default: ())
-    #let main-rows-count = if is-long-table and has-source and rows.len() > 0 { rows.len() - 1 } else { rows.len() }
+    #let merges = blk.at("merges", default: ())
+    #let has-merge-in-last-row = rows.len() > 0 and merges.any(m => int(m.at("row", default: 0)) + int(m.at("rowspan", default: 1)) >= rows.len())
+    #let split-last-row-for-source = is-long-table and has-source and rows.len() > 0 and (not has-merge-in-last-row)
+    #let main-rows-count = if split-last-row-for-source { rows.len() - 1 } else { rows.len() }
     #let render-row-cells(r-idx, row-dict, is-total) = {
       let row-typst = if r-idx < rows-typst.len() { rows-typst.at(r-idx) } else { none }
-      cols.map(c => {
-        let cell-val = row-dict.at(c.field, default: "")
-        let cell-content = if row-typst != none and c.field in row-typst {
-          let cell-markup = str(row-typst.at(c.field))
-          if cell-markup.trim() != "" { eval(cell-markup, mode: "markup") } else []
-        } else {
-          [#cell-val]
-        }
-        let cell-justify = (c.align == "justify")
-        [
-          #set par(justify: cell-justify)
-          #(if is-total {
-            text(font: font-heading, weight: "medium", size: cell-sz, fill: if is-lukb-design { lukb-text } else { lukb-navy })[#cell-content]
+      let cells = ()
+      for (c-idx, c) in cols.enumerate() {
+        let covered-by = merges.find(m => {
+          let mr = int(m.at("row", default: 0))
+          let mc = int(m.at("col", default: 0))
+          let mrs = int(m.at("rowspan", default: 1))
+          let mcs = int(m.at("colspan", default: 1))
+          r-idx >= mr and r-idx < mr + mrs and c-idx >= mc and c-idx < mc + mcs
+        })
+        let is-covered-non-origin = covered-by != none and not (int(covered-by.at("row", default: 0)) == r-idx and int(covered-by.at("col", default: 0)) == c-idx)
+        if not is-covered-non-origin {
+          let cell-val = row-dict.at(c.field, default: "")
+          let cell-content = if row-typst != none and c.field in row-typst {
+            let cell-markup = str(row-typst.at(c.field))
+            if cell-markup.trim() != "" { eval(cell-markup, mode: "markup") } else []
           } else {
-            text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-content]
-          })
-        ]
-      })
+            [#cell-val]
+          }
+          let cell-justify = (c.align == "justify")
+          let rendered-content = [
+            #set par(justify: cell-justify)
+            #(if is-total {
+              text(font: font-heading, weight: "medium", size: cell-sz, fill: if is-lukb-design { lukb-text } else { lukb-navy })[#cell-content]
+            } else {
+              text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-content]
+            })
+          ]
+          if covered-by != none {
+            let mrs = calc.max(1, int(covered-by.at("rowspan", default: 1)))
+            let mcs = calc.max(1, int(covered-by.at("colspan", default: 1)))
+            cells.push(table.cell(rowspan: mrs, colspan: mcs, rendered-content))
+          } else {
+            cells.push(rendered-content)
+          }
+        }
+      }
+      cells
     }
 
     #table(
@@ -769,7 +791,7 @@
         let is-total = highlight-last and (r-idx == rows.len() - 1)
         render-row-cells(r-idx, row-dict, is-total)
       },
-      ..(if is-long-table and has-source and rows.len() > 0 {
+      ..(if split-last-row-for-source {
         let last-idx = rows.len() - 1
         let last-row = rows.last()
         let is-total = highlight-last
@@ -816,7 +838,7 @@
       })
     )
 
-    #if not (is-long-table and has-source and rows.len() > 0) [
+    #if not split-last-row-for-source [
       #render-box-source(blk.source, is-margin: is-margin, with-border: true)
     ]
   ]
