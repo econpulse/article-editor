@@ -670,19 +670,29 @@
     #set table.cell(breakable: false)
     #let show-header = blk.at("show_header", default: true)
     #let highlight-last = blk.at("highlight_last_row", default: false)
+    #let rows-typst = blk.at("rows_typst", default: ())
     #let main-rows-count = if is-long-table and has-source and rows.len() > 0 { rows.len() - 1 } else { rows.len() }
-    #let render-row-cells(row-dict, is-total) = cols.map(c => {
-      let cell-val = row-dict.at(c.field, default: "")
-      let cell-justify = (c.align == "justify")
-      [
-        #set par(justify: cell-justify)
-        #(if is-total {
-          text(font: font-heading, weight: "medium", size: cell-sz, fill: if is-lukb-design { lukb-text } else { lukb-navy })[#cell-val]
+    #let render-row-cells(r-idx, row-dict, is-total) = {
+      let row-typst = if r-idx < rows-typst.len() { rows-typst.at(r-idx) } else { none }
+      cols.map(c => {
+        let cell-val = row-dict.at(c.field, default: "")
+        let cell-content = if row-typst != none and c.field in row-typst {
+          let cell-markup = str(row-typst.at(c.field))
+          if cell-markup.trim() != "" { eval(cell-markup, mode: "markup") } else []
         } else {
-          text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-val]
-        })
-      ]
-    })
+          [#cell-val]
+        }
+        let cell-justify = (c.align == "justify")
+        [
+          #set par(justify: cell-justify)
+          #(if is-total {
+            text(font: font-heading, weight: "medium", size: cell-sz, fill: if is-lukb-design { lukb-text } else { lukb-navy })[#cell-content]
+          } else {
+            text(font: font-body, weight: "light", size: cell-sz, fill: lukb-text)[#cell-content]
+          })
+        ]
+      })
+    }
 
     #table(
       columns: col-widths,
@@ -759,7 +769,7 @@
       }),
       ..for (r-idx, row-dict) in rows.slice(0, main-rows-count).enumerate() {
         let is-total = highlight-last and (r-idx == rows.len() - 1)
-        render-row-cells(row-dict, is-total)
+        render-row-cells(r-idx, row-dict, is-total)
       },
       ..(if is-long-table and has-source and rows.len() > 0 {
         let last-idx = rows.len() - 1
@@ -797,7 +807,7 @@
                   )
                 },
                 fill: (x, y) => last-bg,
-                ..render-row-cells(last-row, is-total)
+                ..render-row-cells(last-idx, last-row, is-total)
               )
               #render-box-source(blk.source, is-margin: is-margin, with-border: true)
             ]

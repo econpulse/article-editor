@@ -38,7 +38,7 @@ from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg, publication_timeseries_snapshot
 from services.custom_chart_generator import generate_custom_chart_svg
-from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html
+from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html, table_cell_html_to_typst
 from services.kpi_icons import get_kpi_tone_palette, render_kpi_icon_svg
 
 logger = logging.getLogger("lukb_cms.renderer")
@@ -382,6 +382,27 @@ def _materialize_chart_svg(work_dir: Path, svg_markup: str) -> str:
     return _materialize_svg_asset(work_dir, svg_markup, prefix="chart_")
 
 
+def _prepare_table_typst_rows(tbl_blk: dict[str, Any]) -> list[dict[str, str]]:
+    """Konvertiert alle Tabellenzellen eines Table-Blocks in sicheres Typst-Markup."""
+    cols = tbl_blk.get("columns", [])
+    rows = tbl_blk.get("rows", [])
+    col_fields = [c.get("field", "") for c in cols if isinstance(c, dict) and c.get("field")]
+    typst_rows: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            typst_rows.append({})
+            continue
+        r_out: dict[str, str] = {}
+        for field in col_fields:
+            r_out[field] = table_cell_html_to_typst(str(row.get(field, "")))
+        # Auch eventuelle Zusatzfelder übernehmen
+        for k, v in row.items():
+            if k not in r_out:
+                r_out[k] = table_cell_html_to_typst(str(v))
+        typst_rows.append(r_out)
+    return typst_rows
+
+
 def _prepare_typst_payload(
     doc: ArticleDocument,
     work_dir: Path,
@@ -447,6 +468,9 @@ def _prepare_typst_payload(
             )
             bcopy["resolved_image"] = _materialize_chart_svg(work_dir, svg_markup)
 
+        elif btype == "table":
+            bcopy["rows_typst"] = _prepare_table_typst_rows(bcopy)
+
         elif btype == "media_text":
             bcopy["title_typst"] = escape_typst_text(blk.get("title", ""))
             bcopy["typst_markup"] = html_to_typst(blk.get("html", ""))
@@ -482,6 +506,8 @@ def _prepare_typst_payload(
                     max_date=doc.metadata.publication_date,
                 )
                 media_copy["resolved_image"] = _materialize_chart_svg(work_dir, svg_markup)
+            elif mtype == "table":
+                media_copy["rows_typst"] = _prepare_table_typst_rows(media_copy)
             bcopy["media"] = media_copy
 
         elif btype == "quote":
@@ -1445,13 +1471,26 @@ def render_docx_bytes(doc_model: ArticleDocument) -> bytes:
                         if is_last_row and src:
                             p.paragraph_format.keep_with_next = True
                         val = str(row.get(col.get("field", ""), ""))
-                        run = p.add_run(val)
-                        run.bold = is_total
-                        run.font.color.rgb = (
+                        cell_color = (
                             RGBColor(0x1A, 0x24, 0x33) if is_lukb_design
                             else (RGBColor(0x00, 0x28, 0x55) if is_total else RGBColor(0x1A, 0x24, 0x33))
                         )
-                        run.font.size = Pt(table_font_pt)
+                        if re.search(r"</?(?:b|strong|i|em|u|sub|sup|a|br|p|div|span)\b", val, re.IGNORECASE):
+                            norm_val = val.replace("\r\n", "\n").replace("\n", "<br>")
+                            norm_val = re.sub(r"</(?:p|div)>\s*<(?:p|div)\b[^>]*>", "<br>", norm_val, flags=re.IGNORECASE)
+                            norm_val = re.sub(r"</?(?:p|div)\b[^>]*>", "", norm_val, flags=re.IGNORECASE)
+                            _add_html_runs_to_paragraph(p, norm_val, footnote_collector=docx_inline_footnotes)
+                            for run in p.runs:
+                                run.font.size = Pt(table_font_pt)
+                                if is_total:
+                                    run.bold = True
+                                if run.font.color.rgb is None:
+                                    run.font.color.rgb = cell_color
+                        else:
+                            run = p.add_run(val)
+                            run.bold = is_total
+                            run.font.color.rgb = cell_color
+                            run.font.size = Pt(table_font_pt)
 
             if src:
                 psrc = container.add_paragraph()

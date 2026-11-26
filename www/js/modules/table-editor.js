@@ -7,8 +7,62 @@
   function createFullLayoutControl() { return E.createFullLayoutControl.apply(this, arguments); }
   function escapeHtml() { return E.escapeHtml.apply(this, arguments); }
   function markDirty() { return E.markDirty.apply(this, arguments); }
+  function openLinkPopover() { return E.openLinkPopover.apply(this, arguments); }
   function parseDelimitedText() { return E.parseDelimitedText.apply(this, arguments); }
+  function sanitizeRichTextHtml() { return E.sanitizeRichTextHtml.apply(this, arguments); }
   function uid() { return E.uid.apply(this, arguments); }
+
+  const TABLE_CELL_HTML_TAG_RE = /<\/?(?:b|strong|i|em|u|sub|sup|a|br|p|div|span)\b/i;
+
+  function sanitizeTableCellHtml(htmlStr) {
+    if (!htmlStr) return "";
+    let s = sanitizeRichTextHtml(String(htmlStr));
+    s = s.replace(/<\/p>\s*<p>/gi, "<br>");
+    s = s.replace(/<p\b[^>]*>/gi, "").replace(/<\/p>/gi, "<br>");
+    s = s.replace(/^(?:<br\s*\/?>|\s|&nbsp;)+/i, "");
+    s = s.replace(/(?:<br\s*\/?>|\s|&nbsp;)+$/i, "");
+    const plainCheck = s.replace(/<br\s*\/?>/gi, "").replace(/&nbsp;/gi, "").trim();
+    if (!plainCheck) return "";
+    return s.trim();
+  }
+
+  function normalizeTableCellForEditor(val) {
+    const raw = val != null ? String(val) : "";
+    if (!raw) return "";
+    if (TABLE_CELL_HTML_TAG_RE.test(raw)) {
+      return sanitizeTableCellHtml(raw);
+    }
+    return escapeHtml(raw).replace(/\r\n|\n|\r/g, "<br>");
+  }
+
+  function tableCellToPlainText(val) {
+    const raw = val != null ? String(val) : "";
+    if (!raw) return "";
+    if (!TABLE_CELL_HTML_TAG_RE.test(raw)) {
+      return raw;
+    }
+    const tmp = document.createElement("div");
+    tmp.innerHTML = raw
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/(?:p|div)>/gi, "\n");
+    return (tmp.textContent || tmp.innerText || "").replace(/\u00A0/g, " ").replace(/\n+$/, "");
+  }
+
+  function isCellInputEl(el) {
+    return !!(el && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" || (el.classList && el.classList.contains("grid-cell-input"))));
+  }
+
+  function hasInnerTextSelection(el) {
+    if (!el) return false;
+    if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+      return el.selectionStart !== el.selectionEnd;
+    }
+    if (el.classList && el.classList.contains("grid-cell-input")) {
+      const sel = window.getSelection();
+      return !!(sel && !sel.isCollapsed && el.contains(sel.anchorNode));
+    }
+    return false;
+  }
 
   const tableEditorState = {
     active: null,
@@ -62,7 +116,7 @@
       const rowObj = blk.rows[r] || {};
       const cols = [];
       for (let c = range.minCol; c <= range.maxCol && c < blk.columns.length; c++) {
-        cols.push(formatTsvCell(rowObj[blk.columns[c].field]));
+        cols.push(formatTsvCell(tableCellToPlainText(rowObj[blk.columns[c].field])));
       }
       lines.push(cols.join("\t"));
     }
@@ -76,7 +130,7 @@
       const cellsHtml = [];
       for (let c = range.minCol; c <= range.maxCol && c < blk.columns.length; c++) {
         const val = rowObj[blk.columns[c].field] != null ? String(rowObj[blk.columns[c].field]) : "";
-        cellsHtml.push("<td>" + escapeHtml(val).replace(/\n/g, "<br>") + "</td>");
+        cellsHtml.push("<td>" + normalizeTableCellForEditor(val) + "</td>");
       }
       rowsHtml.push("<tr>" + cellsHtml.join("") + "</tr>");
     }
@@ -164,7 +218,7 @@
           const sel = window.getSelection();
           if (sel) sel.removeAllRanges();
         }
-        if (document.activeElement && drag.tbl.contains(document.activeElement) && document.activeElement.tagName === "TEXTAREA") {
+        if (document.activeElement && drag.tbl.contains(document.activeElement) && isCellInputEl(document.activeElement)) {
           document.activeElement.blur();
         }
         drag.gridScroll.focus({ preventScroll: true });
@@ -476,6 +530,88 @@
     selectionBar.appendChild(selHint);
     container.appendChild(selectionBar);
 
+    // Formatierungsleiste für aktive Tabellenzelle (Bold, Italic, Underline, Link)
+    const formatBar = document.createElement("div");
+    formatBar.className = "table-format-toolbar";
+
+    const fmtBtnGroup = document.createElement("div");
+    fmtBtnGroup.style.display = "flex";
+    fmtBtnGroup.style.alignItems = "center";
+    fmtBtnGroup.style.gap = "4px";
+
+    let focusedCellCtx = null;
+
+    const cellFmtCommands = [
+      { cmd: "bold", label: "B", title: "Fett (Ctrl+B)" },
+      { cmd: "italic", label: "I", title: "Kursiv (Ctrl+I)" },
+      { cmd: "underline", label: "U", title: "Unterstrichen (Ctrl+U)" },
+      { cmd: "removeFormat", label: "Tx", title: "Formatierung entfernen" },
+    ];
+
+    cellFmtCommands.forEach(function (c) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "rt-btn";
+      btn.textContent = c.label;
+      btn.title = c.title;
+      btn.addEventListener("mousedown", function (e) {
+        e.preventDefault();
+        if (!focusedCellCtx || !focusedCellCtx.cellEl || !focusedCellCtx.cellEl.isConnected) return;
+        focusedCellCtx.cellEl.focus();
+        document.execCommand(c.cmd, false, null);
+        focusedCellCtx.onChange();
+      });
+      fmtBtnGroup.appendChild(btn);
+    });
+
+    const cellLinkBtn = document.createElement("button");
+    cellLinkBtn.type = "button";
+    cellLinkBtn.className = "rt-btn";
+    cellLinkBtn.textContent = "🔗 Link";
+    cellLinkBtn.title = "Link in aktueller Tabellenzelle einfügen oder bearbeiten";
+    cellLinkBtn.addEventListener("mousedown", function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!focusedCellCtx || !focusedCellCtx.cellEl || !focusedCellCtx.cellEl.isConnected) return;
+      const cellEl = focusedCellCtx.cellEl;
+      const onCellChange = focusedCellCtx.onChange;
+      const sel = window.getSelection();
+      let range = null;
+      let existingAnchor = null;
+      if (sel && sel.rangeCount > 0) {
+        const candidate = sel.getRangeAt(0);
+        if (cellEl.contains(candidate.commonAncestorContainer)) {
+          range = candidate.cloneRange();
+          const containerEl =
+            candidate.commonAncestorContainer.nodeType === 1
+              ? candidate.commonAncestorContainer
+              : candidate.commonAncestorContainer.parentElement;
+          if (containerEl) {
+            existingAnchor = containerEl.closest("a");
+          }
+        }
+      }
+      if (existingAnchor && cellEl.contains(existingAnchor)) {
+        openLinkPopover(existingAnchor, cellEl, onCellChange);
+      } else {
+        if (!range) {
+          range = document.createRange();
+          range.selectNodeContents(cellEl);
+          range.collapse(false);
+        }
+        openLinkPopover(range, cellEl, onCellChange);
+      }
+    });
+    fmtBtnGroup.appendChild(cellLinkBtn);
+
+    const fmtHint = document.createElement("span");
+    fmtHint.className = "table-format-hint";
+    fmtHint.textContent = "Zelle anklicken & Text markieren für Fett / Kursiv / Link";
+
+    formatBar.appendChild(fmtBtnGroup);
+    formatBar.appendChild(fmtHint);
+    container.appendChild(formatBar);
+
     // Zeile 4: Interaktives Daten-Grid
     const gridScroll = document.createElement("div");
     gridScroll.className = "table-editor-scroll";
@@ -520,24 +656,12 @@
       }
     }
 
-    function autoResizeCellTextarea(ta) {
-      if (!ta) return;
-      ta.style.height = "auto";
-      ta.style.height = Math.max(32, ta.scrollHeight) + "px";
+    function autoResizeCellTextarea() {
+      // contentEditable div wächst automatisch mit dem Inhalt
     }
 
     function autoResizeAllGridCells() {
-      const cells = Array.from(gridScroll.querySelectorAll("textarea.grid-cell-input"));
-      if (cells.length === 0) return;
-      cells.forEach(function (ta) {
-        ta.style.height = "auto";
-      });
-      const heights = cells.map(function (ta) {
-        return Math.max(32, ta.scrollHeight) + "px";
-      });
-      cells.forEach(function (ta, idx) {
-        ta.style.height = heights[idx];
-      });
+      // contentEditable div wächst automatisch mit dem Inhalt
     }
 
     function applySelectionStyles() {
@@ -648,10 +772,9 @@
           if (tblRef) {
             const td = tblRef.querySelector('td[data-row-idx="' + r + '"][data-col-idx="' + c + '"]');
             if (td) {
-              const ta = td.querySelector("textarea.grid-cell-input");
-              if (ta) {
-                ta.value = "";
-                autoResizeCellTextarea(ta);
+              const cellEl = td.querySelector(".grid-cell-input");
+              if (cellEl) {
+                cellEl.innerHTML = "";
               }
             }
           }
@@ -739,7 +862,7 @@
       const firstRow = blk.rows[0];
       blk.columns.forEach(function (col) {
         const val = firstRow[col.field];
-        col.title = val != null ? String(val) : "";
+        col.title = val != null ? tableCellToPlainText(val).replace(/\n+/g, " ").trim() : "";
       });
       blk.rows.shift();
       resetTableSelectionForStructuralChange();
@@ -1029,16 +1152,26 @@
           td.dataset.rowIdx = String(rIdx);
           td.dataset.colIdx = String(cIdx);
 
-          const cellInp = document.createElement("textarea");
-          cellInp.rows = 1;
+          const cellInp = document.createElement("div");
           cellInp.className = "grid-cell-input";
+          cellInp.contentEditable = "true";
           cellInp.style.textAlign = col.align || "left";
-          cellInp.value = rowObj[col.field] != null ? rowObj[col.field] : "";
+          cellInp.innerHTML = normalizeTableCellForEditor(rowObj[col.field]);
+
+          const commitCell = function (rawHtml) {
+            const nextVal = sanitizeTableCellHtml(rawHtml !== undefined ? rawHtml : cellInp.innerHTML);
+            if (rowObj[col.field] !== nextVal) {
+              rowObj[col.field] = nextVal;
+              markDirty();
+            }
+          };
 
           cellInp.addEventListener("input", function () {
-            rowObj[col.field] = cellInp.value;
-            autoResizeCellTextarea(cellInp);
-            markDirty();
+            commitCell();
+          });
+
+          cellInp.addEventListener("blur", function () {
+            commitCell();
           });
 
           cellInp.addEventListener("focus", function () {
@@ -1046,16 +1179,36 @@
             if (!tableEditorState.drag || !tableEditorState.drag.active) {
               active.anchor = { row: rIdx, col: cIdx };
             }
+            focusedCellCtx = {
+              cellEl: cellInp,
+              rowObj: rowObj,
+              col: col,
+              onChange: function (updatedHtml) {
+                commitCell(updatedHtml);
+              },
+            };
           });
 
-          // Excel Multi-Zellen Copy-Paste Support
+          cellInp.addEventListener("click", function (e) {
+            const linkEl = e.target.closest ? e.target.closest("a") : null;
+            if (linkEl && cellInp.contains(linkEl)) {
+              e.preventDefault();
+              e.stopPropagation();
+              openLinkPopover(linkEl, cellInp, function (updatedHtml) {
+                commitCell(updatedHtml);
+              });
+            }
+          });
+
+          // Excel Multi-Zellen Copy-Paste Support (Single-Cell Paste fügt Plaintext ohne fremde Styles ein)
           cellInp.addEventListener("paste", function (e) {
             const clipText = (e.clipboardData || window.clipboardData).getData("text/plain");
             if (!clipText || (clipText.indexOf("\t") === -1 && clipText.indexOf("\n") === -1 && clipText.indexOf("\r") === -1)) {
-              setTimeout(function () {
-                autoResizeCellTextarea(cellInp);
-              }, 0);
-              return; // Normales Einfügen in einzelne Zelle
+              e.preventDefault();
+              e.stopPropagation();
+              document.execCommand("insertText", false, clipText || "");
+              commitCell();
+              return;
             }
             e.preventDefault();
             e.stopPropagation();
@@ -1158,8 +1311,8 @@
       const active = tableEditorState.active;
       if (!active || active.blockId !== blk.id || !active.range) return;
       const ae = document.activeElement;
-      if (ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT") && gridScroll.contains(ae)) {
-        if (ae.selectionStart !== ae.selectionEnd) return;
+      if (isCellInputEl(ae) && gridScroll.contains(ae)) {
+        if (hasInnerTextSelection(ae)) return;
       }
       e.preventDefault();
       e.stopPropagation();
@@ -1174,8 +1327,8 @@
       const active = tableEditorState.active;
       if (!active || active.blockId !== blk.id || !active.range) return;
       const ae = document.activeElement;
-      if (ae && (ae.tagName === "TEXTAREA" || ae.tagName === "INPUT") && gridScroll.contains(ae)) {
-        if (ae.selectionStart !== ae.selectionEnd) return;
+      if (isCellInputEl(ae) && gridScroll.contains(ae)) {
+        if (hasInnerTextSelection(ae)) return;
       }
       e.preventDefault();
       e.stopPropagation();
@@ -1187,7 +1340,7 @@
     });
 
     gridScroll.addEventListener("paste", function (e) {
-      if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
+      if (isCellInputEl(e.target)) return;
       const active = tableEditorState.active;
       if (!active || active.blockId !== blk.id || !active.range) return;
       const clipText = (e.clipboardData || window.clipboardData).getData("text/plain");
@@ -1220,7 +1373,7 @@
     gridScroll.addEventListener("keydown", function (e) {
       const active = tableEditorState.active;
       if (!active || active.blockId !== blk.id || !active.range) return;
-      if (e.target && (e.target.tagName === "TEXTAREA" || e.target.tagName === "INPUT")) return;
+      if (isCellInputEl(e.target)) return;
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "a") {
         if (!blk.rows.length || !blk.columns.length) return;

@@ -318,3 +318,26 @@ def html_to_typst(
             return f"#block(breakable: false)[{escaped_plain}]"
         return escaped_plain
     return result
+
+
+_TABLE_CELL_HTML_TAG_RE = re.compile(
+    r"</?(?:b|strong|i|em|u|sub|sup|a|br|p|div|span)\b",
+    re.IGNORECASE,
+)
+
+
+@functools.lru_cache(maxsize=4096)
+def table_cell_html_to_typst(cell_val: str) -> str:
+    """Konvertiert einen Tabellenzellen-Inhalt (Plaintext oder Inline-HTML) sicher in Typst-Markup."""
+    if not cell_val:
+        return ""
+    raw = str(cell_val)
+    if not raw.strip():
+        return ""
+    if not _TABLE_CELL_HTML_TAG_RE.search(raw):
+        return escape_typst_text(raw).replace("\r\n", "\n").replace("\n", " \\\n")
+
+    normalized = raw.replace("\r\n", "\n").replace("\n", "<br>")
+    normalized = re.sub(r"</(?:p|div)>\s*<(?:p|div)\b[^>]*>", "<br>", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"</?(?:p|div)\b[^>]*>", "", normalized, flags=re.IGNORECASE)
+    return html_to_typst(normalized, keep_together_max_words=0)

@@ -2215,6 +2215,24 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
   border-color: #FDE68A;
 }
 
+.table-format-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 5px 8px;
+  margin-bottom: 6px;
+  background: #F8FAFC;
+  border: 1px solid var(--lukb-border);
+  border-radius: 6px;
+}
+
+.table-format-hint {
+  font-size: 11px;
+  color: #64748B;
+}
+
 .grid-cell-input {
   width: 100%;
   border: none;
@@ -2227,12 +2245,23 @@ table.cms-grid-editor td.is-cell-selected.sel-right {
   background: transparent;
   outline: none;
   display: block;
-  resize: none;
-  overflow: hidden;
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-wrap: break-word;
   min-height: 32px;
+  cursor: text;
+}
+
+.grid-cell-input b,
+.grid-cell-input strong {
+  font-weight: 600;
+}
+
+.grid-cell-input a {
+  color: var(--lukb-navy);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(0, 90, 156, 0.35);
+  cursor: pointer;
 }
 
 .grid-cell-input:focus {
