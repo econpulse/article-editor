@@ -153,7 +153,7 @@ def test_full_cms_workflow():
 def test_html_to_typst_escaping():
     sample = "<p>Rendite von <strong>+4.5 %</strong> bei $100 &amp; #1 Rating <em>(Prognose)</em></p>"
     typ = html_to_typst(sample)
-    assert "#strong[+4.5 %]" in typ
+    assert "#strong[+4.5\u00a0%]" in typ
     assert "\\$100" in typ
     assert "\\#1" in typ
     assert "#emph[(Prognose)]" in typ

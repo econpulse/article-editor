@@ -38,7 +38,14 @@ from database.repository import get_assets_by_ids
 from schemas.article import ArticleDocument
 from services.chart_generator import generate_db_chart_svg, publication_timeseries_snapshot
 from services.custom_chart_generator import generate_custom_chart_svg
-from services.html_to_typst import escape_typst_text, html_to_typst, sanitize_richtext_html, table_cell_html_to_typst
+from services.html_to_typst import (
+    bind_number_units,
+    bind_number_units_html,
+    escape_typst_text,
+    html_to_typst,
+    sanitize_richtext_html,
+    table_cell_html_to_typst,
+)
 from services.kpi_icons import get_kpi_tone_palette, render_kpi_icon_svg
 
 logger = logging.getLogger("lukb_cms.renderer")
@@ -293,12 +300,77 @@ def _reorder_blocks_for_anchors(blocks: list[dict[str, Any]]) -> list[dict[str, 
     return reordered
 
 
+def _bind_block_plain_text_units(blk: dict[str, Any]) -> None:
+    """Setzt geschützte Leerzeichen zwischen Zahlen und Einheiten in Plaintext-Feldern eines Blocks."""
+    btype = blk.get("type")
+    if btype == "heading":
+        if blk.get("text"):
+            blk["text"] = bind_number_units(str(blk["text"]))
+    elif btype == "callout":
+        if blk.get("title"):
+            blk["title"] = bind_number_units(str(blk["title"]))
+    elif btype in ("figure", "db_chart", "custom_chart"):
+        for key in ("title", "subtitle", "source"):
+            if blk.get(key):
+                blk[key] = bind_number_units(str(blk[key]))
+    elif btype == "table":
+        for key in ("title", "subtitle", "source"):
+            if blk.get(key):
+                blk[key] = bind_number_units(str(blk[key]))
+        for col in blk.get("columns", []) or []:
+            if isinstance(col, dict) and col.get("title"):
+                col["title"] = bind_number_units(str(col["title"]))
+    elif btype == "media_text":
+        if blk.get("title"):
+            blk["title"] = bind_number_units(str(blk["title"]))
+        media = blk.get("media")
+        if isinstance(media, dict):
+            _bind_block_plain_text_units(media)
+    elif btype == "quote":
+        for key in ("quote", "author", "source"):
+            if blk.get(key):
+                blk[key] = bind_number_units(str(blk[key]))
+    elif btype == "footnotes":
+        if blk.get("title"):
+            blk["title"] = bind_number_units(str(blk["title"]))
+        for it in blk.get("items", []) or []:
+            if isinstance(it, dict) and it.get("text"):
+                it["text"] = bind_number_units(str(it["text"]))
+    elif btype == "glossary":
+        if blk.get("title"):
+            blk["title"] = bind_number_units(str(blk["title"]))
+        for it in blk.get("all_items", []) or []:
+            if isinstance(it, dict):
+                if it.get("term"):
+                    it["term"] = bind_number_units(str(it["term"]))
+                if it.get("definition"):
+                    it["definition"] = bind_number_units(str(it["definition"]))
+    elif btype == "publications":
+        if blk.get("title"):
+            blk["title"] = bind_number_units(str(blk["title"]))
+        for it in blk.get("items", []) or []:
+            if isinstance(it, dict):
+                for key in ("clean_title", "subtitle", "category"):
+                    if it.get(key):
+                        it[key] = bind_number_units(str(it[key]))
+    elif btype == "kpi_cards":
+        for key in ("title", "subtitle", "source"):
+            if blk.get(key):
+                blk[key] = bind_number_units(str(blk[key]))
+        for card in blk.get("cards", []) or []:
+            if isinstance(card, dict):
+                for key in ("label", "value", "subtext"):
+                    if card.get(key):
+                        card[key] = bind_number_units(str(card[key]))
+
+
 def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
     """
     Zentrale Voraufbereitung des Artikel-Payloads für alle Ausgabekanäle (Typst-PDF/SVG, Web-HTML, Word-DOCX):
     - Formatiert das Publikationsdatum einheitlich im LUKB-Standardformat.
     - Normalisiert die Reihenfolge verankerter Randelemente (`anchor_to`).
     - Löst Glossar-Begriffe (`all_items`) und Querverweise (`publications`) zentral einmalig auf.
+    - Verbindet Zahlen und Einheiten mit geschützten Leerzeichen (U+00A0).
     """
     payload = doc.model_dump()
     raw_date = doc.metadata.publication_date
@@ -306,6 +378,9 @@ def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
     payload["metadata"]["publication_date_raw"] = raw_date
     payload["metadata"]["publication_date_formatted"] = formatted_date
     payload["metadata"]["publication_date"] = formatted_date or raw_date
+    for meta_key in ("title", "subtitle", "lead", "category", "disclaimer"):
+        if payload["metadata"].get(meta_key):
+            payload["metadata"][meta_key] = bind_number_units(str(payload["metadata"][meta_key]))
     payload["metadata"]["lead_typst"] = escape_typst_text(doc.metadata.lead or "")
 
     raw_blocks = _reorder_blocks_for_anchors(payload.get("blocks", []))
@@ -334,6 +409,7 @@ def _prepare_common_article_payload(doc: ArticleDocument) -> dict[str, Any]:
                 raw_t = it.get("title", "").strip()
                 it["clean_title"] = raw_t.strip('"').strip('«').strip('»')
                 it["url"] = str(it.get("url", "")).strip()
+        _bind_block_plain_text_units(blk)
     return payload
 
 
@@ -829,11 +905,20 @@ def render_web_html(doc: ArticleDocument) -> str:
     payload = _prepare_common_article_payload(doc)
     raw_blocks = payload.get("blocks", [])
     payload["auto_footnotes"] = _transform_web_inline_footnotes(raw_blocks)
+    for fn in payload["auto_footnotes"]:
+        if fn.get("text"):
+            fn["text"] = bind_number_units(fn["text"])
     asset_records = _fetch_doc_asset_records(raw_blocks, article_id=doc.id)
     asset_uri_cache: dict[str, str] = {}
     for blk in raw_blocks:
         if blk.get("type") in ("richtext", "callout"):
-            blk["html"] = _normalize_inline_links_html(blk.get("html", ""))
+            blk["html"] = bind_number_units_html(_normalize_inline_links_html(blk.get("html", "")))
+        elif blk.get("type") == "table":
+            for row in blk.get("rows", []) or []:
+                if isinstance(row, dict):
+                    for k, v in list(row.items()):
+                        if isinstance(v, str) and v:
+                            row[k] = bind_number_units(v)
         elif blk.get("type") == "figure":
             asset_id = blk.get("asset_id", "")
             data_uri = ""
@@ -857,12 +942,18 @@ def render_web_html(doc: ArticleDocument) -> str:
             b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
             blk["data_uri"] = f"data:image/svg+xml;base64,{b64}"
         elif blk.get("type") == "media_text":
-            blk["html"] = _normalize_inline_links_html(blk.get("html", ""))
+            blk["html"] = bind_number_units_html(_normalize_inline_links_html(blk.get("html", "")))
             if blk.get("aside_html"):
-                blk["aside_html"] = _normalize_inline_links_html(blk.get("aside_html", ""))
+                blk["aside_html"] = bind_number_units_html(_normalize_inline_links_html(blk.get("aside_html", "")))
             media = blk.get("media") if isinstance(blk.get("media"), dict) else {}
             mtype = blk.get("media_type") or media.get("type") or "figure"
             media["type"] = mtype
+            if mtype == "table":
+                for row in media.get("rows", []) or []:
+                    if isinstance(row, dict):
+                        for k, v in list(row.items()):
+                            if isinstance(v, str) and v:
+                                row[k] = bind_number_units(v)
             if mtype == "figure":
                 asset_id = media.get("asset_id", "")
                 data_uri = ""

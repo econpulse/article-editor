@@ -67,10 +67,103 @@ def sanitize_richtext_html(html_str: str) -> str:
 
 
 @functools.lru_cache(maxsize=4096)
+def bind_number_units(text: str) -> str:
+    """
+    Ersetzt reguläre Leerzeichen zwischen Zahlen und Einheiten (z.B. '10 %', '0.50 %',
+    '100 CHF', 'CHF 100', '10 Mio. CHF', '20 °C') durch geschützte Leerzeichen (U+00A0),
+    damit in Typst und HTML kein Zeilenumbruch zwischen Zahl und Einheit stattfindet.
+    """
+    if not text or " " not in text and "\t" not in text:
+        return text
+
+    out = _PREFIX_CURRENCY_RE.sub("\\1\u00a0", text)
+    out = _NUM_SYMBOL_UNIT_RE.sub("\u00a0", out)
+    out = _NUM_WORD_UNIT_RE.sub("\u00a0\\1", out)
+    out = _MAGNITUDE_CURRENCY_RE.sub("\\1\u00a0", out)
+    return out
+
+
+_PREFIX_CURRENCY_RE = re.compile(
+    r"(?<![A-Za-zÄÖÜäöüß0-9])"
+    r"(CHF|EUR|USD|GBP|JPY|CNY|RMB|AUD|CAD|SEK|NOK|DKK|Fr\.|€|\$|£|¥)"
+    r"[ \t]+(?=[+-−]?\d)"
+)
+
+_NUM_SYMBOL_UNIT_RE = re.compile(
+    r"(?<=\d)[ \t]+(?=(?:%|‰|°[CF]?|€|\$|£|¥|₹|₿))"
+)
+
+_NUM_WORD_UNIT_RE = re.compile(
+    r"(?<=\d)[ \t]+("
+    r"(?:Mio|Mrd|Bio|Tsd|Std|Stk|St|Fr)\.(?![A-Za-zÄÖÜäöüß])"
+    r"|"
+    r"(?:CHF|EUR|USD|GBP|JPY|CNY|RMB|AUD|CAD|SEK|NOK|DKK|"
+    r"TCHF|TEUR|TUSD|MCHF|MEUR|MUSD|"
+    r"Mio|Mrd|Bio|Tsd|Bps|bps|Bp|BP|PP|"
+    r"km/h|m/s|mph|km²|m²|cm²|mm²|km³|m³|cm³|mm³|"
+    r"km|dm|cm|mm|µm|nm|ha|dl|cl|ml|µl|"
+    r"kt|Mt|Gt|kg|mg|µg|oz|lbs|lb|"
+    r"ms|µs|ns|sec|sek|min|"
+    r"kWh|MWh|GWh|TWh|kW|MW|GW|TW|Wh|kJ|MJ|kHz|MHz|GHz|Hz|kV|mA|"
+    r"Mbps|Gbps|kB|KB|MB|GB|TB|PB|mbar|hPa|bar|Pa|"
+    r"m|l|g|t|s|h|W|J|V|A|K|Ω)"
+    r"(?=$|[\s,;:.\-–—/)\]}»\"'!?])"
+    r")"
+)
+
+_MAGNITUDE_CURRENCY_RE = re.compile(
+    r"(?<![A-Za-zÄÖÜäöüß])(Mio\.?|Mrd\.?|Bio\.?|Tsd\.?)[ \t]+"
+    r"(?=(?:CHF|EUR|USD|GBP|JPY|CNY|RMB|AUD|CAD|SEK|NOK|DKK)\b)"
+)
+
+
+class _HtmlNumberUnitBinder(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=False)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.parts.append(self.get_starttag_text() or f"<{tag}>")
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.parts.append(self.get_starttag_text() or f"<{tag} />")
+
+    def handle_endtag(self, tag: str) -> None:
+        self.parts.append(f"</{tag}>")
+
+    def handle_entityref(self, name: str) -> None:
+        self.parts.append(f"&{name};")
+
+    def handle_charref(self, name: str) -> None:
+        self.parts.append(f"&#{name};")
+
+    def handle_comment(self, data: str) -> None:
+        self.parts.append(f"<!--{data}-->")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(bind_number_units(data))
+
+
+@functools.lru_cache(maxsize=4096)
+def bind_number_units_html(html_str: str) -> str:
+    """Wendet `bind_number_units` ausschliesslich auf Textknoten innerhalb von HTML an."""
+    if not html_str or (" " not in html_str and "\t" not in html_str):
+        return html_str
+    parser = _HtmlNumberUnitBinder()
+    try:
+        parser.feed(html_str)
+        parser.close()
+        return "".join(parser.parts)
+    except Exception:
+        return html_str
+
+
+@functools.lru_cache(maxsize=4096)
 def escape_typst_text(text: str) -> str:
     """Escaped alle in Typst-Markup reservierten Zeichen in reinem Text."""
     if not text:
         return ""
+    out = bind_number_units(text)
     replacements = [
         ("\\", "\\\\"),
         ("#", "\\#"),
@@ -85,7 +178,6 @@ def escape_typst_text(text: str) -> str:
         ("]", "\\]"),
         ("~", "\\~"),
     ]
-    out = text
     for src, target in replacements:
         out = out.replace(src, target)
     return out

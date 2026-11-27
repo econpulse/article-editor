@@ -199,7 +199,7 @@ def test_kpi_cards_render_all_templates_and_formats(template_id: str):
     assert "blk-kpi-cards" in html_out
     assert "kpi-card-icon-badge" in html_out
     assert "SNB Leitzins" in html_out
-    assert "0.50 %" in html_out
+    assert "0.50\u00a0%" in html_out
     assert "Inflation CH #1" in html_out
 
     docx_bytes = render_docx_bytes(doc)
