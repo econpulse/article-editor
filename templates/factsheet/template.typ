@@ -108,7 +108,6 @@
   block(
     width: 100%,
     inset: (bottom: 5pt),
-    stroke: (bottom: 1.5pt + border-color)
   )[
     #grid(
       columns: (1fr, auto),

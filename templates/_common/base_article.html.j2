@@ -61,8 +61,15 @@
 
     .lukb-header {
       padding: 36px 44px 28px 44px;
-      border-bottom: 2px solid var(--lukb-navy);
       background: linear-gradient(180deg, #FFFFFF 0%, #FAFCFF 100%);
+    }
+
+    .lukb-header.lukb-no-subtitle .lukb-brand-row {
+      margin-bottom: 8px;
+    }
+
+    .lukb-header.lukb-no-subtitle .lukb-subtitle-row {
+      margin-bottom: 2px !important;
     }
 
     .lukb-brand-row {
@@ -619,7 +626,7 @@
     .blk-figure, .blk-table-wrap {
       break-inside: avoid;
       page-break-inside: avoid;
-      border-top: 2px solid var(--lukb-navy);
+      border-top: 1px solid var(--lukb-navy);
       border-bottom: 1px solid var(--lukb-border);
       padding: 12px 0 10px 0;
       margin: 2em 0 1.4em 0;
@@ -1026,7 +1033,7 @@
   </style>
 </head>
 <body>
-  {% macro render_brand_row() %}
+  {% macro render_brand_row(inline_date="") %}
     <div class="lukb-brand-row">
       <div class="lukb-brand-badge">
         {% if logo_data_uri %}
@@ -1035,7 +1042,12 @@
         <strong>Luzerner Kantonalbank</strong>
         {% endif %}
       </div>
-      <span class="lukb-header-series">{{ article.metadata.header_series or "Investment Office News" }}</span>
+      <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 3px;">
+        <span class="lukb-header-series">{{ article.metadata.header_series or "Investment Office News" }}</span>
+        {% if inline_date %}
+        <span class="lukb-pub-date" style="font-size: 1.05rem; color: var(--lukb-blue-600);">{{ inline_date }}</span>
+        {% endif %}
+      </div>
     </div>
   {% endmacro %}
 
@@ -1373,19 +1385,19 @@
   {% endmacro %}
 
   <article class="lukb-article-shell">
-    <header class="lukb-header">
+    {% set has_sub_line = (article.metadata.subtitle or article.metadata.category) %}
+    <header class="lukb-header{% if not has_sub_line %} lukb-no-subtitle{% endif %}">
       {% block header_banner %}
-        {{ render_brand_row() }}
-
         {% set pub_date = article.metadata.publication_date_formatted or article.metadata.publication_date %}
-        {% if article.metadata.subtitle or article.metadata.category or pub_date %}
+        {% set has_sub = (article.metadata.subtitle or article.metadata.category) %}
+        {{ render_brand_row(inline_date=(pub_date if not has_sub else "")) }}
+
+        {% if has_sub %}
         <div class="lukb-subtitle-row" style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 6px;">
           {% if article.metadata.subtitle %}
           <p class="lukb-subtitle" style="margin: 0;">{{ article.metadata.subtitle }}</p>
           {% elif article.metadata.category %}
           <p class="lukb-subtitle" style="margin: 0;">{{ article.metadata.category }}</p>
-          {% else %}
-          <div></div>
           {% endif %}
           {% if pub_date %}
           <!-- NOTIZ (vorherige Farbe): var(--lukb-muted) -->

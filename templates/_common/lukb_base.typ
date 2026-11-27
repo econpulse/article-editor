@@ -152,7 +152,7 @@
 // Dokumenten-Kopf-Bausteine (Standard & Executive-Briefing)
 // ============================================================================
 
-#let render-brand-top-row(meta) = {
+#let render-brand-top-row(meta, inline-date: "") = {
   grid(
     columns: (1fr, auto),
     align(left + top)[
@@ -166,6 +166,12 @@
           // NOTIZ (vorherige Farbe): fill: rgb("#0093D1")
           #text(font: font-heading, weight: "medium", size: 14pt, fill: lukb-blue-600)[
             #header-series-text
+          ]
+        ]
+        #if inline-date != "" [
+          #v(3pt)
+          #cms-link-meta("meta-pub-date")[
+            #text(font: font-body, weight: "light", size: 11pt, fill: lukb-blue-600)[#inline-date]
           ]
         ]
       ]
@@ -198,28 +204,25 @@
 
 #let render-standard-header(meta, title-below: 2.2em, lead-below: 2.2em) = {
   v(-0.75cm)
+  let sub-line = if meta.subtitle != "" { meta.subtitle } else if meta.at("category", default: "") != "" { meta.category } else { "" }
+  let sub-field-id = if meta.subtitle != "" { "meta-subtitle" } else { "meta-category" }
+  let display-date = format-pub-date(meta.publication_date)
+  let has-sub = sub-line != ""
+
   block(
     width: 100%,
     inset: (bottom: 12pt),
-    stroke: (bottom: 1.5pt + lukb-navy)
   )[
-    #render-brand-top-row(meta)
-    #v(14pt)
-
-    #let sub-line = if meta.subtitle != "" { meta.subtitle } else if meta.at("category", default: "") != "" { meta.category } else { "" }
-    #let sub-field-id = if meta.subtitle != "" { "meta-subtitle" } else { "meta-category" }
-    #let display-date = format-pub-date(meta.publication_date)
-
-    #if sub-line != "" or display-date != "" [
+    #render-brand-top-row(meta, inline-date: if not has-sub { display-date } else { "" })
+    #if has-sub [
+      #v(14pt)
       #grid(
         columns: (1fr, auto),
         gutter: 10pt,
         align(left + bottom)[
-          #if sub-line != "" [
-            #cms-link-meta(sub-field-id)[
-              // NOTIZ (vorherige Farbe): fill: lukb-blue (#005A9C)
-              #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue-600)[#sub-line]
-            ]
+          #cms-link-meta(sub-field-id)[
+            // NOTIZ (vorherige Farbe): fill: lukb-blue (#005A9C)
+            #text(font: font-heading, weight: "medium", size: 10.5pt, fill: lukb-blue-600)[#sub-line]
           ]
         ],
         align(right + bottom)[
@@ -538,7 +541,7 @@
   let fig-box = block(
     width: 100%,
     breakable: false,
-    stroke: (top: 1.5pt + lukb-navy, bottom: 0.6pt + lukb-border),
+    stroke: (top: 0.75pt + lukb-navy, bottom: 0.6pt + lukb-border),
     inset: (top: if is-margin { 6pt } else { 7pt }, bottom: if is-margin { 5pt } else { 6pt }),
     above: if is-floating { 0pt } else if is-margin { 0.4em } else { 2.0em },
     below: if is-floating { 0pt } else if is-margin { 0.6em } else { 1.1em }
@@ -659,7 +662,7 @@
       width: 100%,
       sticky: true,
       breakable: false,
-      stroke: (top: if is-factsheet { 1.2pt + lukb-navy } else { 1.5pt + lukb-navy }),
+      stroke: (top: if is-factsheet { 0.6pt + lukb-navy } else { 0.75pt + lukb-navy }),
       inset: (top: if is-factsheet { 4pt } else if is-margin { 6pt } else { 7pt }),
       above: 0pt,
       below: if blk.title != "" or blk.subtitle != "" { if is-factsheet { 3pt } else if is-margin { 5pt } else { 6pt } } else { 2pt }
