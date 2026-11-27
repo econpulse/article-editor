@@ -80,6 +80,7 @@ def bind_number_units(text: str) -> str:
     out = _NUM_SYMBOL_UNIT_RE.sub("\u00a0", out)
     out = _NUM_WORD_UNIT_RE.sub("\u00a0\\1", out)
     out = _MAGNITUDE_CURRENCY_RE.sub("\\1\u00a0", out)
+    out = _ORDINAL_PERIOD_RE.sub("\u00a0\\1", out)
     return out
 
 
@@ -114,6 +115,15 @@ _NUM_WORD_UNIT_RE = re.compile(
 _MAGNITUDE_CURRENCY_RE = re.compile(
     r"(?<![A-Za-zÄÖÜäöüß])(Mio\.?|Mrd\.?|Bio\.?|Tsd\.?)[ \t]+"
     r"(?=(?:CHF|EUR|USD|GBP|JPY|CNY|RMB|AUD|CAD|SEK|NOK|DKK)\b)"
+)
+
+_ORDINAL_PERIOD_RE = re.compile(
+    r"(?<=\d\.)[ \t]+("
+    r"(?:Quartal(?:s|e|en)?|Halbjahr(?:es|s|e|en)?|Semester(?:s)?|Trimester(?:s)?|"
+    r"Jahrhundert(?:s|e|en)?|Jahrzehnt(?:s|e|en)?|"
+    r"Januar|Jänner|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember)"
+    r"(?=$|[\s,;:.\-–—/)\]}»\"'!?])"
+    r")"
 )
 
 

@@ -40,9 +40,16 @@ def test_bind_number_units_positive_and_negative_cases():
         "10\u00a0km, 5\u00a0m, 20\u00a0kg, 24\u00a0h, 5\u00a0min, 10\u00a0kWh, 100\u00a0m/s"
     )
 
+    # Ordinalzahlen + Zeit-/Kalenderangaben
+    assert bind_number_units("im 3. Quartal 2026") == "im 3.\u00a0Quartal 2026"
+    assert bind_number_units("des 3. Quartals") == "des 3.\u00a0Quartals"
+    assert bind_number_units("1. Halbjahr und 2. Semester") == "1.\u00a0Halbjahr und 2.\u00a0Semester"
+    assert bind_number_units("8. November 2026") == "8.\u00a0November 2026"
+    assert bind_number_units("21. Jahrhundert") == "21.\u00a0Jahrhundert"
+
     # Negative Fälle: normale Wörter und Zeilenumbrüche bleiben unberührt
     assert bind_number_units("10 Jahre später") == "10 Jahre später"
-    assert bind_number_units("8. November 2026") == "8. November 2026"
+    assert bind_number_units("3. Punkt auf der Liste") == "3. Punkt auf der Liste"
     assert bind_number_units("Artikel 10 mit Bild") == "Artikel 10 mit Bild"
     assert bind_number_units("10 Monate Laufzeit") == "10 Monate Laufzeit"
     assert bind_number_units("10 % und 20 %") == "10\u00a0% und 20\u00a0%"
