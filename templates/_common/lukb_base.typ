@@ -541,7 +541,7 @@
   let fig-box = block(
     width: 100%,
     breakable: false,
-    stroke: (top: 0.75pt + lukb-navy, bottom: 0.6pt + lukb-border),
+    stroke: (top: 0.75pt + lukb-navy),
     inset: (top: if is-margin { 6pt } else { 7pt }, bottom: if is-margin { 5pt } else { 6pt }),
     above: if is-floating { 0pt } else if is-margin { 0.4em } else { 2.0em },
     below: if is-floating { 0pt } else if is-margin { 0.6em } else { 1.1em }
@@ -841,7 +841,7 @@
                 fill: (x, y) => last-bg,
                 ..render-row-cells(last-idx, last-row, is-total)
               )
-              #render-box-source(blk.source, is-margin: is-margin, with-border: true)
+              #render-box-source(blk.source, is-margin: is-margin, with-border: false)
             ]
           ),
         )
@@ -851,7 +851,7 @@
     )
 
     #if not split-last-row-for-source [
-      #render-box-source(blk.source, is-margin: is-margin, with-border: true)
+      #render-box-source(blk.source, is-margin: is-margin, with-border: false)
     ]
   ]
 

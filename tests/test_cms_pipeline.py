@@ -1233,7 +1233,7 @@ def test_hybrid_full_width_float_and_overflow_fallback():
         ],
         rows=med_rows,
     )
-    long_intro = "<p>" + ("Langer Fliesstext der die erste Seite halb füllt. " * 45) + "</p>"
+    long_intro = "<p>" + ("Langer Fliesstext der die erste Seite halb füllt. " * 52) + "</p>"
     for pos_mode in ("auto", "top", "bottom"):
         tbl_dict = med_tbl.model_dump()
         tbl_dict["full_position"] = pos_mode
