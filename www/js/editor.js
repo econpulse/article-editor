@@ -2634,6 +2634,9 @@
     window.Shiny.addCustomMessageHandler("lukb_db_chart_svg", function (msg) {
       if (!msg || !msg.block_id || !msg.data_uri) return;
       state.assetCache[msg.block_id] = msg.data_uri;
+      if (msg.axis_defaults && typeof E.applyChartAxisDefaults === "function") {
+        E.applyChartAxisDefaults(msg.block_id, msg.axis_defaults);
+      }
       const chartImg = document.querySelector(
         '.db-chart-preview-img[data-block-id="' + msg.block_id + '"]'
       );
@@ -2646,6 +2649,9 @@
     window.Shiny.addCustomMessageHandler("lukb_custom_chart_svg", function (msg) {
       if (!msg || !msg.block_id || !msg.data_uri) return;
       state.assetCache[msg.block_id] = msg.data_uri;
+      if (msg.axis_defaults && typeof E.applyChartAxisDefaults === "function") {
+        E.applyChartAxisDefaults(msg.block_id, msg.axis_defaults);
+      }
       const chartImg = document.getElementById("custom-chart-preview-img-" + msg.block_id);
       if (chartImg) {
         chartImg.src = msg.data_uri;

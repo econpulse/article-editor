@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import html
+import json
 import logging
+import re
 from shiny import Inputs, Outputs, Session, reactive
 
 from database.repository import search_tickers
@@ -51,11 +54,19 @@ def register_preview_handlers(
         else:
             svg_markup = await asyncio.to_thread(generate_custom_chart_svg, blk, True)
         b64 = base64.b64encode(svg_markup.encode("utf-8")).decode("ascii")
+        axis_defaults = None
+        m_axes = re.search(r'data-axes-meta="([^"]+)"', svg_markup[:600])
+        if m_axes:
+            try:
+                axis_defaults = json.loads(html.unescape(m_axes.group(1)))
+            except Exception:
+                axis_defaults = None
         await session.send_custom_message(
             message_name,
             {
                 "block_id": bid,
                 "data_uri": f"data:image/svg+xml;base64,{b64}",
+                "axis_defaults": axis_defaults,
             },
         )
 

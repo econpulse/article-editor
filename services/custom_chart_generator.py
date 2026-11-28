@@ -35,6 +35,7 @@ from services.chart_common import (
     compute_legend_item_positions,
     compute_plot_height_px,
     format_axis_ticks,
+    normalize_y_axis_config,
     open_svg_document,
     parse_flexible_date,
     parse_number,
@@ -977,6 +978,8 @@ def _render_timeseries_svg(
             enabled = s.get("enabled", True) if isinstance(s, dict) else getattr(s, "enabled", True)
             label = s.get("label") if isinstance(s, dict) else getattr(s, "label", "")
             ctype = s.get("chart_type") if isinstance(s, dict) else getattr(s, "chart_type", "line")
+            y_ax_raw = s.get("y_axis") if isinstance(s, dict) else getattr(s, "y_axis", "left")
+            y_ax = "right" if str(y_ax_raw or "left").strip().lower() == "right" else "left"
             if enabled and field in columns and field != x_col:
                 configured_series.append(
                     {
@@ -984,6 +987,7 @@ def _render_timeseries_svg(
                         "col_idx": columns.index(field),
                         "label": label if label else field,
                         "chart_type": ctype if ctype in ("line", "step", "dot", "area", "bar") else "line",
+                        "y_axis": y_ax,
                         "color": active_palette[len(configured_series) % len(active_palette)],
                     }
                 )
@@ -997,6 +1001,7 @@ def _render_timeseries_svg(
                         "col_idx": col_i,
                         "label": col,
                         "chart_type": "line",
+                        "y_axis": "left",
                         "color": active_palette[len(configured_series) % len(active_palette)],
                     }
                 )
@@ -1043,6 +1048,7 @@ def _render_timeseries_svg(
                 "chart_type": s["chart_type"],
                 "chart_types": [s["chart_type"]],
                 "chart_types_set": {s["chart_type"]},
+                "y_axis": s.get("y_axis", "left"),
                 "points": pts,
                 "points_map": {d: v for d, v in pts},
             }
@@ -1087,6 +1093,7 @@ def _compute_custom_chart_cache_key(
                     "label": str(s.get("label") or ""),
                     "chart_type": str(s.get("chart_type") or "line"),
                     "enabled": bool(s.get("enabled", True)),
+                    "y_axis": "right" if str(s.get("y_axis") or "left").strip().lower() == "right" else "left",
                 }
             )
         else:
@@ -1096,6 +1103,7 @@ def _compute_custom_chart_cache_key(
                     "label": str(getattr(s, "label", "") or ""),
                     "chart_type": str(getattr(s, "chart_type", "line") or "line"),
                     "enabled": bool(getattr(s, "enabled", True)),
+                    "y_axis": "right" if str(getattr(s, "y_axis", "left") or "left").strip().lower() == "right" else "left",
                 }
             )
 
@@ -1126,6 +1134,8 @@ def _compute_custom_chart_cache_key(
         "orientation": str(block_data.get("orientation") or "vertical").strip().lower(),
         "color_by_category": bool(block_data.get("color_by_category", False)),
         "bar_mode": str(block_data.get("bar_mode") or "grouped").strip(),
+        "y_axis_left": normalize_y_axis_config(block_data.get("y_axis_left")),
+        "y_axis_right": normalize_y_axis_config(block_data.get("y_axis_right")),
         "embed_fonts": bool(embed_fonts),
     }
     raw_json = json.dumps(key_payload, sort_keys=True, ensure_ascii=False)

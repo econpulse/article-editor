@@ -227,6 +227,219 @@
     };
   }
 
+  const RIGHT_AXIS_LEGEND_SUFFIX = " (r. Achse)";
+
+  function syncSeriesAxisLegendLabel(sItem, newAxis, fallbackName, clearIfEqualsFallback) {
+    if (!sItem) return;
+    const cur = String(sItem.label || "").trim();
+    const fb = String(fallbackName || "").trim();
+    if (newAxis === "right") {
+      if (!cur) {
+        sItem.label = fb ? fb + RIGHT_AXIS_LEGEND_SUFFIX : "(r. Achse)";
+      } else if (cur.indexOf("(r. Achse)") === -1) {
+        sItem.label = cur + RIGHT_AXIS_LEGEND_SUFFIX;
+      }
+    } else {
+      if (cur.slice(-RIGHT_AXIS_LEGEND_SUFFIX.length) === RIGHT_AXIS_LEGEND_SUFFIX) {
+        const base = cur.slice(0, -RIGHT_AXIS_LEGEND_SUFFIX.length).trim();
+        if (clearIfEqualsFallback && fb && base === fb) {
+          sItem.label = "";
+        } else {
+          sItem.label = base;
+        }
+      } else if (cur === "(r. Achse)") {
+        sItem.label = clearIfEqualsFallback ? "" : fb;
+      }
+    }
+  }
+
+  function createSeriesAxisToggle(sItem, onSwitch) {
+    const curAxis = sItem && sItem.y_axis === "right" ? "right" : "left";
+    if (sItem && sItem.y_axis !== "right") sItem.y_axis = "left";
+
+    const wrap = document.createElement("div");
+    wrap.className = "db-series-type-toggles";
+    wrap.title = "Y-Achse wählen (Links / Rechts)";
+
+    const btnLeft = document.createElement("button");
+    btnLeft.type = "button";
+    btnLeft.className = "db-type-toggle-btn" + (curAxis === "left" ? " active" : "");
+    btnLeft.textContent = "L";
+    btnLeft.title = "Auf linker Y-Achse plotten";
+
+    const btnRight = document.createElement("button");
+    btnRight.type = "button";
+    btnRight.className = "db-type-toggle-btn" + (curAxis === "right" ? " active" : "");
+    btnRight.textContent = "R";
+    btnRight.title = "Auf rechter Y-Achse plotten";
+
+    function selectAxis(nextAxis) {
+      if (!sItem) return;
+      const prev = sItem.y_axis === "right" ? "right" : "left";
+      if (prev === nextAxis) return;
+      sItem.y_axis = nextAxis;
+      btnLeft.classList.toggle("active", nextAxis === "left");
+      btnRight.classList.toggle("active", nextAxis === "right");
+      if (typeof onSwitch === "function") onSwitch(nextAxis);
+    }
+
+    btnLeft.addEventListener("click", function () { selectAxis("left"); });
+    btnRight.addEventListener("click", function () { selectAxis("right"); });
+
+    wrap.appendChild(btnLeft);
+    wrap.appendChild(btnRight);
+    return wrap;
+  }
+
+  function applyChartAxisDefaults(blockId, axisDefaults) {
+    if (!blockId || !axisDefaults) return;
+    if (!state.chartAxisDefaults) state.chartAxisDefaults = {};
+    state.chartAxisDefaults[blockId] = axisDefaults;
+
+    ["left", "right"].forEach(function (side) {
+      const sideDefaults = axisDefaults[side];
+      ["min", "max", "step"].forEach(function (prop) {
+        const inp = document.querySelector(
+          'input.db-axis-num-input[data-axis-block-id="' + blockId + '"][data-axis-side="' + side + '"][data-axis-prop="' + prop + '"]'
+        );
+        if (!inp) return;
+        if (sideDefaults && sideDefaults[prop] !== undefined && sideDefaults[prop] !== null) {
+          inp.placeholder = "Auto (" + sideDefaults[prop] + ")";
+          inp.title = "Pretty-Break-Vorschlag: " + sideDefaults[prop];
+        } else {
+          inp.placeholder = "Auto";
+          inp.title = "";
+        }
+      });
+    });
+  }
+
+  function createChartYAxisControls(blk, onChange) {
+    if (!blk.y_axis_left || typeof blk.y_axis_left !== "object") {
+      blk.y_axis_left = { min: null, max: null, step: null };
+    }
+    if (!blk.y_axis_right || typeof blk.y_axis_right !== "object") {
+      blk.y_axis_right = { min: null, max: null, step: null };
+    }
+
+    const bar = document.createElement("div");
+    bar.className = "db-chart-axis-bar";
+    const cachedDefaults = state.chartAxisDefaults && state.chartAxisDefaults[blk.id];
+
+    function buildAxisRow(titleText, axisKey, side) {
+      const cfg = blk[axisKey];
+      const sideDefaults = cachedDefaults && cachedDefaults[side];
+      const row = document.createElement("div");
+      row.className = "db-chart-axis-row";
+
+      const lbl = document.createElement("span");
+      lbl.className = "field-label";
+      lbl.style.margin = "0";
+      lbl.textContent = titleText;
+      row.appendChild(lbl);
+
+      const inputs = {};
+      [
+        { key: "min", label: "Min" },
+        { key: "max", label: "Max" },
+        { key: "step", label: "Step" },
+      ].forEach(function (spec) {
+        const fieldWrap = document.createElement("label");
+        fieldWrap.className = "db-axis-field";
+
+        const sub = document.createElement("span");
+        sub.textContent = spec.label;
+
+        const inp = document.createElement("input");
+        inp.type = "number";
+        inp.step = "any";
+        if (spec.key === "step") inp.min = "0";
+        inp.className = "cms-input db-axis-num-input";
+        inp.dataset.axisBlockId = blk.id || "";
+        inp.dataset.axisSide = side;
+        inp.dataset.axisProp = spec.key;
+        if (sideDefaults && sideDefaults[spec.key] !== undefined && sideDefaults[spec.key] !== null) {
+          inp.placeholder = "Auto (" + sideDefaults[spec.key] + ")";
+          inp.title = "Pretty-Break-Vorschlag: " + sideDefaults[spec.key];
+        } else {
+          inp.placeholder = "Auto";
+        }
+        inp.value = cfg[spec.key] !== null && cfg[spec.key] !== undefined ? String(cfg[spec.key]) : "";
+
+        inp.addEventListener("change", function () {
+          const raw = inp.value.trim();
+          if (raw === "") {
+            cfg[spec.key] = null;
+          } else {
+            const num = parseFloat(raw.replace(",", "."));
+            if (isNaN(num) || !isFinite(num) || (spec.key === "step" && num <= 0)) {
+              cfg[spec.key] = null;
+              inp.value = "";
+            } else {
+              cfg[spec.key] = num;
+            }
+          }
+          if (typeof onChange === "function") onChange();
+        });
+
+        inputs[spec.key] = inp;
+        fieldWrap.appendChild(sub);
+        fieldWrap.appendChild(inp);
+        row.appendChild(fieldWrap);
+      });
+
+      const actionsWrap = document.createElement("div");
+      actionsWrap.style.display = "inline-flex";
+      actionsWrap.style.gap = "4px";
+
+      const applyBtn = document.createElement("button");
+      applyBtn.type = "button";
+      applyBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+      applyBtn.style.padding = "3px 7px";
+      applyBtn.style.fontSize = "11px";
+      applyBtn.textContent = "Vorschlag";
+      applyBtn.title = "Berechnete Pretty-Break-Werte als editierbare Startwerte übernehmen";
+      applyBtn.addEventListener("click", function () {
+        const latest = state.chartAxisDefaults && state.chartAxisDefaults[blk.id] && state.chartAxisDefaults[blk.id][side];
+        if (!latest) return;
+        ["min", "max", "step"].forEach(function (k) {
+          if (latest[k] !== undefined && latest[k] !== null) {
+            cfg[k] = latest[k];
+            inputs[k].value = String(latest[k]);
+          }
+        });
+        if (typeof onChange === "function") onChange();
+      });
+
+      const resetBtn = document.createElement("button");
+      resetBtn.type = "button";
+      resetBtn.className = "btn-lukb btn-lukb-ghost btn-lukb-sm";
+      resetBtn.style.padding = "3px 7px";
+      resetBtn.style.fontSize = "11px";
+      resetBtn.textContent = "Auto";
+      resetBtn.title = "Min, Max und Step auf Automatik zurücksetzen";
+      resetBtn.addEventListener("click", function () {
+        cfg.min = null;
+        cfg.max = null;
+        cfg.step = null;
+        inputs.min.value = "";
+        inputs.max.value = "";
+        inputs.step.value = "";
+        if (typeof onChange === "function") onChange();
+      });
+
+      actionsWrap.appendChild(applyBtn);
+      actionsWrap.appendChild(resetBtn);
+      row.appendChild(actionsWrap);
+
+      return row;
+    }
+
+    bar.appendChild(buildAxisRow("Linke Y-Achse:", "y_axis_left", "left"));
+    bar.appendChild(buildAxisRow("Rechte Y-Achse:", "y_axis_right", "right"));
+    return bar;
+  }
+
   function createChartHeightBar(blk, presets, onChange) {
     const heightPresetList =
       Array.isArray(presets) && presets.length > 0 ? presets : DEFAULT_CHART_HEIGHT_PRESETS;
@@ -1446,12 +1659,15 @@
     CHART_PALETTES: CHART_PALETTES,
     DEFAULT_CHART_HEIGHT_PRESETS: DEFAULT_CHART_HEIGHT_PRESETS,
     MAX_UNDO_STACK: MAX_UNDO_STACK,
+    applyChartAxisDefaults: applyChartAxisDefaults,
     clearUndoStack: clearUndoStack,
     closeFigureContextMenu: closeFigureContextMenu,
     createChartHeightBar: createChartHeightBar,
     createChartPaletteBar: createChartPaletteBar,
+    createChartYAxisControls: createChartYAxisControls,
     createDefaultBlock: createDefaultBlock,
     createFullLayoutControl: createFullLayoutControl,
+    createSeriesAxisToggle: createSeriesAxisToggle,
     createSimpleLayoutSelect: createSimpleLayoutSelect,
     deepClone: deepClone,
     ensureUndoToastContainer: ensureUndoToastContainer,
@@ -1479,6 +1695,7 @@
     state: state,
     statsDebounceTimer: statsDebounceTimer,
     submitForReview: submitForReview,
+    syncSeriesAxisLegendLabel: syncSeriesAxisLegendLabel,
     uid: uid,
     undoToastTimer: undoToastTimer,
     updateLiveStatsCounter: updateLiveStatsCounter,

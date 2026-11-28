@@ -46,6 +46,7 @@ from services.chart_common import (
     _render_empty_state_svg,
     compute_plot_height_px,
     format_axis_ticks,
+    normalize_y_axis_config,
     render_timeseries_svg,
     resolve_chart_palette,
     resolve_legend_columns,
@@ -120,14 +121,17 @@ def _compute_db_chart_cache_key(
         if isinstance(item, dict):
             t_str = str(item.get("ticker") or "").strip()
             lbl = str(item.get("label") or "").strip()
+            y_ax = "right" if str(item.get("y_axis") or "left").strip().lower() == "right" else "left"
         else:
             t_str = str(getattr(item, "ticker", "") or "").strip()
             lbl = str(getattr(item, "label", "") or "").strip()
+            y_ax = "right" if str(getattr(item, "y_axis", "left") or "left").strip().lower() == "right" else "left"
         normalized_series.append(
             {
                 "ticker": t_str,
                 "label": lbl,
                 "chart_types": _extract_series_chart_types(item),
+                "y_axis": y_ax,
             }
         )
 
@@ -142,6 +146,8 @@ def _compute_db_chart_cache_key(
         "palette": resolve_chart_palette(block_data),
         "legend_columns": str(leg_cols) if leg_cols > 0 else "auto",
         "show_legend": resolve_show_legend(block_data),
+        "y_axis_left": normalize_y_axis_config(block_data.get("y_axis_left")),
+        "y_axis_right": normalize_y_axis_config(block_data.get("y_axis_right")),
         "embed_fonts": bool(embed_fonts),
         "max_date": str(max_date or "").strip(),
         "data_revision": _DB_CHART_DATA_REVISION,
@@ -180,9 +186,11 @@ def generate_db_chart_svg(
         if isinstance(item, dict):
             t_str = str(item.get("ticker") or "").strip()
             lbl = str(item.get("label") or "").strip()
+            y_ax = "right" if str(item.get("y_axis") or "left").strip().lower() == "right" else "left"
         else:
             t_str = str(getattr(item, "ticker", "") or "").strip()
             lbl = str(getattr(item, "label", "") or "").strip()
+            y_ax = "right" if str(getattr(item, "y_axis", "left") or "left").strip().lower() == "right" else "left"
         if t_str:
             ctypes = _extract_series_chart_types(item)
             configured_items.append(
@@ -191,6 +199,7 @@ def generate_db_chart_svg(
                     "chart_types": ctypes,
                     "chart_type": ctypes[0],
                     "label": lbl,
+                    "y_axis": y_ax,
                     "color": active_palette[raw_idx % len(active_palette)],
                 }
             )
@@ -242,6 +251,7 @@ def generate_db_chart_svg(
                 "chart_type": it["chart_types"][0],
                 "chart_types": it["chart_types"],
                 "chart_types_set": set(it["chart_types"]),
+                "y_axis": it["y_axis"],
                 "color": it["color"],
                 "points": pts,
                 "points_map": {d: v for d, v in pts},

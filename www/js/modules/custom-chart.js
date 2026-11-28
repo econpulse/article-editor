@@ -149,6 +149,7 @@
           label: col,
           chart_type: blk.chart_type === "timeseries" ? "line" : "bar",
           enabled: true,
+          y_axis: "left",
         });
       }
     });
@@ -822,11 +823,11 @@
           });
           rowEl.appendChild(labelInp);
 
-          // Bei Zeitreihen: Darstellungsart wählbar (Linie, Stufen, Balken, Fläche, Punkte)
+          // Bei Zeitreihen: Darstellungsart & Y-Achse (Links / Rechts) wählbar
           if (blk.chart_type === "timeseries") {
             const styleSel = document.createElement("select");
             styleSel.className = "cms-select";
-            styleSel.style.width = "110px";
+            styleSel.style.width = "100px";
             styleSel.style.height = "28px";
             styleSel.style.fontSize = "11.5px";
             styleSel.innerHTML =
@@ -842,12 +843,30 @@
               requestCustomChartPreview(blk, true);
             });
             rowEl.appendChild(styleSel);
+
+            const axisToggle = E.createSeriesAxisToggle(s, function (nextAxis) {
+              E.syncSeriesAxisLegendLabel(s, nextAxis, s.field, false);
+              labelInp.value = s.label || s.field;
+              markDirty();
+              requestCustomChartPreview(blk, true);
+              if (typeof flushAutosave === "function") flushAutosave(false);
+            });
+            rowEl.appendChild(axisToggle);
           }
 
           seriesCard.appendChild(rowEl);
         });
       }
       configContainer.appendChild(seriesCard);
+
+      if (blk.chart_type === "timeseries") {
+        const yAxisBar = E.createChartYAxisControls(blk, function () {
+          markDirty();
+          requestCustomChartPreview(blk, true);
+          if (typeof flushAutosave === "function") flushAutosave(false);
+        });
+        configContainer.appendChild(yAxisBar);
+      }
     }
 
     rebuildConfigSection();

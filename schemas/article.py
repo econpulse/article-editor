@@ -175,6 +175,34 @@ class MarginAnchorBlockBase(BaseModel):
         return _normalize_share_mode(v)
 
 
+class ChartYAxisConfig(BaseModel):
+    """Optionale manuelle Skalierung für eine Y-Achse (None = Auto)."""
+
+    min: Optional[float] = Field(default=None, description="Manuelles Achsen-Minimum (None = Auto)")
+    max: Optional[float] = Field(default=None, description="Manuelles Achsen-Maximum (None = Auto)")
+    step: Optional[float] = Field(default=None, description="Manuelle Schrittweite (None = Auto)")
+
+    @field_validator("min", "max", "step", mode="before")
+    @classmethod
+    def validate_opt_float(cls, v: Any) -> Optional[float]:
+        if v is None or v == "":
+            return None
+        try:
+            f = float(v)
+            if math.isnan(f) or math.isinf(f):
+                return None
+            return f
+        except (ValueError, TypeError):
+            return None
+
+    @field_validator("step", mode="after")
+    @classmethod
+    def validate_positive_step(cls, v: Optional[float]) -> Optional[float]:
+        if v is not None and v <= 0:
+            return None
+        return v
+
+
 class ChartBlockBase(MarginAnchorBlockBase):
     """Gemeinsame Basis für Diagramm-Blöcke (DB-Chart und Custom-Chart)."""
 
@@ -196,7 +224,20 @@ class ChartBlockBase(MarginAnchorBlockBase):
         default=True,
         description="Ob die Legende im Chart angezeigt wird",
     )
+    y_axis_left: ChartYAxisConfig = Field(
+        default_factory=ChartYAxisConfig,
+        description="Optionale manuelle Skalierung der linken Y-Achse",
+    )
+    y_axis_right: ChartYAxisConfig = Field(
+        default_factory=ChartYAxisConfig,
+        description="Optionale manuelle Skalierung der rechten Y-Achse",
+    )
     asset_id: str = Field(default="", description="Gecachtes SVG-Asset in io_assets")
+
+    @field_validator("y_axis_left", "y_axis_right", mode="before")
+    @classmethod
+    def validate_y_axis_cfg(cls, v: Any) -> Any:
+        return {} if v is None else v
 
     @field_validator("chart_height_mm", mode="before")
     @classmethod
@@ -284,6 +325,12 @@ class TimeSeriesItem(BaseModel):
         description="Eine oder mehrere kombinierte Darstellungsarten derselben Zeitreihe (z.B. ['line', 'dot'] oder ['step', 'area'])",
     )
     label: str = Field(default="", description="Optionaler Legenden-Name (überschreibt ts_db.name)")
+    y_axis: Literal["left", "right"] = Field(default="left", description="Zugewiesene Y-Achse ('left' oder 'right')")
+
+    @field_validator("y_axis", mode="before")
+    @classmethod
+    def validate_y_axis(cls, v: Any) -> str:
+        return "right" if str(v or "left").strip().lower() == "right" else "left"
 
     @model_validator(mode="before")
     @classmethod
@@ -342,6 +389,12 @@ class CustomChartSeriesItem(BaseModel):
     label: str = Field(default="", description="Benutzerdefiniertes Label für die Legende")
     chart_type: ChartSeriesType = Field(default="line", description="Darstellungsart für Zeitreihen")
     enabled: bool = Field(default=True, description="Ob die Serie im Chart dargestellt wird")
+    y_axis: Literal["left", "right"] = Field(default="left", description="Zugewiesene Y-Achse ('left' oder 'right')")
+
+    @field_validator("y_axis", mode="before")
+    @classmethod
+    def validate_y_axis(cls, v: Any) -> str:
+        return "right" if str(v or "left").strip().lower() == "right" else "left"
 
 
 class CustomChartBlock(ChartBlockBase):

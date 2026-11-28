@@ -643,6 +643,15 @@
           markDirty();
         });
 
+        const axisToggle = E.createSeriesAxisToggle(sItem, function (nextAxis) {
+          const fallbackName = lookupTickerName(sItem.ticker) || sItem.ticker;
+          E.syncSeriesAxisLegendLabel(sItem, nextAxis, fallbackName, true);
+          labelInp.value = sItem.label || "";
+          requestDbChartPreview(blk, true);
+          markDirty();
+          if (typeof flushAutosave === "function") flushAutosave(false);
+        });
+
         const delBtn = document.createElement("button");
         delBtn.type = "button";
         delBtn.className = "btn-icon-only danger";
@@ -660,6 +669,7 @@
         row.appendChild(colorDot);
         row.appendChild(tickerInp);
         row.appendChild(typeTogglesWrap);
+        row.appendChild(axisToggle);
         row.appendChild(labelInp);
         row.appendChild(delBtn);
         seriesListEl.appendChild(row);
@@ -668,13 +678,21 @@
 
     addSeriesBtn.addEventListener("click", function () {
       if (blk.series.length >= 5) return;
-      blk.series.push({ ticker: "", chart_type: "line", chart_types: ["line"], label: "" });
+      blk.series.push({ ticker: "", chart_type: "line", chart_types: ["line"], label: "", y_axis: "left" });
       renderSeriesRows();
       markDirty();
     });
 
     renderSeriesRows();
     container.appendChild(seriesSection);
+
+    // Zeile 4b: Y-Achsen-Skalierung (Min, Max, Step für linke & rechte Y-Achse)
+    const yAxisBar = E.createChartYAxisControls(blk, function () {
+      requestDbChartPreview(blk, true);
+      markDirty();
+      if (typeof flushAutosave === "function") flushAutosave(false);
+    });
+    container.appendChild(yAxisBar);
 
     // Zeile 5: Eigener Container für Höhe der Chartfläche (Y-Achse in mm)
     const heightBar = E.createChartHeightBar(blk, null, function () {

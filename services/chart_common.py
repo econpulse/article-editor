@@ -497,6 +497,140 @@ def _compute_nice_ticks(min_val: float, max_val: float, target_ticks: int = 5) -
     return ticks
 
 
+def normalize_y_axis_config(axis_cfg: Any) -> tuple[float | None, float | None, float | None]:
+    """Extrahiert (min, max, step) aus einer optionalen Y-Achsen-Konfiguration (dict oder Objekt)."""
+    if axis_cfg is None:
+        return None, None, None
+
+    def _opt_float(key: str) -> float | None:
+        raw = axis_cfg.get(key) if isinstance(axis_cfg, dict) else getattr(axis_cfg, key, None)
+        if raw is None or raw == "":
+            return None
+        try:
+            f = float(raw)
+            if math.isnan(f) or math.isinf(f):
+                return None
+            return f
+        except (ValueError, TypeError):
+            return None
+
+    c_min = _opt_float("min")
+    c_max = _opt_float("max")
+    c_step = _opt_float("step")
+    if c_step is not None and c_step <= 0:
+        c_step = None
+    return c_min, c_max, c_step
+
+
+def _compute_aligned_nice_ticks(
+    min_val: float,
+    max_val: float,
+    interval_count: int,
+) -> tuple[list[float], float, float, float]:
+    """
+    Berechnet schöne Pretty-Break-Ticks mit exakt `interval_count` Intervallen
+    (also `interval_count + 1` Ticks), sodass die rechte Y-Achse exakt auf den
+    horizontalen Gitterlinien der linken Y-Achse liegt.
+    """
+    n_int = max(1, int(interval_count))
+    if min_val > max_val:
+        min_val, max_val = max_val, min_val
+    if math.isclose(min_val, max_val, abs_tol=1e-9):
+        delta = abs(min_val) * 0.1 if abs(min_val) > 1e-6 else 1.0
+        min_val -= delta
+        max_val += delta
+
+    span = max(1e-9, max_val - min_val)
+    raw_step = span / n_int
+    mag = 10.0 ** math.floor(math.log10(raw_step))
+
+    chosen_step = raw_step
+    chosen_min = min_val
+    for factor in (1.0, 2.0, 2.5, 5.0, 10.0, 20.0, 25.0, 50.0, 100.0):
+        cand_step = factor * mag
+        cand_min = math.floor(min_val / cand_step) * cand_step
+        cand_max = cand_min + n_int * cand_step
+        if cand_max >= max_val - cand_step * 1e-6:
+            chosen_step = cand_step
+            chosen_min = cand_min
+            break
+
+    ticks = [round(chosen_min + i * chosen_step, 8) for i in range(n_int + 1)]
+    return ticks, ticks[0], ticks[-1], chosen_step
+
+
+def _resolve_axis_scale(
+    raw_min_y: float,
+    raw_max_y: float,
+    axis_cfg: Any = None,
+    target_ticks: int = 5,
+    align_intervals: int | None = None,
+) -> tuple[list[float], float, float, float]:
+    """
+    Berechnet (ticks, y_min, y_max, y_step) unter Berücksichtigung optionaler manueller
+    Vorgaben für min, max und step. Ist `align_intervals` gesetzt und keine manuelle
+    Vorgabe aktiv, werden Pretty-Breaks mit exakt `align_intervals` Intervallen erzeugt.
+    """
+    c_min, c_max, c_step = normalize_y_axis_config(axis_cfg)
+    if c_min is None and c_max is None and c_step is None:
+        if align_intervals is not None and align_intervals >= 1:
+            return _compute_aligned_nice_ticks(raw_min_y, raw_max_y, align_intervals)
+        ticks = _compute_nice_ticks(raw_min_y, raw_max_y, target_ticks=target_ticks)
+        y_min = ticks[0]
+        y_max = ticks[-1]
+        y_step = ticks[1] - ticks[0] if len(ticks) > 1 else 1.0
+        return ticks, y_min, y_max, y_step
+
+    eff_min = c_min if c_min is not None else raw_min_y
+    eff_max = c_max if c_max is not None else raw_max_y
+
+    if eff_min >= eff_max:
+        if c_min is not None and c_max is None:
+            eff_max = eff_min + (abs(eff_min) * 0.1 if abs(eff_min) > 1e-6 else 1.0)
+        elif c_max is not None and c_min is None:
+            eff_min = eff_max - (abs(eff_max) * 0.1 if abs(eff_max) > 1e-6 else 1.0)
+        else:
+            eff_min, eff_max = raw_min_y, raw_max_y
+            if eff_min >= eff_max:
+                delta = abs(eff_min) * 0.1 if abs(eff_min) > 1e-6 else 1.0
+                eff_min -= delta
+                eff_max += delta
+            c_min = None
+            c_max = None
+
+    span = max(1e-9, eff_max - eff_min)
+    step = c_step if c_step is not None else _nice_step(span, target_ticks=target_ticks)
+    if step <= 0 or math.isnan(step) or math.isinf(step):
+        step = _nice_step(span, target_ticks=target_ticks)
+
+    if span / step > 25.0:
+        if c_step is not None:
+            mult = math.ceil((span / step) / 20.0)
+            step = step * max(1, mult)
+        else:
+            step = _nice_step(span, target_ticks=target_ticks)
+
+    tick_start = eff_min if c_min is not None else math.floor(eff_min / step) * step
+    tick_end = eff_max if c_max is not None else math.ceil(eff_max / step) * step
+
+    ticks: list[float] = []
+    curr = tick_start
+    safety = 0
+    while curr <= tick_end + step * 1e-6 and safety < 30:
+        ticks.append(round(curr, 8))
+        curr += step
+        safety += 1
+
+    if len(ticks) < 2:
+        ticks = [round(tick_start, 8), round(tick_end, 8)]
+
+    y_min = eff_min if c_min is not None else ticks[0]
+    y_max = eff_max if c_max is not None else ticks[-1]
+    if y_min >= y_max:
+        y_max = y_min + step
+    return ticks, y_min, y_max, step
+
+
 def _count_needed_decimals(val: float, max_check: int = 6) -> int:
     """Ermittelt die minimale Anzahl an Nachkommastellen für val (bis max_check)."""
     if math.isnan(val) or math.isinf(val) or abs(val) < 1e-9:
@@ -709,66 +843,101 @@ def render_timeseries_svg(
 
     span_ord = max(1.0, max_ord - min_ord)
 
-    y_candidates: list[float] = []
-    for s in resolved_series:
-        if "stacked_bar" not in s["chart_types_set"] or len(s["chart_types_set"]) > 1:
-            for _, v in s["points"]:
-                y_candidates.append(v)
+    left_series = [s for s in resolved_series if s.get("y_axis") != "right"]
+    right_series = [s for s in resolved_series if s.get("y_axis") == "right"]
+    has_left_axis = len(left_series) > 0
+    has_right_axis = len(right_series) > 0
 
-    stacked_series = [s for s in resolved_series if "stacked_bar" in s["chart_types_set"]]
-    if stacked_series:
-        stacked_dates = sorted({d for s in stacked_series for d, _ in s["points"]})
-        for dt in stacked_dates:
-            pos_sum = sum(
-                s["points_map"][dt]
-                for s in stacked_series
-                if dt in s["points_map"] and s["points_map"][dt] >= 0
-            )
-            neg_sum = sum(
-                s["points_map"][dt]
-                for s in stacked_series
-                if dt in s["points_map"] and s["points_map"][dt] < 0
-            )
-            y_candidates.append(pos_sum)
-            if neg_sum < 0:
-                y_candidates.append(neg_sum)
+    def _compute_series_y_range(series_list: list[dict[str, Any]]) -> tuple[float, float]:
+        y_cands: list[float] = []
+        for s in series_list:
+            if "stacked_bar" not in s["chart_types_set"] or len(s["chart_types_set"]) > 1:
+                for _, v in s["points"]:
+                    y_cands.append(v)
 
-    if has_bars:
-        y_candidates.append(0.0)
-    if rebasing == "index_100":
-        y_candidates.append(100.0)
+        stacked = [s for s in series_list if "stacked_bar" in s["chart_types_set"]]
+        if stacked:
+            stacked_dates = sorted({d for s in stacked for d, _ in s["points"]})
+            for dt in stacked_dates:
+                pos_sum = sum(
+                    s["points_map"][dt]
+                    for s in stacked
+                    if dt in s["points_map"] and s["points_map"][dt] >= 0
+                )
+                neg_sum = sum(
+                    s["points_map"][dt]
+                    for s in stacked
+                    if dt in s["points_map"] and s["points_map"][dt] < 0
+                )
+                y_cands.append(pos_sum)
+                if neg_sum < 0:
+                    y_cands.append(neg_sum)
 
-    raw_min_y = min(y_candidates) if y_candidates else 0.0
-    raw_max_y = max(y_candidates) if y_candidates else 100.0
+        if any(bool(s["chart_types_set"] & {"bar", "stacked_bar"}) for s in series_list):
+            y_cands.append(0.0)
+        if rebasing == "index_100":
+            y_cands.append(100.0)
 
-    y_ticks = _compute_nice_ticks(raw_min_y, raw_max_y, target_ticks=5)
-    y_min = y_ticks[0]
-    y_max = y_ticks[-1]
-    y_span = max(1e-9, y_max - y_min)
-    y_step = y_ticks[1] - y_ticks[0] if len(y_ticks) > 1 else 1.0
+        return (min(y_cands) if y_cands else 0.0), (max(y_cands) if y_cands else 100.0)
 
     axis_font_size = 22.5 if is_column_layout else 14.5
     legend_font_size = 20.5 if is_column_layout else 14.0
     show_legend = resolve_show_legend(block_data)
     explicit_leg_cols = resolve_explicit_legend_columns(block_data)
     legend_row_gap = 29.0 if is_column_layout else 22.0
-
-    y_tick_labels = format_axis_ticks(y_ticks, y_step)
-    max_y_label_w = max(
-        (_estimate_label_width_px(lbl, axis_font_size) for lbl in y_tick_labels),
-        default=16.0,
-    )
-    y_label_right_x = max(12.0, round(max_y_label_w, 1))
     y_axis_gap = 10.0 if is_column_layout else 9.0
+
+    if has_left_axis:
+        raw_min_l, raw_max_l = _compute_series_y_range(left_series)
+        y_ticks_left, y_min_left, y_max_left, y_step_left = _resolve_axis_scale(
+            raw_min_l, raw_max_l, block_data.get("y_axis_left"), target_ticks=5
+        )
+        y_span_left = max(1e-9, y_max_left - y_min_left)
+        y_tick_labels_left = format_axis_ticks(y_ticks_left, y_step_left)
+        max_y_left_w = max(
+            (_estimate_label_width_px(lbl, axis_font_size) for lbl in y_tick_labels_left),
+            default=16.0,
+        )
+        y_left_label_right_x = max(12.0, round(max_y_left_w, 1))
+        plot_left = y_left_label_right_x + y_axis_gap
+    else:
+        y_ticks_left, y_min_left, y_max_left, y_step_left = [0.0, 100.0], 0.0, 100.0, 100.0
+        y_span_left = 100.0
+        y_tick_labels_left = []
+        y_left_label_right_x = 0.0
+        plot_left = 10.0
+
+    svg_w = 680
+    if has_right_axis:
+        raw_min_r, raw_max_r = _compute_series_y_range(right_series)
+        left_intervals = (len(y_ticks_left) - 1) if (has_left_axis and len(y_ticks_left) >= 2) else None
+        y_ticks_right, y_min_right, y_max_right, y_step_right = _resolve_axis_scale(
+            raw_min_r,
+            raw_max_r,
+            block_data.get("y_axis_right"),
+            target_ticks=5,
+            align_intervals=left_intervals,
+        )
+        y_span_right = max(1e-9, y_max_right - y_min_right)
+        y_tick_labels_right = format_axis_ticks(y_ticks_right, y_step_right)
+        max_y_right_w = max(
+            (_estimate_label_width_px(lbl, axis_font_size) for lbl in y_tick_labels_right),
+            default=16.0,
+        )
+        y_right_label_left_x = round(svg_w - 2.0 - max(12.0, max_y_right_w), 1)
+        plot_right = y_right_label_left_x - y_axis_gap
+    else:
+        y_ticks_right, y_min_right, y_max_right, y_step_right = [0.0, 100.0], 0.0, 100.0, 100.0
+        y_span_right = 100.0
+        y_tick_labels_right = []
+        y_right_label_left_x = float(svg_w)
+        plot_right = 678.0
 
     _, plot_h = compute_plot_height_px(block_data, is_column_layout)
 
-    svg_w = 680
-    plot_left = y_label_right_x + y_axis_gap
-    plot_right = 678.0
     plot_top = 18.0
     plot_bottom = plot_top + plot_h
-    plot_w = plot_right - plot_left
+    plot_w = max(40.0, plot_right - plot_left)
 
     x_axis_label_y = plot_bottom + (31.0 if is_column_layout else 24.0)
     legend_start_y = x_axis_label_y + (34.0 if is_column_layout else 27.0)
@@ -800,18 +969,36 @@ def render_timeseries_svg(
     def x_px(dt: date) -> float:
         return plot_left + ((float(dt.toordinal()) - min_ord) / span_ord) * plot_w
 
-    def y_px(val: float) -> float:
-        clamped = max(y_min, min(y_max, val))
-        return plot_bottom - ((clamped - y_min) / y_span) * plot_h
+    def y_px_for(axis: str, val: float) -> float:
+        if axis == "right" and has_right_axis:
+            return plot_bottom - ((val - y_min_right) / y_span_right) * plot_h
+        return plot_bottom - ((val - y_min_left) / y_span_left) * plot_h
 
-    zero_y = y_px(0.0) if (y_min <= 0.0 <= y_max) else (plot_bottom if y_min > 0 else plot_top)
+    def zero_y_for(axis: str) -> float:
+        if axis == "right" and has_right_axis:
+            return y_px_for("right", 0.0) if (y_min_right <= 0.0 <= y_max_right) else (plot_bottom if y_min_right > 0 else plot_top)
+        return y_px_for("left", 0.0) if (y_min_left <= 0.0 <= y_max_left) else (plot_bottom if y_min_left > 0 else plot_top)
 
     svg_parts = open_svg_document(svg_w, svg_h, embed_fonts=embed_fonts)
+    axes_meta_payload = {
+        "left": {"min": round(y_min_left, 8), "max": round(y_max_left, 8), "step": round(y_step_left, 8)} if has_left_axis else None,
+        "right": {"min": round(y_min_right, 8), "max": round(y_max_right, 8), "step": round(y_step_right, 8)} if has_right_axis else None,
+    }
+    import json as _json_mod
+    axes_meta_attr = html.escape(_json_mod.dumps(axes_meta_payload, separators=(",", ":")))
+    svg_parts[0] = svg_parts[0].replace("<svg ", f'<svg data-axes-meta="{axes_meta_attr}" ', 1)
+    svg_parts.append(
+        f'  <defs><clipPath id="lukb-plot-clip">'
+        f'<rect x="{plot_left - 2.0:.1f}" y="{plot_top - 6.0:.1f}" width="{plot_w + 4.0:.1f}" height="{plot_h + 12.0:.1f}"/>'
+        f'</clipPath></defs>'
+    )
 
-    # Horizontale Gitterlinien & Y-Achsen-Labels
+    # Horizontale Gitterlinien (orientiert an primärer/linker Achse, oder rechter Achse falls keine Serie links)
+    grid_axis = "left" if has_left_axis else "right"
+    grid_ticks = y_ticks_left if has_left_axis else y_ticks_right
     svg_parts.append('  <g stroke="#E2E8F0" stroke-width="1">')
-    for tick in y_ticks:
-        ty = y_px(tick)
+    for tick in grid_ticks:
+        ty = y_px_for(grid_axis, tick)
         is_zero = abs(tick) < 1e-9
         stroke_col = "#94A3B8" if is_zero else "#E2E8F0"
         stroke_w = "1.4" if is_zero else "1"
@@ -821,23 +1008,35 @@ def render_timeseries_svg(
         )
     svg_parts.append("  </g>")
 
-    if rebasing == "index_100" and y_min < 100.0 < y_max:
-        y100 = y_px(100.0)
+    if rebasing == "index_100" and has_left_axis and y_min_left < 100.0 < y_max_left:
+        y100 = y_px_for("left", 100.0)
         svg_parts.append(
             f'  <line x1="{plot_left:.1f}" y1="{y100:.1f}" x2="{plot_right:.1f}" y2="{y100:.1f}" '
             f'stroke="#64748B" stroke-width="1.1" stroke-dasharray="4,3"/>'
         )
 
     y_text_offset = 7.0 if is_column_layout else 5.0
-    svg_parts.append(
-        f'  <g font-family="{FONT_BODY}" font-weight="{FONT_WEIGHT_BODY}" font-size="{axis_font_size}" fill="#5A687C" text-anchor="end">'
-    )
-    for tick, raw_lbl in zip(y_ticks, y_tick_labels):
-        ty = y_px(tick)
+    if has_left_axis:
         svg_parts.append(
-            f'    <text x="{y_label_right_x:.1f}" y="{ty + y_text_offset:.1f}">{html.escape(raw_lbl)}</text>'
+            f'  <g font-family="{FONT_BODY}" font-weight="{FONT_WEIGHT_BODY}" font-size="{axis_font_size}" fill="#5A687C" text-anchor="end">'
         )
-    svg_parts.append("  </g>")
+        for tick, raw_lbl in zip(y_ticks_left, y_tick_labels_left):
+            ty = y_px_for("left", tick)
+            svg_parts.append(
+                f'    <text x="{y_left_label_right_x:.1f}" y="{ty + y_text_offset:.1f}">{html.escape(raw_lbl)}</text>'
+            )
+        svg_parts.append("  </g>")
+
+    if has_right_axis:
+        svg_parts.append(
+            f'  <g font-family="{FONT_BODY}" font-weight="{FONT_WEIGHT_BODY}" font-size="{axis_font_size}" fill="#5A687C" text-anchor="start">'
+        )
+        for tick, raw_lbl in zip(y_ticks_right, y_tick_labels_right):
+            ty = y_px_for("right", tick)
+            svg_parts.append(
+                f'    <text x="{y_right_label_left_x:.1f}" y="{ty + y_text_offset:.1f}">{html.escape(raw_lbl)}</text>'
+            )
+        svg_parts.append("  </g>")
 
     # X-Achsen-Labels
     x_ticks_data = _compute_pretty_x_axis_ticks(min_date, max_date, is_column_layout)
@@ -862,6 +1061,9 @@ def render_timeseries_svg(
             )
     svg_parts.append("  </g>")
 
+    # Daten-Ebenen (geclippt auf Plot-Fläche bei manuellen Min/Max-Grenzen)
+    svg_parts.append('  <g clip-path="url(#lukb-plot-clip)">')
+
     # Ebene 1: AREA
     for s in resolved_series:
         ctypes = s["chart_types_set"]
@@ -871,38 +1073,43 @@ def render_timeseries_svg(
         if not pts:
             continue
         col = s["color"]
+        ax = s.get("y_axis", "left")
+        z_y = zero_y_for(ax)
         if len(pts) >= 2:
             if "step" in ctypes:
-                d_cmds = [f"M {x_px(pts[0][0]):.1f} {zero_y:.1f}", f"V {y_px(pts[0][1]):.1f}"]
+                d_cmds = [f"M {x_px(pts[0][0]):.1f} {z_y:.1f}", f"V {y_px_for(ax, pts[0][1]):.1f}"]
                 for i in range(1, len(pts)):
-                    nx, ny = x_px(pts[i][0]), y_px(pts[i][1])
+                    nx, ny = x_px(pts[i][0]), y_px_for(ax, pts[i][1])
                     d_cmds.append(f"H {nx:.1f} V {ny:.1f}")
-                d_cmds.append(f"V {zero_y:.1f} Z")
-                svg_parts.append(f'  <path d="{" ".join(d_cmds)}" fill="{col}" fill-opacity="0.18"/>')
+                d_cmds.append(f"V {z_y:.1f} Z")
+                svg_parts.append(f'    <path d="{" ".join(d_cmds)}" fill="{col}" fill-opacity="0.18"/>')
             else:
-                poly_coords = [f"{x_px(pts[0][0]):.1f},{zero_y:.1f}"]
+                poly_coords = [f"{x_px(pts[0][0]):.1f},{z_y:.1f}"]
                 line_coords = []
                 for d, v in pts:
-                    px, py = x_px(d), y_px(v)
+                    px, py = x_px(d), y_px_for(ax, v)
                     poly_coords.append(f"{px:.1f},{py:.1f}")
                     line_coords.append(f"{px:.1f},{py:.1f}")
-                poly_coords.append(f"{x_px(pts[-1][0]):.1f},{zero_y:.1f}")
-                svg_parts.append(f'  <polygon points="{" ".join(poly_coords)}" fill="{col}" fill-opacity="0.18"/>')
+                poly_coords.append(f"{x_px(pts[-1][0]):.1f},{z_y:.1f}")
+                svg_parts.append(f'    <polygon points="{" ".join(poly_coords)}" fill="{col}" fill-opacity="0.18"/>')
                 if "line" not in ctypes and "step" not in ctypes:
                     svg_parts.append(
-                        f'  <polyline fill="none" stroke="{col}" stroke-width="2.6" '
+                        f'    <polyline fill="none" stroke="{col}" stroke-width="2.6" '
                         f'stroke-linejoin="round" stroke-linecap="round" points="{" ".join(line_coords)}"/>'
                     )
         else:
-            px, py = x_px(pts[0][0]), y_px(pts[0][1])
-            svg_parts.append(f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{col}"/>')
+            px, py = x_px(pts[0][0]), y_px_for(ax, pts[0][1])
+            svg_parts.append(f'    <circle cx="{px:.1f}" cy="{py:.1f}" r="4" fill="{col}"/>')
 
     # Ebene 2 & 3: STACKED_BAR & BAR
+    stacked_left = [s for s in left_series if "stacked_bar" in s["chart_types_set"]]
+    stacked_right = [s for s in right_series if "stacked_bar" in s["chart_types_set"]]
     bar_series = [
         s for s in resolved_series if "bar" in s["chart_types_set"] and "stacked_bar" not in s["chart_types_set"]
     ]
-    if stacked_series or bar_series:
-        bar_dates = sorted({d for s in (stacked_series + bar_series) for d, _ in s["points"]})
+    if stacked_left or stacked_right or bar_series:
+        all_bar_series = stacked_left + stacked_right + bar_series
+        bar_dates = sorted({d for s in all_bar_series for d, _ in s["points"]})
         if len(bar_dates) >= 2:
             diffs = [
                 abs(x_px(bar_dates[i + 1]) - x_px(bar_dates[i]))
@@ -913,7 +1120,7 @@ def render_timeseries_svg(
         else:
             min_dx = 60.0
 
-        slot_count = (1 if stacked_series else 0) + len(bar_series)
+        slot_count = (1 if stacked_left else 0) + (1 if stacked_right else 0) + len(bar_series)
         cluster_w = max(6.0, min(46.0, min_dx * 0.68))
         single_bar_w = max(3.0, cluster_w / max(1, slot_count))
 
@@ -922,26 +1129,28 @@ def render_timeseries_svg(
             cluster_left = cx - (cluster_w / 2.0)
             slot_idx = 0
 
-            if stacked_series:
+            for st_axis, st_group in (("left", stacked_left), ("right", stacked_right)):
+                if not st_group:
+                    continue
                 bx = cluster_left + slot_idx * single_bar_w
                 pos_cursor = 0.0
                 neg_cursor = 0.0
-                for s in stacked_series:
+                for s in st_group:
                     val = s["points_map"].get(dt)
                     if val is None or abs(val) < 1e-12:
                         continue
                     if val >= 0:
-                        y_start = y_px(pos_cursor + val)
-                        y_end = y_px(pos_cursor)
+                        y_start = y_px_for(st_axis, pos_cursor + val)
+                        y_end = y_px_for(st_axis, pos_cursor)
                         pos_cursor += val
                     else:
-                        y_start = y_px(neg_cursor)
-                        y_end = y_px(neg_cursor + val)
+                        y_start = y_px_for(st_axis, neg_cursor)
+                        y_end = y_px_for(st_axis, neg_cursor + val)
                         neg_cursor += val
                     rect_h = max(1.0, abs(y_end - y_start))
                     rect_top = min(y_start, y_end)
                     svg_parts.append(
-                        f'  <rect x="{bx:.1f}" y="{rect_top:.1f}" width="{max(2.0, single_bar_w - 0.8):.1f}" '
+                        f'    <rect x="{bx:.1f}" y="{rect_top:.1f}" width="{max(2.0, single_bar_w - 0.8):.1f}" '
                         f'height="{rect_h:.1f}" fill="{s["color"]}" rx="1"/>'
                     )
                 slot_idx += 1
@@ -949,12 +1158,14 @@ def render_timeseries_svg(
             for s in bar_series:
                 val = s["points_map"].get(dt)
                 if val is not None:
+                    ax = s.get("y_axis", "left")
                     bx = cluster_left + slot_idx * single_bar_w
-                    vy = y_px(val)
-                    rect_top = min(vy, zero_y)
-                    rect_h = max(1.5, abs(zero_y - vy))
+                    vy = y_px_for(ax, val)
+                    z_y = zero_y_for(ax)
+                    rect_top = min(vy, z_y)
+                    rect_h = max(1.5, abs(z_y - vy))
                     svg_parts.append(
-                        f'  <rect x="{bx:.1f}" y="{rect_top:.1f}" width="{max(2.0, single_bar_w - 1.0):.1f}" '
+                        f'    <rect x="{bx:.1f}" y="{rect_top:.1f}" width="{max(2.0, single_bar_w - 1.0):.1f}" '
                         f'height="{rect_h:.1f}" fill="{s["color"]}" rx="1"/>'
                     )
                 slot_idx += 1
@@ -968,18 +1179,19 @@ def render_timeseries_svg(
         if not pts:
             continue
         col = s["color"]
+        ax = s.get("y_axis", "left")
         if len(pts) >= 2:
-            d_cmds = [f"M {x_px(pts[0][0]):.1f} {y_px(pts[0][1]):.1f}"]
+            d_cmds = [f"M {x_px(pts[0][0]):.1f} {y_px_for(ax, pts[0][1]):.1f}"]
             for i in range(1, len(pts)):
-                nx, ny = x_px(pts[i][0]), y_px(pts[i][1])
+                nx, ny = x_px(pts[i][0]), y_px_for(ax, pts[i][1])
                 d_cmds.append(f"H {nx:.1f} V {ny:.1f}")
             svg_parts.append(
-                f'  <path d="{" ".join(d_cmds)}" fill="none" stroke="{col}" '
+                f'    <path d="{" ".join(d_cmds)}" fill="none" stroke="{col}" '
                 f'stroke-width="{stroke_w_main}" stroke-linejoin="round" stroke-linecap="round"/>'
             )
         else:
-            px, py = x_px(pts[0][0]), y_px(pts[0][1])
-            svg_parts.append(f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="4.5" fill="{col}"/>')
+            px, py = x_px(pts[0][0]), y_px_for(ax, pts[0][1])
+            svg_parts.append(f'    <circle cx="{px:.1f}" cy="{py:.1f}" r="4.5" fill="{col}"/>')
 
     # Ebene 5: LINE
     for s in resolved_series:
@@ -989,15 +1201,16 @@ def render_timeseries_svg(
         if not pts:
             continue
         col = s["color"]
+        ax = s.get("y_axis", "left")
         if len(pts) >= 2:
-            coords = [f"{x_px(d):.1f},{y_px(v):.1f}" for d, v in pts]
+            coords = [f"{x_px(d):.1f},{y_px_for(ax, v):.1f}" for d, v in pts]
             svg_parts.append(
-                f'  <polyline fill="none" stroke="{col}" stroke-width="{stroke_w_main}" '
+                f'    <polyline fill="none" stroke="{col}" stroke-width="{stroke_w_main}" '
                 f'stroke-linejoin="round" stroke-linecap="round" points="{" ".join(coords)}"/>'
             )
         else:
-            px, py = x_px(pts[0][0]), y_px(pts[0][1])
-            svg_parts.append(f'  <circle cx="{px:.1f}" cy="{py:.1f}" r="4.5" fill="{col}"/>')
+            px, py = x_px(pts[0][0]), y_px_for(ax, pts[0][1])
+            svg_parts.append(f'    <circle cx="{px:.1f}" cy="{py:.1f}" r="4.5" fill="{col}"/>')
 
     # Ebene 6: DOT
     dot_r = "5.0" if is_column_layout else "4.0"
@@ -1006,10 +1219,13 @@ def render_timeseries_svg(
             continue
         pts = s["points"]
         col = s["color"]
-        svg_parts.append(f'  <g fill="{col}" stroke="#FFFFFF" stroke-width="1.4">')
+        ax = s.get("y_axis", "left")
+        svg_parts.append(f'    <g fill="{col}" stroke="#FFFFFF" stroke-width="1.4">')
         for d, v in pts:
-            svg_parts.append(f'    <circle cx="{x_px(d):.1f}" cy="{y_px(v):.1f}" r="{dot_r}"/>')
-        svg_parts.append("  </g>")
+            svg_parts.append(f'      <circle cx="{x_px(d):.1f}" cy="{y_px_for(ax, v):.1f}" r="{dot_r}"/>')
+        svg_parts.append("    </g>")
+
+    svg_parts.append("  </g>")
 
     # Legende
     if show_legend and legend_positions:

@@ -740,6 +740,109 @@ def test_compact_legend_and_no_legend():
     assert "Obligationen" not in svg_donut_no_leg
 
 
+def test_dual_y_axis_and_manual_scale():
+    """Prüft linke/rechte Y-Achse sowie manuelle min/max/step-Skalierung bei Zeitreihencharts."""
+    from services.chart_common import _resolve_axis_scale
+    from services.custom_chart_generator import _compute_custom_chart_cache_key
+
+    # 1. Tick-Berechnung mit manuellen Grenzen & Schrittweite
+    ticks, y_min, y_max, y_step = _resolve_axis_scale(1.2, 4.8, {"min": 0, "max": 6, "step": 2})
+    assert ticks == [0.0, 2.0, 4.0, 6.0]
+    assert y_min == 0.0
+    assert y_max == 6.0
+    assert y_step == 2.0
+
+    # Nur min gesetzt
+    ticks_min, y_min2, y_max2, _ = _resolve_axis_scale(1.2, 4.8, {"min": 0})
+    assert y_min2 == 0.0
+    assert ticks_min[0] == 0.0
+    assert y_max2 >= 4.8
+
+    # Ungültiges min >= max fällt sauber auf Rohdaten zurück
+    ticks_inv, y_min_inv, y_max_inv, _ = _resolve_axis_scale(10.0, 20.0, {"min": 50, "max": 10})
+    assert y_min_inv <= 10.0
+    assert y_max_inv >= 20.0
+    assert len(ticks_inv) >= 2
+
+    # 2. Custom Timeseries Chart mit zwei unterschiedlichen Skalen (SMI vs. Leitzins %)
+    tsv_dual = (
+        "Datum\tSMI\tSNB\n"
+        "2024-01-01\t11000\t1.75\n"
+        "2024-06-01\t12000\t1.25\n"
+        "2024-12-01\t11500\t0.50\n"
+    )
+    blk_dual = {
+        "id": "blk_dual_y",
+        "type": "custom_chart",
+        "chart_type": "timeseries",
+        "raw_tsv": tsv_dual,
+        "series": [
+            {"field": "SMI", "label": "SMI", "chart_type": "line", "enabled": True, "y_axis": "left"},
+            {"field": "SNB", "label": "SNB (r. Achse)", "chart_type": "step", "enabled": True, "y_axis": "right"},
+        ],
+        "y_axis_left": {"min": 10000, "max": 13000, "step": 1000},
+        "y_axis_right": {"min": 0, "max": 2.5, "step": 0.5},
+    }
+    svg_dual = generate_custom_chart_svg(blk_dual, embed_fonts=False)
+    assert "<clipPath id=\"lukb-plot-clip\">" in svg_dual
+    assert 'text-anchor="start"' in svg_dual  # rechte Y-Achsen-Labels
+    assert "10&#x27;000" in svg_dual
+    assert "13&#x27;000" in svg_dual
+    assert "2.5" in svg_dual
+    assert "SNB (r. Achse)" in svg_dual
+
+    # Cache-Key ändert sich bei Änderung der Y-Achse oder Skalierung
+    key_1 = _compute_custom_chart_cache_key(blk_dual, embed_fonts=False)
+    blk_dual_mod = dict(blk_dual, y_axis_right={"min": 0, "max": 3.0, "step": 0.5})
+    key_2 = _compute_custom_chart_cache_key(blk_dual_mod, embed_fonts=False)
+    assert key_1 != key_2
+
+    # 3. Schema-Validierung für CustomChartBlock und DbChartBlock
+    parsed_custom = parse_block(blk_dual)
+    assert isinstance(parsed_custom, CustomChartBlock)
+    assert parsed_custom.series[1].y_axis == "right"
+    assert parsed_custom.y_axis_left.min == 10000.0
+    assert parsed_custom.y_axis_right.step == 0.5
+
+    parsed_db = parse_block(
+        {
+            "id": "blk_db_dual",
+            "type": "db_chart",
+            "series": [
+                {"ticker": "SMI", "chart_type": "line", "y_axis": "left"},
+                {"ticker": "SNB_RATE", "chart_type": "step", "y_axis": "right", "label": "SNB (r. Achse)"},
+            ],
+            "y_axis_left": {"min": 9000, "max": 13000, "step": 1000},
+            "y_axis_right": {"min": 0, "max": 3, "step": 1},
+        }
+    )
+    assert parsed_db.series[1].y_axis == "right"
+    assert parsed_db.y_axis_right.max == 3.0
+
+    # 4. Auto-Modus auf rechter Y-Achse richtet Pretty-Breaks exakt auf die linken Gridlines aus
+    blk_dual_auto = {
+        "id": "blk_dual_auto",
+        "type": "custom_chart",
+        "chart_type": "timeseries",
+        "raw_tsv": tsv_dual,
+        "series": [
+            {"field": "SMI", "label": "SMI", "chart_type": "line", "enabled": True, "y_axis": "left"},
+            {"field": "SNB", "label": "SNB (r. Achse)", "chart_type": "step", "enabled": True, "y_axis": "right"},
+        ],
+    }
+    svg_auto = generate_custom_chart_svg(blk_dual_auto, embed_fonts=False)
+    import html as _html
+    import json as _json
+    import re as _re
+    m_meta = _re.search(r'data-axes-meta="([^"]+)"', svg_auto)
+    assert m_meta is not None
+    axes_meta = _json.loads(_html.unescape(m_meta.group(1)))
+    assert axes_meta["left"] is not None and axes_meta["right"] is not None
+    left_n_int = round((axes_meta["left"]["max"] - axes_meta["left"]["min"]) / axes_meta["left"]["step"])
+    right_n_int = round((axes_meta["right"]["max"] - axes_meta["right"]["min"]) / axes_meta["right"]["step"])
+    assert left_n_int == right_n_int
+
+
 if __name__ == "__main__":
     test_parsing_helpers()
     test_auto_detection()
